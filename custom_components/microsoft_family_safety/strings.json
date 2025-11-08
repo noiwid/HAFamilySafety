@@ -1,0 +1,95 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Microsoft Family Safety Authentication",
+        "description": "To authenticate with Microsoft Family Safety, follow these steps:\n\n1. Click on this URL: {auth_url}\n2. Log in with your Microsoft account\n3. After successful login, you will be redirected to a blank page\n4. Copy the entire URL from your browser's address bar\n5. Extract the token from the URL (it's the value after 'access_token=')\n6. Click Next to enter the token"
+      },
+      "token": {
+        "title": "Enter Authentication Token",
+        "description": "Paste the authentication token you obtained from the redirect URL.\n\nThe token is the long string that appears after 'access_token=' in the URL.\n\nAuthentication URL: {auth_url}",
+        "data": {
+          "token": "Authentication Token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Microsoft Family Safety",
+        "description": "Your authentication token has expired. Please obtain a new token:\n\n1. Click on this URL: {auth_url}\n2. Log in with your Microsoft account\n3. Copy the URL after redirect and extract the token\n4. Enter the new token below",
+        "data": {
+          "token": "Authentication Token"
+        }
+      }
+    },
+    "error": {
+      "auth_failed": "Authentication failed. Please check your token and try again.",
+      "token_expired": "Your authentication token has expired. Please reauthenticate.",
+      "no_token": "Please enter a valid token.",
+      "unknown": "An unexpected error occurred. Please try again."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Reauthentication successful!"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Microsoft Family Safety Options",
+        "description": "Configure options for Microsoft Family Safety integration.",
+        "data": {
+          "update_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  },
+  "services": {
+    "block_device": {
+      "name": "Block Device",
+      "description": "Block a device from being used.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "The ID of the device to block."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Optional duration in minutes for the block (leave empty for indefinite)."
+        }
+      }
+    },
+    "unblock_device": {
+      "name": "Unblock Device",
+      "description": "Unblock a previously blocked device.",
+      "fields": {
+        "device_id": {
+          "name": "Device ID",
+          "description": "The ID of the device to unblock."
+        }
+      }
+    },
+    "approve_request": {
+      "name": "Approve Request",
+      "description": "Approve a pending time extension request.",
+      "fields": {
+        "request_id": {
+          "name": "Request ID",
+          "description": "The ID of the request to approve."
+        },
+        "extension_time": {
+          "name": "Extension Time",
+          "description": "Time to grant in minutes."
+        }
+      }
+    },
+    "deny_request": {
+      "name": "Deny Request",
+      "description": "Deny a pending time extension request.",
+      "fields": {
+        "request_id": {
+          "name": "Request ID",
+          "description": "The ID of the request to deny."
+        }
+      }
+    }
+  }
+}
