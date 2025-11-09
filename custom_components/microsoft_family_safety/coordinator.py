@@ -1,13 +1,14 @@
 """DataUpdateCoordinator for Microsoft Family Safety."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
 from pyfamilysafety.device import Device
+from pyfamilysafety.enum import OverrideTarget, OverrideType
 from pyfamilysafety.exceptions import HttpException
 
 from homeassistant.config_entries import ConfigEntry
@@ -159,57 +160,62 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("Unexpected error fetching data: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
-    async def async_block_device(self, device_id: str, duration: int | None = None) -> None:
-        """Block a device."""
-        if device_id not in self._devices:
-            raise ValueError(f"Device {device_id} not found")
+    async def async_block_platform(
+        self,
+        account_id: str,
+        platform: OverrideTarget,
+        duration_minutes: int | None = None
+    ) -> None:
+        """Block a platform (Windows/Xbox/Mobile) for an account."""
+        if account_id not in self._accounts:
+            raise ValueError(f"Account {account_id} not found")
 
-        device = self._devices[device_id]
-        account = self._get_account_for_device(device_id)
-
-        if account is None:
-            raise ValueError(f"Account not found for device {device_id}")
+        account = self._accounts[account_id]
 
         try:
-            # Override device to block it
-            # valid_until can be None for indefinite block
+            # Calculate valid_until datetime if duration is specified
+            valid_until = None
+            if duration_minutes:
+                valid_until = datetime.now() + timedelta(minutes=duration_minutes)
+
+            # Override platform to block it
             await account.override_device(
-                target=device.device_id,
-                override=True,
-                valid_until=duration
+                target=platform,
+                override=OverrideType.UNTIL,
+                valid_until=valid_until
             )
+
+            _LOGGER.info("Blocked platform %s for account %s", platform, account_id)
 
             # Refresh data after action
             await self.async_request_refresh()
 
         except Exception as err:
-            _LOGGER.error("Failed to block device %s: %s", device_id, err)
+            _LOGGER.error("Failed to block platform %s: %s", platform, err)
             raise
 
-    async def async_unblock_device(self, device_id: str) -> None:
-        """Unblock a device."""
-        if device_id not in self._devices:
-            raise ValueError(f"Device {device_id} not found")
+    async def async_unblock_platform(self, account_id: str, platform: OverrideTarget) -> None:
+        """Unblock a platform (Windows/Xbox/Mobile) for an account."""
+        if account_id not in self._accounts:
+            raise ValueError(f"Account {account_id} not found")
 
-        device = self._devices[device_id]
-        account = self._get_account_for_device(device_id)
-
-        if account is None:
-            raise ValueError(f"Account not found for device {device_id}")
+        account = self._accounts[account_id]
 
         try:
-            # Override device to unblock it
+            # Cancel override to unblock the platform
             await account.override_device(
-                target=device.device_id,
-                override=False,
-                valid_until=None
+                target=platform,
+                override=OverrideType.CANCEL,
+                valid_until=datetime.now()
             )
+
+            _LOGGER.info("Unblocked platform %s for account %s", platform, account_id)
 
             # Refresh data after action
             await self.async_request_refresh()
 
         except Exception as err:
-            _LOGGER.error("Failed to unblock device %s: %s", device_id, err)
+            _LOGGER.error("Failed to unblock platform %s: %s", platform, err)
             raise
 
     async def async_approve_request(self, request_id: str, extension_time: int) -> None:
@@ -247,6 +253,32 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         account_id = device_data.get("account_id")
         return self._accounts.get(account_id)
+
+    def get_platforms_for_account(self, account_id: str) -> set[OverrideTarget]:
+        """Get all platforms that have devices for an account."""
+        if not self.data or "devices" not in self.data:
+            return set()
+
+        platforms = set()
+        for device_data in self.data["devices"].values():
+            if device_data.get("account_id") == account_id:
+                platform = self._get_platform_from_os(device_data.get("os_name", ""))
+                if platform:
+                    platforms.add(platform)
+
+        return platforms
+
+    @staticmethod
+    def _get_platform_from_os(os_name: str) -> OverrideTarget | None:
+        """Map OS name to OverrideTarget platform."""
+        os_lower = os_name.lower()
+        if "windows" in os_lower:
+            return OverrideTarget.WINDOWS
+        elif "xbox" in os_lower:
+            return OverrideTarget.XBOX
+        elif "android" in os_lower or "ios" in os_lower:
+            return OverrideTarget.MOBILE
+        return None
 
     async def async_cleanup(self) -> None:
         """Clean up resources."""
