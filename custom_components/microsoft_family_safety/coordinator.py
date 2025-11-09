@@ -322,9 +322,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Call the API directly using the low-level send_request
             # Access the api object which has send_request method
+            # Note: The endpoint URL contains {USER_ID} placeholder (uppercase)
             response = await self.api.api.send_request(
                 endpoint="update_schedule",
-                user_id=account_id,
+                USER_ID=account_id,
                 body=payload
             )
 
