@@ -87,3 +87,36 @@ deny_request:
       example: "request123"
       selector:
         text:
+
+set_time_limit:
+  name: Set Time Limit (EXPERIMENTAL)
+  description: EXPERIMENTAL - Set daily time limit for a platform. Use 0 to block immediately, or restore original limit to unblock.
+  fields:
+    account_id:
+      name: Account ID
+      description: The ID of the Family Safety account.
+      required: true
+      example: "1055519684390826"
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform to modify (windows, mobile, or xbox).
+      required: true
+      example: "windows"
+      selector:
+        select:
+          options:
+            - "windows"
+            - "mobile"
+            - "xbox"
+    limit_minutes:
+      name: Daily Limit (minutes)
+      description: Set to 0 to block immediately, or original value (e.g. 75 for 1h15) to unblock.
+      required: true
+      example: 0
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: minutes

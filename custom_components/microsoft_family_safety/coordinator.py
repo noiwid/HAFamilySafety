@@ -287,6 +287,63 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Failed to deny request %s: %s", request_id, err)
             raise
 
+    async def async_set_daily_time_limit(
+        self,
+        account_id: str,
+        platform: OverrideTarget,
+        limit_minutes: int
+    ) -> None:
+        """EXPERIMENTAL: Set daily time limit for a platform.
+
+        This attempts to modify the daily time limit by calling the
+        update_schedule endpoint directly. This is not officially supported
+        by pyfamilysafety yet.
+        """
+        if account_id not in self._accounts:
+            raise ValueError(f"Account {account_id} not found")
+
+        try:
+            # Build the API URL manually
+            url = f"https://mobileaggregator.family.microsoft.com/api/v4/devicelimits/schedules/{account_id}"
+
+            # Try different payload structures to see what works
+            payload = {
+                "platform": str(platform),
+                "dailyLimit": limit_minutes,
+            }
+
+            _LOGGER.debug(
+                "EXPERIMENTAL: Calling update_schedule for account %s, platform %s, limit %d minutes",
+                account_id,
+                platform,
+                limit_minutes
+            )
+            _LOGGER.debug("Payload: %s", payload)
+
+            # Call the API directly using the low-level send_request
+            response = await self.api.send_request(
+                endpoint="update_schedule",
+                user_id=account_id,
+                body=payload
+            )
+
+            _LOGGER.info(
+                "Successfully updated time limit for platform %s to %d minutes",
+                platform,
+                limit_minutes
+            )
+            _LOGGER.debug("Response: %s", response)
+
+            await self.async_request_refresh()
+
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to set daily time limit for platform %s: %s",
+                platform,
+                err
+            )
+            raise
+
     def _get_account_for_device(self, device_id: str) -> Account | None:
         """Get the account that owns a device."""
         if not self.data or "devices" not in self.data:

@@ -18,6 +18,7 @@ from .const import (
     SERVICE_APPROVE_REQUEST,
     SERVICE_BLOCK_DEVICE,
     SERVICE_DENY_REQUEST,
+    SERVICE_SET_TIME_LIMIT,
     SERVICE_UNBLOCK_DEVICE,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
@@ -50,6 +51,14 @@ SERVICE_APPROVE_REQUEST_SCHEMA = vol.Schema(
 SERVICE_DENY_REQUEST_SCHEMA = vol.Schema(
     {
         vol.Required("request_id"): cv.string,
+    }
+)
+
+SERVICE_SET_TIME_LIMIT_SCHEMA = vol.Schema(
+    {
+        vol.Required("account_id"): cv.string,
+        vol.Required("platform"): vol.In(["windows", "mobile", "xbox"]),
+        vol.Required("limit_minutes"): cv.positive_int,
     }
 )
 
@@ -166,6 +175,33 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         else:
             _LOGGER.error("No Family Safety coordinator found")
 
+    async def handle_set_time_limit(call: ServiceCall) -> None:
+        """Handle EXPERIMENTAL set time limit service call."""
+        account_id = call.data["account_id"]
+        platform_str = call.data["platform"]
+        limit_minutes = call.data["limit_minutes"]
+
+        # Convert platform string to enum
+        platform_map = {
+            "windows": OverrideTarget.WINDOWS,
+            "mobile": OverrideTarget.MOBILE,
+            "xbox": OverrideTarget.XBOX,
+        }
+        platform = platform_map.get(platform_str.lower())
+
+        if not platform:
+            _LOGGER.error("Invalid platform: %s", platform_str)
+            return
+
+        # Find coordinator for this account
+        for entry_id, coordinator in hass.data[DOMAIN].items():
+            if isinstance(coordinator, FamilySafetyDataUpdateCoordinator):
+                if coordinator.data and account_id in coordinator.data.get("accounts", {}):
+                    await coordinator.async_set_daily_time_limit(account_id, platform, limit_minutes)
+                    return
+
+        _LOGGER.error("Account %s not found in any Family Safety integration", account_id)
+
     # Register services only once
     if not hass.services.has_service(DOMAIN, SERVICE_BLOCK_DEVICE):
         hass.services.async_register(
@@ -197,6 +233,14 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             SERVICE_DENY_REQUEST,
             handle_deny_request,
             schema=SERVICE_DENY_REQUEST_SCHEMA,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_SET_TIME_LIMIT):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SET_TIME_LIMIT,
+            handle_set_time_limit,
+            schema=SERVICE_SET_TIME_LIMIT_SCHEMA,
         )
 
 
