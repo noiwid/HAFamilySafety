@@ -308,10 +308,23 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Let's try multiple variations to find the right one
 
             # Platform must be passed as a HEADER (Plat-Info), not in body!
-            # Body only contains the daily limit
-            payload = {
-                "dailyLimit": limit_minutes,
-            }
+            # Try multiple payload variations
+            payloads_to_try = [
+                # Variation 1: Just dailyLimit as int
+                {"dailyLimit": limit_minutes},
+                # Variation 2: dailyLimit with enableDailyLimit flag
+                {"dailyLimit": limit_minutes, "enableDailyLimit": True},
+                # Variation 3: Nested structure
+                {"schedule": {"dailyLimit": limit_minutes}},
+                # Variation 4: dailyLimit as string
+                {"dailyLimit": str(limit_minutes)},
+                # Variation 5: More complete structure
+                {
+                    "dailyLimit": limit_minutes,
+                    "enableDailyLimit": True,
+                    "scheduleType": "daily"
+                },
+            ]
 
             # Prepare headers with platform info
             headers = {
@@ -324,18 +337,33 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 platform,
                 limit_minutes
             )
-            _LOGGER.debug("Payload: %s", payload)
-            _LOGGER.debug("Headers: %s", headers)
 
-            # Call the API directly using the low-level send_request
-            # Access the api object which has send_request method
-            # Note: The endpoint URL contains {USER_ID} placeholder (uppercase)
-            response = await self.api.api.send_request(
-                endpoint="update_schedule",
-                USER_ID=account_id,
-                body=payload,
-                headers=headers
-            )
+            # Try each payload until one works
+            last_error = None
+            response = None
+            for i, payload in enumerate(payloads_to_try):
+                try:
+                    _LOGGER.debug("Trying payload variation %d: %s", i + 1, payload)
+                    _LOGGER.debug("Headers: %s", headers)
+
+                    response = await self.api.api.send_request(
+                        endpoint="update_schedule",
+                        USER_ID=account_id,
+                        body=payload,
+                        headers=headers
+                    )
+
+                    # If we get here, it worked!
+                    _LOGGER.info("SUCCESS with payload variation %d: %s", i + 1, payload)
+                    break
+
+                except HttpException as err:
+                    _LOGGER.debug("Payload variation %d failed: %s", i + 1, str(err))
+                    last_error = err
+                    continue
+            else:
+                # None of the payloads worked
+                raise last_error or Exception("All payload variations failed")
 
             _LOGGER.info(
                 "Successfully updated time limit for platform %s to %d minutes",
