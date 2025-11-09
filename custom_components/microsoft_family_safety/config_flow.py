@@ -27,12 +27,21 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _build_auth_url() -> str:
+    """Build the Microsoft authentication URL.
+
+    Returns:
+        Complete authentication URL with all required parameters
+    """
+    params = "&".join([f"{k}={v}" for k, v in MS_AUTH_PARAMS.items()])
+    return f"{MS_LOGIN_URL}?{params}"
+
+
 async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[str, Any]:
     """Validate the redirect URL by attempting to authenticate."""
     try:
         _LOGGER.debug("Config flow received - testing credentials")
 
-        # Create authenticator from redirect URL
         authenticator = await Authenticator.create(
             token=redirect_url,
             use_refresh_token=False
@@ -43,7 +52,6 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
             authenticator.expires
         )
 
-        # Return refresh token - accounts will be fetched later by coordinator
         return {
             "title": INTEGRATION_NAME,
             "refresh_token": authenticator.refresh_token,
@@ -70,24 +78,17 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step - show authentication instructions."""
-        errors: dict[str, str] = {}
-
         if user_input is not None:
-            # User clicked "Next" to continue to redirect URL entry
             return await self.async_step_auth()
 
-        # Build the authentication URL
-        auth_url = f"{MS_LOGIN_URL}?"
-        auth_url += "&".join([f"{k}={v}" for k, v in MS_AUTH_PARAMS.items()])
-
         description_placeholders = {
-            "auth_url": auth_url,
+            "auth_url": _build_auth_url(),
         }
 
         return self.async_show_form(
             step_id="user",
             description_placeholders=description_placeholders,
-            errors=errors,
+            errors={},
         )
 
     async def async_step_auth(
@@ -103,15 +104,12 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "no_redirect_url"
             else:
                 try:
-                    # Validate the redirect URL
                     info = await validate_redirect_url(self.hass, redirect_url)
 
-                    # Check if already configured
                     refresh_token = info["refresh_token"]
                     await self.async_set_unique_id(refresh_token[:20])
                     self._abort_if_unique_id_configured()
 
-                    # Create the config entry
                     return self.async_create_entry(
                         title=info["title"],
                         data={
@@ -121,16 +119,12 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 except InvalidAuth:
                     errors["base"] = ERROR_AUTH_FAILED
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     _LOGGER.exception("Unexpected exception during authentication")
                     errors["base"] = "unknown"
 
-        # Build the authentication URL for instructions
-        auth_url = f"{MS_LOGIN_URL}?"
-        auth_url += "&".join([f"{k}={v}" for k, v in MS_AUTH_PARAMS.items()])
-
         description_placeholders = {
-            "auth_url": auth_url,
+            "auth_url": _build_auth_url(),
         }
 
         return self.async_show_form(
@@ -161,10 +155,8 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "no_redirect_url"
             else:
                 try:
-                    # Validate the new redirect URL
                     info = await validate_redirect_url(self.hass, redirect_url)
 
-                    # Update the entry
                     entry = self.hass.config_entries.async_get_entry(
                         self.context["entry_id"]
                     )
@@ -180,16 +172,12 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 except InvalidAuth:
                     errors["base"] = ERROR_AUTH_FAILED
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     _LOGGER.exception("Unexpected exception during reauth")
                     errors["base"] = "unknown"
 
-        # Build the authentication URL for instructions
-        auth_url = f"{MS_LOGIN_URL}?"
-        auth_url += "&".join([f"{k}={v}" for k, v in MS_AUTH_PARAMS.items()])
-
         description_placeholders = {
-            "auth_url": auth_url,
+            "auth_url": _build_auth_url(),
         }
 
         return self.async_show_form(

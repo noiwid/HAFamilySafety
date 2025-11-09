@@ -8,6 +8,7 @@ from typing import Any
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
 from pyfamilysafety.device import Device
+from pyfamilysafety.exceptions import HttpException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -23,6 +24,20 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _ms_to_seconds(milliseconds: int | None) -> int:
+    """Convert milliseconds to seconds.
+
+    Args:
+        milliseconds: Duration in milliseconds, can be None
+
+    Returns:
+        Duration in seconds as integer, or 0 if input is None
+    """
+    if not milliseconds:
+        return 0
+    return int(milliseconds / 1000)
 
 
 class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -47,8 +62,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
 
         try:
-            # Initialize Family Safety API using the create() method
-            # This method (available in pyfamilysafety 1.1.2) automatically fetches accounts
             self.api = await FamilySafety.create(
                 token=refresh_token,
                 use_refresh_token=True,
@@ -60,99 +73,90 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Failed to initialize Family Safety API: %s", err)
             raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
 
+    def _transform_account_data(self, account: Account) -> tuple[str, dict[str, Any]]:
+        """Transform an Account object to dictionary format.
+
+        Args:
+            account: The pyfamilysafety Account object
+
+        Returns:
+            Tuple of (account_id, account_data_dict)
+        """
+        account_id = account.user_id
+        account_data = {
+            "user_id": account.user_id,
+            "first_name": account.first_name,
+            "surname": account.surname,
+            "profile_picture": account.profile_picture,
+            "today_screentime_usage": _ms_to_seconds(account.today_screentime_usage),
+            "average_screentime_usage": _ms_to_seconds(account.average_screentime_usage),
+            "account_balance": account.account_balance,
+            "account_currency": account.account_currency,
+            "blocked_platforms": account.blocked_platforms,
+            "devices": [],
+            "applications": [
+                {
+                    "app_id": app.app_id,
+                    "app_name": app.name,
+                    "blocked": app.blocked,
+                }
+                for app in account.applications
+            ],
+        }
+        return account_id, account_data
+
+    def _transform_device_data(self, device: Device, account_id: str) -> tuple[str, dict[str, Any]]:
+        """Transform a Device object to dictionary format.
+
+        Args:
+            device: The pyfamilysafety Device object
+            account_id: The parent account ID
+
+        Returns:
+            Tuple of (device_id, device_data_dict)
+        """
+        device_id = device.device_id
+        device_data = {
+            "device_id": device.device_id,
+            "device_name": device.device_name,
+            "device_class": device.device_class,
+            "device_make": device.device_make,
+            "device_model": device.device_model,
+            "os_name": device.os_name,
+            "today_time_used": _ms_to_seconds(device.today_time_used),
+            "last_seen": device.last_seen,
+            "blocked": device.blocked,
+            "account_id": account_id,
+        }
+        return device_id, device_data
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Family Safety API."""
         if self.api is None:
             await self._async_setup_api()
 
         try:
-            # Update all accounts
-            try:
-                await self.api.update()
-            except TypeError as type_err:
-                # Handle pyfamilysafety bug where Account.from_dict returns None
-                if "'NoneType' object is not iterable" in str(type_err):
-                    _LOGGER.warning(
-                        "pyfamilysafety returned None for accounts - "
-                        "this may indicate no child accounts are configured or an API incompatibility"
-                    )
-                    if not hasattr(self.api, 'accounts') or self.api.accounts is None:
-                        self.api.accounts = []
-                else:
-                    raise
+            await self.api.update()
 
-            # Workaround for pyfamilysafety bug where accounts can be None
-            if self.api.accounts is None:
+            if not hasattr(self.api, 'accounts') or self.api.accounts is None:
                 _LOGGER.warning("API accounts is None after update, initializing to empty list")
                 self.api.accounts = []
 
-            # Get all accounts
             accounts_data = {}
             devices_data = {}
 
-            # Log account count
             _LOGGER.debug("Found %d Family Safety accounts", len(self.api.accounts))
 
-            # Store accounts and their devices
             for account in self.api.accounts:
-                account_id = account.user_id
-
-                # Convert screentime from milliseconds to seconds
-                today_screentime_ms = account.today_screentime_usage or 0
-                today_screentime_seconds = int(today_screentime_ms / 1000) if today_screentime_ms else 0
-
-                average_screentime_ms = account.average_screentime_usage or 0
-                average_screentime_seconds = int(average_screentime_ms / 1000) if average_screentime_ms else 0
-
-                accounts_data[account_id] = {
-                    "user_id": account.user_id,
-                    "first_name": account.first_name,
-                    "surname": account.surname,
-                    "profile_picture": account.profile_picture,
-                    "today_screentime_usage": today_screentime_seconds,
-                    "average_screentime_usage": average_screentime_seconds,
-                    "account_balance": account.account_balance,
-                    "account_currency": account.account_currency,
-                    "blocked_platforms": account.blocked_platforms,
-                    "devices": [],
-                    "applications": [],
-                }
-
-                # Store account reference
+                account_id, account_data = self._transform_account_data(account)
+                accounts_data[account_id] = account_data
                 self._accounts[account_id] = account
 
-                # Process devices for this account
                 for device in account.devices:
-                    device_id = device.device_id
-                    # Convert milliseconds to seconds (keep as seconds for compatibility)
-                    time_used_ms = device.today_time_used or 0
-                    time_used_seconds = int(time_used_ms / 1000) if time_used_ms else 0
-
-                    device_data = {
-                        "device_id": device.device_id,
-                        "device_name": device.device_name,
-                        "device_class": device.device_class,
-                        "device_make": device.device_make,
-                        "device_model": device.device_model,
-                        "os_name": device.os_name,
-                        "today_time_used": time_used_seconds,  # Store as seconds
-                        "last_seen": device.last_seen,
-                        "blocked": device.blocked,
-                        "account_id": account_id,
-                    }
+                    device_id, device_data = self._transform_device_data(device, account_id)
                     devices_data[device_id] = device_data
                     accounts_data[account_id]["devices"].append(device_id)
-
-                    # Store device reference
                     self._devices[device_id] = device
-
-                # Store applications
-                for app in account.applications:
-                    accounts_data[account_id]["applications"].append({
-                        "app_id": app.app_id,
-                        "app_name": app.name,
-                        "blocked": app.blocked,
-                    })
 
             return {
                 "accounts": accounts_data,

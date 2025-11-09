@@ -30,16 +30,5 @@
       "already_configured": "Ce compte est déjà configuré.",
       "reauth_successful": "Réauthentification réussie !"
     }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Options Microsoft Family Safety",
-        "description": "Configurez les options de l'intégration Microsoft Family Safety.",
-        "data": {
-          "update_interval": "Intervalle de mise à jour (secondes)"
-        }
-      }
-    }
   }
 }
