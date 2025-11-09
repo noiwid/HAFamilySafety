@@ -1,7 +1,7 @@
 {
   "domain": "microsoft_family_safety",
   "name": "Microsoft Family Safety",
-  "version": "0.3.2",
+  "version": "0.5.0",
   "codeowners": ["@noiwid"],
   "config_flow": true,
   "dependencies": [],
