@@ -50,21 +50,11 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
         _LOGGER.debug("Before update - api.accounts: %s", api.accounts)
 
         try:
-            # Manually get accounts data to see what's returned
-            from pyfamilysafety.account import Account
-            _LOGGER.debug("Manually fetching accounts from API...")
-            data = await api._api.send_request("get_accounts")
-            _LOGGER.debug("Raw API response status: %s", data.get("status"))
-            _LOGGER.debug("Raw API response json keys: %s", data.get("json", {}).keys() if data.get("json") else None)
-            _LOGGER.debug("Raw API response json: %s", data.get("json"))
-
-            # Try to parse accounts
-            accounts = await Account.from_dict(api._api, data["json"], False)
-            _LOGGER.debug("Parsed accounts: %s (type: %s)", accounts, type(accounts))
-
-            # Now call normal update
+            # Call update to fetch accounts
             await api.update()
+            _LOGGER.debug("Update completed successfully")
         except TypeError as type_err:
+            _LOGGER.error("TypeError during update: %s", str(type_err))
             if "'NoneType' object is not iterable" in str(type_err):
                 _LOGGER.error("API returned None for accounts - likely no Family Safety accounts configured")
                 raise InvalidAuth(
@@ -72,9 +62,11 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
                     "Family Safety in your Microsoft account first."
                 ) from type_err
             raise
+        except Exception as err:
+            _LOGGER.error("Unexpected error during update: %s", str(err))
+            raise
 
-        _LOGGER.debug("Update completed. Accounts object type: %s, value: %s",
-                     type(api.accounts), api.accounts)
+        _LOGGER.debug("After update - api.accounts: %s (type: %s)", api.accounts, type(api.accounts))
 
         # Check if accounts is None or empty
         if api.accounts is None:
