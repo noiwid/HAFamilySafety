@@ -321,7 +321,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Payload: %s", payload)
 
             # Call the API directly using the low-level send_request
-            response = await self.api.send_request(
+            # Access the internal _api object which has send_request method
+            response = await self.api._api.send_request(
                 endpoint="update_schedule",
                 user_id=account_id,
                 body=payload
