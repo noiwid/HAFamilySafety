@@ -17,7 +17,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
-    CONF_TOKEN,
+    CONF_REFRESH_TOKEN,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ERROR_AUTH_FAILED,
@@ -46,11 +46,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_setup_api(self) -> None:
         """Set up the Family Safety API client."""
-        token = self.entry.data[CONF_TOKEN]
+        refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
 
         try:
-            # Initialize authenticator with token
-            authenticator = Authenticator(token=token)
+            # Initialize authenticator with refresh token
+            authenticator = await Authenticator.create(
+                token=refresh_token,
+                use_refresh_token=True
+            )
 
             # Initialize Family Safety API
             self.api = FamilySafety(auth=authenticator)
