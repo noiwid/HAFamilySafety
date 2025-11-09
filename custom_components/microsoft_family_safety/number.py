@@ -78,7 +78,7 @@ class FamilySafetyTimeAllowanceNumber(CoordinatorEntity, NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return the current value (minutes of override remaining)."""
+        """Return the current value (0 = blocked, >0 = override active)."""
         account_data = self._get_account_data()
         if not account_data:
             return 0
@@ -86,29 +86,14 @@ class FamilySafetyTimeAllowanceNumber(CoordinatorEntity, NumberEntity):
         blocked_platforms = account_data.get("blocked_platforms", [])
 
         # Check if this platform has an active override
-        for blocked_platform in blocked_platforms:
-            if blocked_platform.target == self._platform:
-                # Calculate minutes remaining until valid_until
-                if blocked_platform.valid_until:
-                    try:
-                        # Parse the valid_until datetime
-                        if isinstance(blocked_platform.valid_until, datetime):
-                            valid_until = blocked_platform.valid_until
-                        else:
-                            # Assume ISO format string
-                            valid_until = datetime.fromisoformat(str(blocked_platform.valid_until).replace('Z', '+00:00'))
+        # blocked_platforms is a list of OverrideTarget enums
+        if self._platform in blocked_platforms:
+            # Override is active - return a non-zero value to indicate this
+            # We can't easily get the exact remaining time without additional API calls
+            # So we return a placeholder value to indicate "override active"
+            return 1.0
 
-                        # Calculate minutes remaining
-                        now = datetime.now(valid_until.tzinfo) if valid_until.tzinfo else datetime.now()
-                        remaining = valid_until - now
-                        minutes = max(0, int(remaining.total_seconds() / 60))
-
-                        return float(minutes)
-                    except Exception as err:
-                        _LOGGER.warning("Failed to parse valid_until: %s", err)
-                        return 0
-
-        # No override = 0 minutes
+        # No override = 0 minutes (blocked)
         return 0
 
     async def async_set_native_value(self, value: float) -> None:
