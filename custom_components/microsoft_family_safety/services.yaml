@@ -1,0 +1,67 @@
+block_device:
+  name: Block Device
+  description: Block a device from being used.
+  fields:
+    device_id:
+      name: Device ID
+      description: The ID of the device to block.
+      required: true
+      example: "device123"
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Optional duration in minutes for the block (leave empty for indefinite).
+      required: false
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minutes
+
+unblock_device:
+  name: Unblock Device
+  description: Unblock a previously blocked device.
+  fields:
+    device_id:
+      name: Device ID
+      description: The ID of the device to unblock.
+      required: true
+      example: "device123"
+      selector:
+        text:
+
+approve_request:
+  name: Approve Request
+  description: Approve a pending time extension request.
+  fields:
+    request_id:
+      name: Request ID
+      description: The ID of the request to approve.
+      required: true
+      example: "request123"
+      selector:
+        text:
+    extension_time:
+      name: Extension Time
+      description: Time to grant in minutes.
+      required: true
+      example: 30
+      selector:
+        number:
+          min: 1
+          max: 480
+          unit_of_measurement: minutes
+
+deny_request:
+  name: Deny Request
+  description: Deny a pending time extension request.
+  fields:
+    request_id:
+      name: Request ID
+      description: The ID of the request to deny.
+      required: true
+      example: "request123"
+      selector:
+        text:
