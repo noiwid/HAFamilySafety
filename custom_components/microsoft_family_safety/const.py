@@ -67,4 +67,4 @@ SERVICE_DENY_REQUEST: Final = "deny_request"
 SERVICE_SET_TIME_LIMIT: Final = "set_time_limit"  # EXPERIMENTAL
 
 # Platforms
-PLATFORMS: Final = ["sensor", "switch"]
+PLATFORMS: Final = ["sensor", "switch", "number"]
