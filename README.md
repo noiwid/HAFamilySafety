@@ -5,6 +5,8 @@
 [![License](https://img.shields.io/github/license/noiwid/HAFamilySafety.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/noiwid/HAFamilySafety.svg)](https://github.com/noiwid/HAFamilySafety/stargazers)
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=Integration)
+
 > **Custom integration for Home Assistant to monitor and control Microsoft Family Safety accounts and devices directly from your home automation setup.**
 
 This integration allows you to track your children's screen time, manage device access, and automate parental controls from Home Assistant.
@@ -39,8 +41,6 @@ This integration allows you to track your children's screen time, manage device 
 ---
 
 ## 📦 Installation
-
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=Integration)
 
 For detailed installation instructions, see **[INSTALL.md](INSTALL.md)**.
 
