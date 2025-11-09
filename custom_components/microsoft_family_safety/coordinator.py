@@ -229,18 +229,20 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account = self._accounts[account_id]
 
         try:
-            # Cancel override to unblock the platform (remove restrictions)
+            # Remove override by setting UNTIL with a date in the past
+            # This expires the override immediately
+            past_date = datetime.now() - timedelta(days=1)
             _LOGGER.debug(
-                "Calling override_device with target=%s, override=%s, valid_until=%s",
+                "Calling override_device with target=%s, override=%s, valid_until=%s (past)",
                 platform,
-                OverrideType.CANCEL,
-                None
+                OverrideType.UNTIL,
+                past_date
             )
 
             await account.override_device(
                 target=platform,
-                override=OverrideType.CANCEL,
-                valid_until=None
+                override=OverrideType.UNTIL,
+                valid_until=past_date
             )
 
             _LOGGER.info("Unblocked platform %s for account %s", platform, account_id)
