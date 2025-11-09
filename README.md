@@ -38,13 +38,9 @@ This integration allows you to track your children's screen time, manage device 
 
 ---
 
-## 📸 Screenshots
-
-> 🚧 Section to be completed with screenshots from your installation
-
----
-
 ## 📦 Installation
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=Integration)
 
 For detailed installation instructions, see **[INSTALL.md](INSTALL.md)**.
 
