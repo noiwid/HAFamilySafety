@@ -208,6 +208,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     account_id,
                     [p.name for p in blocked_platforms]
                 )
+                # Also log device blocked status
+                for device_id, device_data in self.data.get("devices", {}).items():
+                    if device_data.get("account_id") == account_id:
+                        _LOGGER.debug(
+                            "Device %s blocked status: %s",
+                            device_data.get("device_name"),
+                            device_data.get("blocked")
+                        )
 
         except Exception as err:
             _LOGGER.error("Failed to block platform %s: %s", platform, err)
