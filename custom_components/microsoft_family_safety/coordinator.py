@@ -7,7 +7,6 @@ from typing import Any
 
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
-from pyfamilysafety.authenticator import Authenticator
 from pyfamilysafety.device import Device
 from pyfamilysafety.exceptions import HttpException
 
@@ -49,17 +48,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
 
         try:
-            # Initialize authenticator with refresh token
-            authenticator = await Authenticator.create(
+            # Initialize Family Safety API using the create() method
+            # This method (available in pyfamilysafety 1.1.2) automatically fetches accounts
+            self.api = await FamilySafety.create(
                 token=refresh_token,
-                use_refresh_token=True
+                use_refresh_token=True,
+                experimental=False
             )
 
-            # Initialize Family Safety API
-            self.api = FamilySafety(authenticator)
-
-            # DO NOT enable experimental mode - causes issues with current pyfamilysafety version
-            # self.api.experimental = True
             _LOGGER.debug("Family Safety API client initialized successfully")
         except Exception as err:
             _LOGGER.error("Failed to initialize Family Safety API: %s", err)
