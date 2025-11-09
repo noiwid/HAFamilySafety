@@ -97,6 +97,14 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         platform_str = call.data["platform"].lower()
         duration_minutes = call.data.get("duration_minutes")
 
+        # Convert account_id to int if it's a string
+        if isinstance(account_id, str):
+            try:
+                account_id = int(account_id)
+            except ValueError:
+                _LOGGER.error("Invalid account_id format: %s", account_id)
+                return
+
         # Map platform string to OverrideTarget enum
         platform_map = {
             "windows": OverrideTarget.WINDOWS,
@@ -122,6 +130,14 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         """Handle unblock platform service call."""
         account_id = call.data["account_id"]
         platform_str = call.data["platform"].lower()
+
+        # Convert account_id to int if it's a string
+        if isinstance(account_id, str):
+            try:
+                account_id = int(account_id)
+            except ValueError:
+                _LOGGER.error("Invalid account_id format: %s", account_id)
+                return
 
         # Map platform string to OverrideTarget enum
         platform_map = {
@@ -180,6 +196,14 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         account_id = call.data["account_id"]
         platform_str = call.data["platform"]
         limit_minutes = call.data["limit_minutes"]
+
+        # Convert account_id to int if it's a string (coordinator stores them as int)
+        if isinstance(account_id, str):
+            try:
+                account_id = int(account_id)
+            except ValueError:
+                _LOGGER.error("Invalid account_id format: %s", account_id)
+                return
 
         _LOGGER.debug(
             "handle_set_time_limit called with account_id=%s (type=%s), platform=%s, limit=%d",
