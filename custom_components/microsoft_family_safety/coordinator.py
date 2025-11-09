@@ -182,6 +182,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Permanent block: set to far future (10 years)
                 valid_until = datetime.now() + timedelta(days=3650)
 
+            _LOGGER.debug(
+                "Calling override_device with target=%s, override=%s, valid_until=%s",
+                platform,
+                OverrideType.UNTIL,
+                valid_until
+            )
+
             await account.override_device(
                 target=platform,
                 override=OverrideType.UNTIL,
@@ -215,6 +222,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             # Cancel override to unblock the platform (remove restrictions)
+            _LOGGER.debug(
+                "Calling override_device with target=%s, override=%s, valid_until=%s",
+                platform,
+                OverrideType.CANCEL,
+                None
+            )
+
             await account.override_device(
                 target=platform,
                 override=OverrideType.CANCEL,
