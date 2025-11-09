@@ -181,6 +181,14 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         platform_str = call.data["platform"]
         limit_minutes = call.data["limit_minutes"]
 
+        _LOGGER.debug(
+            "handle_set_time_limit called with account_id=%s (type=%s), platform=%s, limit=%d",
+            account_id,
+            type(account_id).__name__,
+            platform_str,
+            limit_minutes
+        )
+
         # Convert platform string to enum
         platform_map = {
             "windows": OverrideTarget.WINDOWS,
@@ -194,11 +202,18 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             return
 
         # Find coordinator for this account
+        _LOGGER.debug("Searching for account in %d coordinators", len(hass.data[DOMAIN]))
         for entry_id, coordinator in hass.data[DOMAIN].items():
+            _LOGGER.debug("Checking entry_id=%s, type=%s", entry_id, type(coordinator).__name__)
             if isinstance(coordinator, FamilySafetyDataUpdateCoordinator):
-                if coordinator.data and account_id in coordinator.data.get("accounts", {}):
-                    await coordinator.async_set_daily_time_limit(account_id, platform, limit_minutes)
-                    return
+                if coordinator.data:
+                    accounts = coordinator.data.get("accounts", {})
+                    _LOGGER.debug("Coordinator has %d accounts: %s", len(accounts), list(accounts.keys()))
+                    if account_id in accounts:
+                        await coordinator.async_set_daily_time_limit(account_id, platform, limit_minutes)
+                        return
+                else:
+                    _LOGGER.debug("Coordinator has no data yet")
 
         _LOGGER.error("Account %s not found in any Family Safety integration", account_id)
 
