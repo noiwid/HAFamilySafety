@@ -45,6 +45,15 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
         _LOGGER.debug("Initializing Family Safety API...")
         api = FamilySafety(authenticator)
 
+        # Enable experimental mode to get more data
+        api.experimental = True
+        _LOGGER.debug("Enabled experimental mode")
+
+        # Ensure accounts is initialized as a list (workaround for potential None return)
+        if not hasattr(api, 'accounts') or api.accounts is None:
+            _LOGGER.warning("api.accounts is not properly initialized, setting to empty list")
+            api.accounts = []
+
         # Try to update/fetch data to validate authentication
         _LOGGER.debug("Fetching Family Safety data...")
         _LOGGER.debug("Before update - api.accounts: %s", api.accounts)
@@ -53,15 +62,21 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
             # Call update to fetch accounts
             await api.update()
             _LOGGER.debug("Update completed successfully")
+
+            # Check again if accounts became None after update
+            if api.accounts is None:
+                _LOGGER.error("api.accounts became None after update - this is a pyfamilysafety bug")
+                api.accounts = []
+
         except TypeError as type_err:
             _LOGGER.error("TypeError during update: %s", str(type_err))
             if "'NoneType' object is not iterable" in str(type_err):
-                _LOGGER.error("API returned None for accounts - likely no Family Safety accounts configured")
-                raise InvalidAuth(
-                    "No Family Safety accounts found. Please ensure you have set up "
-                    "Family Safety in your Microsoft account first."
-                ) from type_err
-            raise
+                _LOGGER.error("API returned None for accounts - this indicates Account.from_dict() returned None")
+                # Force accounts to empty list to prevent crash
+                api.accounts = []
+                _LOGGER.info("Continuing with empty accounts list...")
+            else:
+                raise
         except Exception as err:
             _LOGGER.error("Unexpected error during update: %s", str(err))
             raise
@@ -70,12 +85,24 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
 
         # Check if accounts is None or empty
         if api.accounts is None:
-            _LOGGER.error("api.accounts is None after update()")
-            raise InvalidAuth("No accounts returned from API - accounts is None")
+            _LOGGER.error("api.accounts is None after update() - should have been fixed to []")
+            api.accounts = []
 
         if len(api.accounts) == 0:
-            _LOGGER.error("api.accounts is empty after update()")
-            raise InvalidAuth("No Family Safety accounts found for this Microsoft account")
+            _LOGGER.error("api.accounts is empty after update() - no Family Safety child accounts found")
+            _LOGGER.error(
+                "This could mean: "
+                "1) You are not the family organizer, "
+                "2) No child accounts are configured in Family Safety, "
+                "3) There is an API incompatibility issue"
+            )
+            raise InvalidAuth(
+                "No Family Safety child accounts found. "
+                "Please verify: "
+                "1) You are logged in as the family organizer "
+                "2) You have child accounts configured at https://account.microsoft.com/family "
+                "3) Family Safety is enabled for at least one child"
+            )
 
         _LOGGER.debug("Data fetched, found %d accounts", len(api.accounts))
 
