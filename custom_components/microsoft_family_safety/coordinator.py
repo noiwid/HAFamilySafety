@@ -56,7 +56,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
             # Initialize Family Safety API
-            self.api = FamilySafety(auth=authenticator)
+            self.api = FamilySafety(authenticator)
 
             _LOGGER.debug("Family Safety API client initialized successfully")
         except Exception as err:

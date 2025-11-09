@@ -43,7 +43,7 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
 
         # Try to initialize Family Safety API
         _LOGGER.debug("Initializing Family Safety API...")
-        api = FamilySafety(auth=authenticator)
+        api = FamilySafety(authenticator)
 
         # Try to update/fetch data to validate authentication
         _LOGGER.debug("Fetching Family Safety data...")
