@@ -47,7 +47,22 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
 
         # Try to update/fetch data to validate authentication
         _LOGGER.debug("Fetching Family Safety data...")
+        _LOGGER.debug("Before update - api.accounts: %s", api.accounts)
+
         try:
+            # Manually get accounts data to see what's returned
+            from pyfamilysafety.account import Account
+            _LOGGER.debug("Manually fetching accounts from API...")
+            data = await api._api.send_request("get_accounts")
+            _LOGGER.debug("Raw API response status: %s", data.get("status"))
+            _LOGGER.debug("Raw API response json keys: %s", data.get("json", {}).keys() if data.get("json") else None)
+            _LOGGER.debug("Raw API response json: %s", data.get("json"))
+
+            # Try to parse accounts
+            accounts = await Account.from_dict(api._api, data["json"], False)
+            _LOGGER.debug("Parsed accounts: %s (type: %s)", accounts, type(accounts))
+
+            # Now call normal update
             await api.update()
         except TypeError as type_err:
             if "'NoneType' object is not iterable" in str(type_err):
