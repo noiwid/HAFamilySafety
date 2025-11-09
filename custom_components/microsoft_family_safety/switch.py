@@ -107,16 +107,16 @@ class FamilySafetyPlatformSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool:
         """Return true if platform is unblocked (switch ON = devices active)."""
-        # Check if any device on this platform is NOT blocked
-        # If all devices are blocked, switch is OFF
-        # If any device is unblocked, switch is ON
-        devices = self._get_platform_devices()
-        if not devices:
+        # Check if the platform is in the blocked_platforms list
+        account_data = self._get_account_data()
+        if not account_data:
             return False
 
-        # Switch ON means at least one device is UNBLOCKED
-        # Switch OFF means all devices are BLOCKED
-        return any(not device.get("blocked", False) for device in devices)
+        blocked_platforms = account_data.get("blocked_platforms", [])
+
+        # Switch ON means platform is NOT blocked
+        # Switch OFF means platform IS blocked
+        return self._platform not in blocked_platforms
 
     @property
     def icon(self) -> str:

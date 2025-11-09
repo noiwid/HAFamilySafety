@@ -107,6 +107,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "average_screentime_usage": account.average_screentime_usage,
                     "account_balance": account.account_balance,
                     "account_currency": account.account_currency,
+                    "blocked_platforms": account.blocked_platforms,
                     "devices": [],
                     "applications": [],
                 }
@@ -192,6 +193,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Refresh data after action
             await self.async_request_refresh()
 
+            # Log blocked platforms after refresh
+            if self.data and account_id in self.data.get("accounts", {}):
+                blocked_platforms = self.data["accounts"][account_id].get("blocked_platforms", [])
+                _LOGGER.debug(
+                    "Account %s blocked platforms after block: %s",
+                    account_id,
+                    [p.name for p in blocked_platforms]
+                )
+
         except Exception as err:
             _LOGGER.error("Failed to block platform %s: %s", platform, err)
             raise
@@ -215,6 +225,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Refresh data after action
             await self.async_request_refresh()
+
+            # Log blocked platforms after refresh
+            if self.data and account_id in self.data.get("accounts", {}):
+                blocked_platforms = self.data["accounts"][account_id].get("blocked_platforms", [])
+                _LOGGER.debug(
+                    "Account %s blocked platforms after unblock: %s",
+                    account_id,
+                    [p.name for p in blocked_platforms]
+                )
 
         except Exception as err:
             _LOGGER.error("Failed to unblock platform %s: %s", platform, err)
