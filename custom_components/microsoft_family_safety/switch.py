@@ -106,17 +106,25 @@ class FamilySafetyPlatformSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return true if platform is unblocked (switch ON = devices active)."""
+        """Return true if platform has an override (access authorized).
+
+        IMPORTANT: Microsoft Family Safety 'overrides' AUTHORIZE access,
+        they don't block it. An override means the platform can bypass normal limits.
+
+        Switch ON = Override active = Access authorized
+        Switch OFF = No override = Subject to normal limits
+        """
         # Check if the platform is in the blocked_platforms list
+        # Note: "blocked_platforms" is misleading - it means platforms WITH overrides
         account_data = self._get_account_data()
         if not account_data:
             return False
 
         blocked_platforms = account_data.get("blocked_platforms", [])
 
-        # Switch ON means platform is NOT blocked
-        # Switch OFF means platform IS blocked
-        return self._platform not in blocked_platforms
+        # Switch ON means override IS active (platform CAN access)
+        # Switch OFF means NO override (platform subject to limits)
+        return self._platform in blocked_platforms
 
     @property
     def icon(self) -> str:
@@ -161,34 +169,40 @@ class FamilySafetyPlatformSwitch(CoordinatorEntity, SwitchEntity):
         return attributes
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the switch (unblock the platform)."""
+        """Turn on the switch (create override to authorize access).
+
+        Creates an override that allows the platform to bypass normal limits.
+        """
         try:
-            await self.coordinator.async_unblock_platform(self._account_id, self._platform)
+            await self.coordinator.async_block_platform(self._account_id, self._platform)
             _LOGGER.info(
-                "Unblocked platform %s for account %s",
+                "Created override for platform %s for account %s (access authorized)",
                 PLATFORM_NAMES.get(self._platform),
                 self._account_id
             )
         except Exception as err:
             _LOGGER.error(
-                "Failed to unblock platform %s: %s",
+                "Failed to create override for platform %s: %s",
                 PLATFORM_NAMES.get(self._platform),
                 err
             )
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the switch (block the platform)."""
+        """Turn off the switch (remove override, subject to limits).
+
+        Removes any override so the platform is subject to normal time limits.
+        """
         try:
-            await self.coordinator.async_block_platform(self._account_id, self._platform)
+            await self.coordinator.async_unblock_platform(self._account_id, self._platform)
             _LOGGER.info(
-                "Blocked platform %s for account %s",
+                "Removed override for platform %s for account %s (subject to limits)",
                 PLATFORM_NAMES.get(self._platform),
                 self._account_id
             )
         except Exception as err:
             _LOGGER.error(
-                "Failed to block platform %s: %s",
+                "Failed to remove override for platform %s: %s",
                 PLATFORM_NAMES.get(self._platform),
                 err
             )
