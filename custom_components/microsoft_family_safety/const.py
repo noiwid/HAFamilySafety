@@ -18,11 +18,14 @@ DEFAULT_TIMEOUT: Final = 30
 # Authentication URLs
 MS_LOGIN_URL: Final = "https://login.live.com/oauth20_authorize.srf"
 MS_AUTH_PARAMS: Final = {
-    "cobrandid": "8058f65d-ce06-4c30-9559-473c9275a65d",
+    "cobrandid": "b5d15d4b-695a-4cd5-93c6-13f551b310df",
     "client_id": "000000000004893A",
     "response_type": "code",
+    "redirect_uri": "https://login.live.com/oauth20_desktop.srf",
+    "response_mode": "query",
     "scope": "service::familymobile.microsoft.com::MBI_SSL",
-    "redirect_uri": "https://login.live.com/oauth20_desktop.srf"
+    "lw": "1",
+    "fl": "easi2"
 }
 
 # API
