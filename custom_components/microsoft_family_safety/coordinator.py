@@ -229,20 +229,17 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account = self._accounts[account_id]
 
         try:
-            # Remove override by setting UNTIL with a date in the past
-            # This expires the override immediately
-            past_date = datetime.now() - timedelta(days=1)
+            # Cancel the override using CANCEL type (like pantherale0 does)
+            # pyfamilysafety will automatically set valid_until to datetime.now()
             _LOGGER.debug(
-                "Calling override_device with target=%s, override=%s, valid_until=%s (past)",
+                "Calling override_device with target=%s, override=%s",
                 platform,
-                OverrideType.UNTIL,
-                past_date
+                OverrideType.CANCEL
             )
 
             await account.override_device(
                 target=platform,
-                override=OverrideType.UNTIL,
-                valid_until=past_date
+                override=OverrideType.CANCEL
             )
 
             _LOGGER.info("Unblocked platform %s for account %s", platform, account_id)
