@@ -31,10 +31,6 @@ MS_AUTH_PARAMS: Final = {
 # API
 API_TIMEOUT: Final = 30
 
-# Device control actions
-DEVICE_BLOCK_ACTION: Final = "block"
-DEVICE_UNBLOCK_ACTION: Final = "unblock"
-
 # Error codes
 ERROR_AUTH_FAILED: Final = "auth_failed"
 ERROR_TIMEOUT: Final = "timeout"
@@ -59,12 +55,5 @@ ATTR_AVERAGE_SCREENTIME: Final = "average_screentime"
 ATTR_ACCOUNT_BALANCE: Final = "account_balance"
 ATTR_ACCOUNT_CURRENCY: Final = "account_currency"
 
-# Services
-SERVICE_BLOCK_DEVICE: Final = "block_device"
-SERVICE_UNBLOCK_DEVICE: Final = "unblock_device"
-SERVICE_APPROVE_REQUEST: Final = "approve_request"
-SERVICE_DENY_REQUEST: Final = "deny_request"
-SERVICE_SET_TIME_LIMIT: Final = "set_time_limit"  # EXPERIMENTAL
-
 # Platforms
-PLATFORMS: Final = ["sensor", "switch", "number"]
+PLATFORMS: Final = ["sensor"]

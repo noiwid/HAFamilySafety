@@ -8,8 +8,6 @@ from typing import Any
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
 from pyfamilysafety.device import Device
-from pyfamilysafety.enum import OverrideTarget, OverrideType
-from pyfamilysafety.exceptions import HttpException
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -98,13 +96,21 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Store accounts and their devices
             for account in self.api.accounts:
                 account_id = account.user_id
+
+                # Convert screentime from milliseconds to seconds
+                today_screentime_ms = account.today_screentime_usage or 0
+                today_screentime_seconds = int(today_screentime_ms / 1000) if today_screentime_ms else 0
+
+                average_screentime_ms = account.average_screentime_usage or 0
+                average_screentime_seconds = int(average_screentime_ms / 1000) if average_screentime_ms else 0
+
                 accounts_data[account_id] = {
                     "user_id": account.user_id,
                     "first_name": account.first_name,
                     "surname": account.surname,
                     "profile_picture": account.profile_picture,
-                    "today_screentime_usage": account.today_screentime_usage,
-                    "average_screentime_usage": account.average_screentime_usage,
+                    "today_screentime_usage": today_screentime_seconds,
+                    "average_screentime_usage": average_screentime_seconds,
                     "account_balance": account.account_balance,
                     "account_currency": account.account_currency,
                     "blocked_platforms": account.blocked_platforms,
@@ -118,6 +124,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Process devices for this account
                 for device in account.devices:
                     device_id = device.device_id
+                    # Convert milliseconds to seconds (keep as seconds for compatibility)
+                    time_used_ms = device.today_time_used or 0
+                    time_used_seconds = int(time_used_ms / 1000) if time_used_ms else 0
+
                     device_data = {
                         "device_id": device.device_id,
                         "device_name": device.device_name,
@@ -125,7 +135,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "device_make": device.device_make,
                         "device_model": device.device_model,
                         "os_name": device.os_name,
-                        "today_time_used": device.today_time_used,
+                        "today_time_used": time_used_seconds,  # Store as seconds
                         "last_seen": device.last_seen,
                         "blocked": device.blocked,
                         "account_id": account_id,
@@ -160,265 +170,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             _LOGGER.exception("Unexpected error fetching data: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
-
-    async def async_block_platform(
-        self,
-        account_id: str,
-        platform: OverrideTarget,
-        duration_minutes: int | None = None
-    ) -> None:
-        """Block a platform (Windows/Xbox/Mobile) for an account."""
-        if account_id not in self._accounts:
-            raise ValueError(f"Account {account_id} not found")
-
-        account = self._accounts[account_id]
-
-        try:
-            # Use UNTIL type to block the platform
-            # If no duration specified, block for a very long time (10 years)
-            if duration_minutes:
-                valid_until = datetime.now() + timedelta(minutes=duration_minutes)
-            else:
-                # Permanent block: set to far future (10 years)
-                valid_until = datetime.now() + timedelta(days=3650)
-
-            _LOGGER.debug(
-                "Calling override_device with target=%s, override=%s, valid_until=%s",
-                platform,
-                OverrideType.UNTIL,
-                valid_until
-            )
-
-            await account.override_device(
-                target=platform,
-                override=OverrideType.UNTIL,
-                valid_until=valid_until
-            )
-
-            _LOGGER.info("Blocked platform %s for account %s", platform, account_id)
-
-            # Refresh data after action
-            await self.async_request_refresh()
-
-            # Log blocked platforms after refresh
-            if self.data and account_id in self.data.get("accounts", {}):
-                blocked_platforms = self.data["accounts"][account_id].get("blocked_platforms", [])
-                _LOGGER.debug(
-                    "Account %s blocked platforms after block: %s",
-                    account_id,
-                    [p.name for p in blocked_platforms]
-                )
-                # Also log device blocked status
-                for device_id, device_data in self.data.get("devices", {}).items():
-                    if device_data.get("account_id") == account_id:
-                        _LOGGER.debug(
-                            "Device %s blocked status: %s",
-                            device_data.get("device_name"),
-                            device_data.get("blocked")
-                        )
-
-        except Exception as err:
-            _LOGGER.error("Failed to block platform %s: %s", platform, err)
-            raise
-
-    async def async_unblock_platform(self, account_id: str, platform: OverrideTarget) -> None:
-        """Unblock a platform (Windows/Xbox/Mobile) for an account."""
-        if account_id not in self._accounts:
-            raise ValueError(f"Account {account_id} not found")
-
-        account = self._accounts[account_id]
-
-        try:
-            # Cancel the override using CANCEL type (like pantherale0 does)
-            # pyfamilysafety will automatically set valid_until to datetime.now()
-            _LOGGER.debug(
-                "Calling override_device with target=%s, override=%s",
-                platform,
-                OverrideType.CANCEL
-            )
-
-            await account.override_device(
-                target=platform,
-                override=OverrideType.CANCEL
-            )
-
-            _LOGGER.info("Unblocked platform %s for account %s", platform, account_id)
-
-            # Refresh data after action
-            await self.async_request_refresh()
-
-            # Log blocked platforms after refresh
-            if self.data and account_id in self.data.get("accounts", {}):
-                blocked_platforms = self.data["accounts"][account_id].get("blocked_platforms", [])
-                _LOGGER.debug(
-                    "Account %s blocked platforms after unblock: %s",
-                    account_id,
-                    [p.name for p in blocked_platforms]
-                )
-
-        except Exception as err:
-            _LOGGER.error("Failed to unblock platform %s: %s", platform, err)
-            raise
-
-    async def async_approve_request(self, request_id: str, extension_time: int) -> None:
-        """Approve a pending request with extension time."""
-        if self.api is None:
-            raise ValueError("API not initialized")
-
-        try:
-            await self.api.approve_pending_request(request_id, extension_time)
-            await self.async_request_refresh()
-        except Exception as err:
-            _LOGGER.error("Failed to approve request %s: %s", request_id, err)
-            raise
-
-    async def async_deny_request(self, request_id: str) -> None:
-        """Deny a pending request."""
-        if self.api is None:
-            raise ValueError("API not initialized")
-
-        try:
-            await self.api.deny_pending_request(request_id)
-            await self.async_request_refresh()
-        except Exception as err:
-            _LOGGER.error("Failed to deny request %s: %s", request_id, err)
-            raise
-
-    async def async_set_daily_time_limit(
-        self,
-        account_id: str,
-        platform: OverrideTarget,
-        limit_minutes: int
-    ) -> None:
-        """EXPERIMENTAL: Set daily time limit for a platform.
-
-        This attempts to modify the daily time limit by calling the
-        update_schedule endpoint directly. This is not officially supported
-        by pyfamilysafety yet.
-        """
-        if account_id not in self._accounts:
-            raise ValueError(f"Account {account_id} not found")
-
-        try:
-            # Build the API URL manually
-            url = f"https://mobileaggregator.family.microsoft.com/api/v4/devicelimits/schedules/{account_id}"
-
-            # Payload structure - trying different field names
-            # Error mentions "Plat-Info" which might be the actual field name
-            # Let's try multiple variations to find the right one
-
-            # Platform must be passed as a HEADER (Plat-Info), not in body!
-            # Try multiple payload variations
-            payloads_to_try = [
-                # Variation 1: Just dailyLimit as int
-                {"dailyLimit": limit_minutes},
-                # Variation 2: dailyLimit with enableDailyLimit flag
-                {"dailyLimit": limit_minutes, "enableDailyLimit": True},
-                # Variation 3: Nested structure
-                {"schedule": {"dailyLimit": limit_minutes}},
-                # Variation 4: dailyLimit as string
-                {"dailyLimit": str(limit_minutes)},
-                # Variation 5: More complete structure
-                {
-                    "dailyLimit": limit_minutes,
-                    "enableDailyLimit": True,
-                    "scheduleType": "daily"
-                },
-            ]
-
-            # Prepare headers with platform info
-            headers = {
-                "Plat-Info": platform.name  # "MOBILE", "WINDOWS", or "XBOX"
-            }
-
-            _LOGGER.debug(
-                "EXPERIMENTAL: Calling update_schedule for account %s, platform %s, limit %d minutes",
-                account_id,
-                platform,
-                limit_minutes
-            )
-
-            # Try each payload until one works
-            last_error = None
-            response = None
-            for i, payload in enumerate(payloads_to_try):
-                try:
-                    _LOGGER.debug("Trying payload variation %d: %s", i + 1, payload)
-                    _LOGGER.debug("Headers: %s", headers)
-
-                    response = await self.api.api.send_request(
-                        endpoint="update_schedule",
-                        USER_ID=account_id,
-                        body=payload,
-                        headers=headers
-                    )
-
-                    # If we get here, it worked!
-                    _LOGGER.info("SUCCESS with payload variation %d: %s", i + 1, payload)
-                    break
-
-                except HttpException as err:
-                    _LOGGER.debug("Payload variation %d failed: %s", i + 1, str(err))
-                    last_error = err
-                    continue
-            else:
-                # None of the payloads worked
-                raise last_error or Exception("All payload variations failed")
-
-            _LOGGER.info(
-                "Successfully updated time limit for platform %s to %d minutes",
-                platform,
-                limit_minutes
-            )
-            _LOGGER.debug("Response: %s", response)
-
-            await self.async_request_refresh()
-
-        except Exception as err:
-            _LOGGER.error(
-                "Failed to set daily time limit for platform %s: %s",
-                platform,
-                err
-            )
-            raise
-
-    def _get_account_for_device(self, device_id: str) -> Account | None:
-        """Get the account that owns a device."""
-        if not self.data or "devices" not in self.data:
-            return None
-
-        device_data = self.data["devices"].get(device_id)
-        if not device_data:
-            return None
-
-        account_id = device_data.get("account_id")
-        return self._accounts.get(account_id)
-
-    def get_platforms_for_account(self, account_id: str) -> set[OverrideTarget]:
-        """Get all platforms that have devices for an account."""
-        if not self.data or "devices" not in self.data:
-            return set()
-
-        platforms = set()
-        for device_data in self.data["devices"].values():
-            if device_data.get("account_id") == account_id:
-                platform = self._get_platform_from_os(device_data.get("os_name", ""))
-                if platform:
-                    platforms.add(platform)
-
-        return platforms
-
-    @staticmethod
-    def _get_platform_from_os(os_name: str) -> OverrideTarget | None:
-        """Map OS name to OverrideTarget platform."""
-        os_lower = os_name.lower()
-        if "windows" in os_lower:
-            return OverrideTarget.WINDOWS
-        elif "xbox" in os_lower:
-            return OverrideTarget.XBOX
-        elif "android" in os_lower or "ios" in os_lower:
-            return OverrideTarget.MOBILE
-        return None
 
     async def async_cleanup(self) -> None:
         """Clean up resources."""

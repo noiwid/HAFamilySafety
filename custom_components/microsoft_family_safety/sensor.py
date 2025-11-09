@@ -114,8 +114,8 @@ class FamilySafetyScreenTimeSensor(CoordinatorEntity, SensorEntity):
     """Sensor for account screen time."""
 
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_icon = "mdi:clock-outline"
 
     def __init__(
@@ -142,7 +142,7 @@ class FamilySafetyScreenTimeSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        """Return the screen time in minutes."""
+        """Return the screen time in seconds."""
         account_data = self._get_account_data()
         if not account_data:
             return None
@@ -155,9 +155,30 @@ class FamilySafetyScreenTimeSensor(CoordinatorEntity, SensorEntity):
         if not account_data:
             return {}
 
+        total_seconds = account_data.get("today_screentime_usage", 0)
+        average_seconds = account_data.get("average_screentime_usage", 0)
+
+        # Calculate hours, minutes, seconds for today
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+
+        # Format as HH:MM:SS
+        formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # Get today's date
+        today = datetime.now().date().isoformat()
+
         return {
-            ATTR_AVERAGE_SCREENTIME: account_data.get("average_screentime_usage", 0),
             ATTR_USER_ID: account_data.get(ATTR_USER_ID),
+            ATTR_AVERAGE_SCREENTIME: average_seconds,
+            "state_class": "total",
+            "total_seconds": total_seconds,
+            "formatted_time": formatted_time,
+            "hours": hours,
+            "minutes": minutes,
+            "seconds": seconds,
+            "date": today,
         }
 
 
@@ -323,8 +344,8 @@ class FamilySafetyDeviceScreenTimeSensor(CoordinatorEntity, SensorEntity):
     """Sensor for device screen time."""
 
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_icon = "mdi:cellphone-clock"
 
     def __init__(
@@ -351,7 +372,7 @@ class FamilySafetyDeviceScreenTimeSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> int | None:
-        """Return the screen time in minutes."""
+        """Return the screen time in seconds."""
         device_data = self._get_device_data()
         if not device_data:
             return None
@@ -364,9 +385,29 @@ class FamilySafetyDeviceScreenTimeSensor(CoordinatorEntity, SensorEntity):
         if not device_data:
             return {}
 
+        total_seconds = device_data.get(ATTR_TODAY_TIME_USED, 0)
+
+        # Calculate hours, minutes, seconds
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+
+        # Format as HH:MM:SS
+        formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # Get today's date
+        today = datetime.now().date().isoformat()
+
         return {
             ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
             ATTR_DEVICE_NAME: device_data.get(ATTR_DEVICE_NAME),
+            "state_class": "total",
+            "total_seconds": total_seconds,
+            "formatted_time": formatted_time,
+            "hours": hours,
+            "minutes": minutes,
+            "seconds": seconds,
+            "date": today,
         }
 
 
