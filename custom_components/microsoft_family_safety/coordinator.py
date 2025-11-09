@@ -58,9 +58,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Initialize Family Safety API
             self.api = FamilySafety(authenticator)
 
-            # Enable experimental mode to get more data
-            self.api.experimental = True
-            _LOGGER.debug("Family Safety API client initialized successfully with experimental mode")
+            # DO NOT enable experimental mode - causes issues with current pyfamilysafety version
+            # self.api.experimental = True
+            _LOGGER.debug("Family Safety API client initialized successfully")
         except Exception as err:
             _LOGGER.error("Failed to initialize Family Safety API: %s", err)
             raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err

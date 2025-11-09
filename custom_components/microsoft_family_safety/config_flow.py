@@ -45,9 +45,9 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
         _LOGGER.debug("Initializing Family Safety API...")
         api = FamilySafety(authenticator)
 
-        # Enable experimental mode to get more data
-        api.experimental = True
-        _LOGGER.debug("Enabled experimental mode")
+        # DO NOT enable experimental mode - it causes issues with current pyfamilysafety version
+        # api.experimental = True
+        _LOGGER.debug("Family Safety API initialized (experimental mode disabled)")
 
         # Ensure accounts is initialized as a list (workaround for potential None return)
         if not hasattr(api, 'accounts') or api.accounts is None:
