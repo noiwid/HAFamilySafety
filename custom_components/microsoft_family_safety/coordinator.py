@@ -72,11 +72,31 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             # Update all accounts
-            await self.api.update()
+            try:
+                await self.api.update()
+            except TypeError as type_err:
+                # Handle pyfamilysafety bug where Account.from_dict returns None
+                if "'NoneType' object is not iterable" in str(type_err):
+                    _LOGGER.warning(
+                        "pyfamilysafety returned None for accounts - "
+                        "this may indicate no child accounts are configured or an API incompatibility"
+                    )
+                    if not hasattr(self.api, 'accounts') or self.api.accounts is None:
+                        self.api.accounts = []
+                else:
+                    raise
+
+            # Workaround for pyfamilysafety bug where accounts can be None
+            if self.api.accounts is None:
+                _LOGGER.warning("API accounts is None after update, initializing to empty list")
+                self.api.accounts = []
 
             # Get all accounts
             accounts_data = {}
             devices_data = {}
+
+            # Log account count
+            _LOGGER.debug("Found %d Family Safety accounts", len(self.api.accounts))
 
             # Store accounts and their devices
             for account in self.api.accounts:

@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pyfamilysafety import FamilySafety
 from pyfamilysafety.authenticator import Authenticator
+from pyfamilysafety.exceptions import HttpException
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -30,101 +30,31 @@ _LOGGER = logging.getLogger(__name__)
 async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[str, Any]:
     """Validate the redirect URL by attempting to authenticate."""
     try:
-        _LOGGER.debug("Starting authentication with redirect URL: %s", redirect_url)
+        _LOGGER.debug("Config flow received - testing credentials")
 
         # Create authenticator from redirect URL
-        _LOGGER.debug("Creating authenticator...")
         authenticator = await Authenticator.create(
             token=redirect_url,
             use_refresh_token=False
         )
-        _LOGGER.debug("Authenticator created successfully, refresh_token: %s",
-                     authenticator.refresh_token[:20] if authenticator.refresh_token else None)
 
-        # Try to initialize Family Safety API
-        _LOGGER.debug("Initializing Family Safety API...")
-        api = FamilySafety(authenticator)
+        _LOGGER.debug(
+            "Authentication success, expiry time %s, returning refresh_token.",
+            authenticator.expires
+        )
 
-        # DO NOT enable experimental mode - it causes issues with current pyfamilysafety version
-        # api.experimental = True
-        _LOGGER.debug("Family Safety API initialized (experimental mode disabled)")
-
-        # Ensure accounts is initialized as a list (workaround for potential None return)
-        if not hasattr(api, 'accounts') or api.accounts is None:
-            _LOGGER.warning("api.accounts is not properly initialized, setting to empty list")
-            api.accounts = []
-
-        # Try to update/fetch data to validate authentication
-        _LOGGER.debug("Fetching Family Safety data...")
-        _LOGGER.debug("Before update - api.accounts: %s", api.accounts)
-
-        try:
-            # Call update to fetch accounts
-            await api.update()
-            _LOGGER.debug("Update completed successfully")
-
-            # Check again if accounts became None after update
-            if api.accounts is None:
-                _LOGGER.error("api.accounts became None after update - this is a pyfamilysafety bug")
-                api.accounts = []
-
-        except TypeError as type_err:
-            _LOGGER.error("TypeError during update: %s", str(type_err))
-            if "'NoneType' object is not iterable" in str(type_err):
-                _LOGGER.error("API returned None for accounts - this indicates Account.from_dict() returned None")
-                # Force accounts to empty list to prevent crash
-                api.accounts = []
-                _LOGGER.info("Continuing with empty accounts list...")
-            else:
-                raise
-        except Exception as err:
-            _LOGGER.error("Unexpected error during update: %s", str(err))
-            raise
-
-        _LOGGER.debug("After update - api.accounts: %s (type: %s)", api.accounts, type(api.accounts))
-
-        # Check if accounts is None or empty
-        if api.accounts is None:
-            _LOGGER.error("api.accounts is None after update() - should have been fixed to []")
-            api.accounts = []
-
-        if len(api.accounts) == 0:
-            _LOGGER.error("api.accounts is empty after update() - no Family Safety child accounts found")
-            _LOGGER.error(
-                "This could mean: "
-                "1) You are not the family organizer, "
-                "2) No child accounts are configured in Family Safety, "
-                "3) There is an API incompatibility issue"
-            )
-            raise InvalidAuth(
-                "No Family Safety child accounts found. "
-                "Please verify: "
-                "1) You are logged in as the family organizer "
-                "2) You have child accounts configured at https://account.microsoft.com/family "
-                "3) Family Safety is enabled for at least one child"
-            )
-
-        _LOGGER.debug("Data fetched, found %d accounts", len(api.accounts))
-
-        # If we got accounts, authentication is valid
-        if not api.accounts:
-            _LOGGER.error("No accounts found after successful authentication")
-            raise InvalidAuth("No accounts found - authentication may be invalid")
-
-        # Return info about the first account for naming and the refresh token
-        first_account = api.accounts[0]
-        _LOGGER.info("Authentication successful for user: %s", first_account.first_name)
+        # Return refresh token - accounts will be fetched later by coordinator
         return {
-            "title": f"{INTEGRATION_NAME} - {first_account.first_name}",
-            "accounts": len(api.accounts),
+            "title": INTEGRATION_NAME,
             "refresh_token": authenticator.refresh_token,
         }
 
-    except InvalidAuth:
-        raise
+    except HttpException as err:
+        _LOGGER.error("HTTP error during authentication: %s", err)
+        raise InvalidAuth from err
     except Exception as err:
-        _LOGGER.exception("Authentication failed with exception: %s", err)
-        raise InvalidAuth(f"Authentication error: {str(err)}") from err
+        _LOGGER.error("Unexpected error during authentication: %s", err)
+        raise InvalidAuth(f"Cannot connect: {err}") from err
 
 
 class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
