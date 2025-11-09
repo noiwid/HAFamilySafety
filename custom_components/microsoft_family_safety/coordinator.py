@@ -306,12 +306,26 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Build the API URL manually
             url = f"https://mobileaggregator.family.microsoft.com/api/v4/devicelimits/schedules/{account_id}"
 
-            # Payload structure based on API error response
-            # API expects "platformInfo" field (not "platform")
+            # Payload structure - trying different field names
+            # Error mentions "Plat-Info" which might be the actual field name
+            # Let's try multiple variations to find the right one
+
+            # Try 1: Plat-Info (from error message)
             payload = {
-                "platformInfo": str(platform),
+                "Plat-Info": str(platform),
                 "dailyLimit": limit_minutes,
             }
+
+            # If that fails, uncomment these alternatives:
+            # Try 2: platform (lowercase)
+            # payload = {"platform": str(platform).lower(), "dailyLimit": limit_minutes}
+
+            # Try 3: More complete schedule structure
+            # payload = {
+            #     "platformInfo": str(platform),
+            #     "dailyLimit": limit_minutes,
+            #     "enableDailyLimit": True
+            # }
 
             _LOGGER.debug(
                 "EXPERIMENTAL: Calling update_schedule for account %s, platform %s, limit %d minutes",
