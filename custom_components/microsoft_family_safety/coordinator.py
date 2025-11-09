@@ -307,23 +307,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Error mentions "Plat-Info" which might be the actual field name
             # Let's try multiple variations to find the right one
 
-            # Use platformInfo (camelCase) as required by API
-            # Use platform.name to get "MOBILE", "WINDOWS", or "XBOX"
+            # Platform must be passed as a HEADER (Plat-Info), not in body!
+            # Body only contains the daily limit
             payload = {
-                "platformInfo": platform.name,
                 "dailyLimit": limit_minutes,
             }
 
-            # If that fails, uncomment these alternatives:
-            # Try 2: platform (lowercase)
-            # payload = {"platform": str(platform).lower(), "dailyLimit": limit_minutes}
-
-            # Try 3: More complete schedule structure
-            # payload = {
-            #     "platformInfo": str(platform),
-            #     "dailyLimit": limit_minutes,
-            #     "enableDailyLimit": True
-            # }
+            # Prepare headers with platform info
+            headers = {
+                "Plat-Info": platform.name  # "MOBILE", "WINDOWS", or "XBOX"
+            }
 
             _LOGGER.debug(
                 "EXPERIMENTAL: Calling update_schedule for account %s, platform %s, limit %d minutes",
@@ -332,6 +325,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 limit_minutes
             )
             _LOGGER.debug("Payload: %s", payload)
+            _LOGGER.debug("Headers: %s", headers)
 
             # Call the API directly using the low-level send_request
             # Access the api object which has send_request method
@@ -339,7 +333,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             response = await self.api.api.send_request(
                 endpoint="update_schedule",
                 USER_ID=account_id,
-                body=payload
+                body=payload,
+                headers=headers
             )
 
             _LOGGER.info(
