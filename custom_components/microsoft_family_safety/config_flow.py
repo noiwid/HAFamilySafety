@@ -47,7 +47,29 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
 
         # Try to update/fetch data to validate authentication
         _LOGGER.debug("Fetching Family Safety data...")
-        await api.update()
+        try:
+            await api.update()
+        except TypeError as type_err:
+            if "'NoneType' object is not iterable" in str(type_err):
+                _LOGGER.error("API returned None for accounts - likely no Family Safety accounts configured")
+                raise InvalidAuth(
+                    "No Family Safety accounts found. Please ensure you have set up "
+                    "Family Safety in your Microsoft account first."
+                ) from type_err
+            raise
+
+        _LOGGER.debug("Update completed. Accounts object type: %s, value: %s",
+                     type(api.accounts), api.accounts)
+
+        # Check if accounts is None or empty
+        if api.accounts is None:
+            _LOGGER.error("api.accounts is None after update()")
+            raise InvalidAuth("No accounts returned from API - accounts is None")
+
+        if len(api.accounts) == 0:
+            _LOGGER.error("api.accounts is empty after update()")
+            raise InvalidAuth("No Family Safety accounts found for this Microsoft account")
+
         _LOGGER.debug("Data fetched, found %d accounts", len(api.accounts))
 
         # If we got accounts, authentication is valid
