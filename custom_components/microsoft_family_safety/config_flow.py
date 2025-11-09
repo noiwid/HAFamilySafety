@@ -30,33 +30,45 @@ _LOGGER = logging.getLogger(__name__)
 async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[str, Any]:
     """Validate the redirect URL by attempting to authenticate."""
     try:
+        _LOGGER.debug("Starting authentication with redirect URL: %s", redirect_url)
+
         # Create authenticator from redirect URL
+        _LOGGER.debug("Creating authenticator...")
         authenticator = await Authenticator.create(
             token=redirect_url,
             use_refresh_token=False
         )
+        _LOGGER.debug("Authenticator created successfully, refresh_token: %s",
+                     authenticator.refresh_token[:20] if authenticator.refresh_token else None)
 
         # Try to initialize Family Safety API
+        _LOGGER.debug("Initializing Family Safety API...")
         api = FamilySafety(auth=authenticator)
 
         # Try to update/fetch data to validate authentication
+        _LOGGER.debug("Fetching Family Safety data...")
         await api.update()
+        _LOGGER.debug("Data fetched, found %d accounts", len(api.accounts))
 
         # If we got accounts, authentication is valid
         if not api.accounts:
+            _LOGGER.error("No accounts found after successful authentication")
             raise InvalidAuth("No accounts found - authentication may be invalid")
 
         # Return info about the first account for naming and the refresh token
         first_account = api.accounts[0]
+        _LOGGER.info("Authentication successful for user: %s", first_account.first_name)
         return {
             "title": f"{INTEGRATION_NAME} - {first_account.first_name}",
             "accounts": len(api.accounts),
             "refresh_token": authenticator.refresh_token,
         }
 
+    except InvalidAuth:
+        raise
     except Exception as err:
-        _LOGGER.error("Authentication failed: %s", err)
-        raise InvalidAuth from err
+        _LOGGER.exception("Authentication failed with exception: %s", err)
+        raise InvalidAuth(f"Authentication error: {str(err)}") from err
 
 
 class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
