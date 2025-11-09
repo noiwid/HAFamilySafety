@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Authentification Microsoft Family Safety",
+        "description": "Pour vous authentifier avec Microsoft Family Safety, vous devez obtenir un code d'autorisation.\n\n**IMPORTANT : Copiez cette URL et ouvrez-la dans votre navigateur :**\n\n{auth_url}\n\nAprès vous être connecté, vous serez redirigé vers une page vierge. L'URL de cette page contiendra un paramètre 'code'.\n\nCliquez sur Suivant lorsque vous êtes prêt à entrer l'URL de redirection."
+      },
+      "auth": {
+        "title": "Entrez l'URL de redirection",
+        "description": "Collez l'URL complète depuis la barre d'adresse de votre navigateur après vous être connecté.\n\nL'URL devrait ressembler à :\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nVous pouvez coller l'URL entière - le code sera extrait automatiquement.\n\n**URL d'authentification (si nécessaire à nouveau) :**\n{auth_url}",
+        "data": {
+          "redirect_url": "URL de redirection"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Réauthentification Microsoft Family Safety",
+        "description": "Votre authentification a expiré. Veuillez obtenir un nouveau code d'autorisation :\n\n1. Ouvrez cette URL : {auth_url}\n2. Connectez-vous avec votre compte Microsoft\n3. Copiez l'URL de la page vierge qui apparaît\n4. Collez-la ci-dessous",
+        "data": {
+          "redirect_url": "URL de redirection"
+        }
+      }
+    },
+    "error": {
+      "auth_failed": "Échec de l'authentification. Veuillez vérifier l'URL et réessayer.",
+      "token_expired": "Votre authentification a expiré. Veuillez vous réauthentifier.",
+      "no_redirect_url": "Veuillez entrer une URL de redirection valide.",
+      "unknown": "Une erreur inattendue s'est produite. Veuillez réessayer."
+    },
+    "abort": {
+      "already_configured": "Ce compte est déjà configuré.",
+      "reauth_successful": "Réauthentification réussie !"
+    }
+  }
+}

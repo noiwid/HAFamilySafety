@@ -1,0 +1,7 @@
+{
+  "name": "Microsoft Family Safety",
+  "render_readme": true,
+  "domains": ["sensor", "switch"],
+  "homeassistant": "2023.1.0",
+  "iot_class": "cloud_polling"
+}
