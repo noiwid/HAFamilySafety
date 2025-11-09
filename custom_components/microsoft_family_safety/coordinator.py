@@ -137,8 +137,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Store applications
                 for app in account.applications:
                     accounts_data[account_id]["applications"].append({
-                        "app_id": app.application_id,
-                        "app_name": app.application_name,
+                        "app_id": app.app_id,
+                        "app_name": app.name,
                         "blocked": app.blocked,
                     })
 
