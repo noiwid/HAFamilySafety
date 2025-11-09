@@ -307,9 +307,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Error mentions "Plat-Info" which might be the actual field name
             # Let's try multiple variations to find the right one
 
-            # Try 1: Plat-Info (from error message)
+            # Use platformInfo (camelCase) as required by API
+            # Use platform.name to get "MOBILE", "WINDOWS", or "XBOX"
             payload = {
-                "Plat-Info": str(platform),
+                "platformInfo": platform.name,
                 "dailyLimit": limit_minutes,
             }
 
