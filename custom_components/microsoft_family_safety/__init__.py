@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 import voluptuous as vol
+from pyfamilysafety.enum import OverrideTarget
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -26,14 +27,16 @@ _LOGGER = logging.getLogger(__name__)
 # Service schemas
 SERVICE_BLOCK_DEVICE_SCHEMA = vol.Schema(
     {
-        vol.Required("device_id"): cv.string,
-        vol.Optional("duration"): cv.positive_int,
+        vol.Required("account_id"): cv.string,
+        vol.Required("platform"): vol.In(["windows", "mobile", "xbox"]),
+        vol.Optional("duration_minutes"): cv.positive_int,
     }
 )
 
 SERVICE_UNBLOCK_DEVICE_SCHEMA = vol.Schema(
     {
-        vol.Required("device_id"): cv.string,
+        vol.Required("account_id"): cv.string,
+        vol.Required("platform"): vol.In(["windows", "mobile", "xbox"]),
     }
 )
 
@@ -80,31 +83,57 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for Microsoft Family Safety."""
 
     async def handle_block_device(call: ServiceCall) -> None:
-        """Handle block device service call."""
-        device_id = call.data["device_id"]
-        duration = call.data.get("duration")
+        """Handle block platform service call."""
+        account_id = call.data["account_id"]
+        platform_str = call.data["platform"].lower()
+        duration_minutes = call.data.get("duration_minutes")
 
-        # Find coordinator that has this device
+        # Map platform string to OverrideTarget enum
+        platform_map = {
+            "windows": OverrideTarget.WINDOWS,
+            "mobile": OverrideTarget.MOBILE,
+            "xbox": OverrideTarget.XBOX,
+        }
+        platform = platform_map.get(platform_str)
+
+        if not platform:
+            _LOGGER.error("Invalid platform: %s", platform_str)
+            return
+
+        # Find coordinator that has this account
         for entry_id, coordinator in hass.data[DOMAIN].items():
             if isinstance(coordinator, FamilySafetyDataUpdateCoordinator):
-                if coordinator.data and device_id in coordinator.data.get("devices", {}):
-                    await coordinator.async_block_device(device_id, duration)
+                if coordinator.data and account_id in coordinator.data.get("accounts", {}):
+                    await coordinator.async_block_platform(account_id, platform, duration_minutes)
                     return
 
-        _LOGGER.error("Device %s not found in any Family Safety account", device_id)
+        _LOGGER.error("Account %s not found in any Family Safety integration", account_id)
 
     async def handle_unblock_device(call: ServiceCall) -> None:
-        """Handle unblock device service call."""
-        device_id = call.data["device_id"]
+        """Handle unblock platform service call."""
+        account_id = call.data["account_id"]
+        platform_str = call.data["platform"].lower()
 
-        # Find coordinator that has this device
+        # Map platform string to OverrideTarget enum
+        platform_map = {
+            "windows": OverrideTarget.WINDOWS,
+            "mobile": OverrideTarget.MOBILE,
+            "xbox": OverrideTarget.XBOX,
+        }
+        platform = platform_map.get(platform_str)
+
+        if not platform:
+            _LOGGER.error("Invalid platform: %s", platform_str)
+            return
+
+        # Find coordinator that has this account
         for entry_id, coordinator in hass.data[DOMAIN].items():
             if isinstance(coordinator, FamilySafetyDataUpdateCoordinator):
-                if coordinator.data and device_id in coordinator.data.get("devices", {}):
-                    await coordinator.async_unblock_device(device_id)
+                if coordinator.data and account_id in coordinator.data.get("accounts", {}):
+                    await coordinator.async_unblock_platform(account_id, platform)
                     return
 
-        _LOGGER.error("Device %s not found in any Family Safety account", device_id)
+        _LOGGER.error("Account %s not found in any Family Safety integration", account_id)
 
     async def handle_approve_request(call: ServiceCall) -> None:
         """Handle approve request service call."""

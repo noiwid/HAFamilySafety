@@ -1,16 +1,27 @@
 block_device:
-  name: Block Device
-  description: Block a device from being used.
+  name: Block Platform
+  description: Block a platform (Windows/Mobile/Xbox) for an account.
   fields:
-    device_id:
-      name: Device ID
-      description: The ID of the device to block.
+    account_id:
+      name: Account ID
+      description: The ID of the Family Safety account.
       required: true
-      example: "device123"
+      example: "abc123def456"
       selector:
         text:
-    duration:
-      name: Duration
+    platform:
+      name: Platform
+      description: The platform to block (windows, mobile, or xbox).
+      required: true
+      example: "windows"
+      selector:
+        select:
+          options:
+            - "windows"
+            - "mobile"
+            - "xbox"
+    duration_minutes:
+      name: Duration (minutes)
       description: Optional duration in minutes for the block (leave empty for indefinite).
       required: false
       example: 60
@@ -21,16 +32,27 @@ block_device:
           unit_of_measurement: minutes
 
 unblock_device:
-  name: Unblock Device
-  description: Unblock a previously blocked device.
+  name: Unblock Platform
+  description: Unblock a previously blocked platform (Windows/Mobile/Xbox).
   fields:
-    device_id:
-      name: Device ID
-      description: The ID of the device to unblock.
+    account_id:
+      name: Account ID
+      description: The ID of the Family Safety account.
       required: true
-      example: "device123"
+      example: "abc123def456"
       selector:
         text:
+    platform:
+      name: Platform
+      description: The platform to unblock (windows, mobile, or xbox).
+      required: true
+      example: "windows"
+      selector:
+        select:
+          options:
+            - "windows"
+            - "mobile"
+            - "xbox"
 
 approve_request:
   name: Approve Request
