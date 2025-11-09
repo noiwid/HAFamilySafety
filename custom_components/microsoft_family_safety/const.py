@@ -7,6 +7,8 @@ INTEGRATION_NAME: Final = "Microsoft Family Safety"
 
 # Configuration
 CONF_TOKEN: Final = "token"
+CONF_REDIRECT_URL: Final = "redirect_url"
+CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 
 # Defaults
@@ -18,8 +20,8 @@ MS_LOGIN_URL: Final = "https://login.live.com/oauth20_authorize.srf"
 MS_AUTH_PARAMS: Final = {
     "cobrandid": "8058f65d-ce06-4c30-9559-473c9275a65d",
     "client_id": "000000000004893A",
-    "response_type": "token",
-    "scope": "service::family.microsoft.com::MBI_SSL",
+    "response_type": "code",
+    "scope": "service::familymobile.microsoft.com::MBI_SSL",
     "redirect_uri": "https://login.live.com/oauth20_desktop.srf"
 }
 

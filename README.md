@@ -56,22 +56,29 @@ A custom integration for Home Assistant to monitor and control Microsoft Family 
 2. Click "+ Add Integration"
 3. Search for "Microsoft Family Safety"
 4. Follow the authentication steps:
-   - Click on the provided Microsoft login URL
+   - Copy the provided Microsoft login URL
+   - Open it in your browser
    - Log in with your Microsoft account
-   - Copy the redirect URL from your browser
-   - Extract the token (the value after `access_token=`)
-   - Paste the token in Home Assistant
+   - You'll be redirected to a blank page with a message from Microsoft
+   - Copy the entire URL from your browser's address bar
+   - Paste the URL in Home Assistant
 
 ## Authentication
 
 This integration uses the Microsoft Family Safety API which requires manual authentication:
 
-1. You'll be provided with a special Microsoft login URL
-2. After logging in, you'll be redirected to a blank page
-3. The URL will contain an access token
-4. Copy this token and paste it into the integration setup
+1. You'll be provided with a special Microsoft login URL with an authorization code flow
+2. After logging in, you'll be redirected to a blank page (this is normal)
+3. The URL will contain a `code` parameter (authorization code)
+4. Paste the complete URL - the integration will automatically extract the code
+5. The integration will exchange the code for a refresh token that's stored securely
 
-**Security Note**: The token only grants access to Family Safety data, not other Microsoft services like OneDrive or Outlook.
+**Example redirect URL:**
+```
+https://login.live.com/oauth20_desktop.srf?code=M.C123_BAY.0.U.-xxxxxxxxxxxxxxxx&lc=1036
+```
+
+**Security Note**: The authorization only grants access to Family Safety data, not other Microsoft services like OneDrive or Outlook.
 
 ## Entities
 

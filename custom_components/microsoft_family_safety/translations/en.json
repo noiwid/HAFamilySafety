@@ -3,27 +3,27 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety Authentication",
-        "description": "To authenticate with Microsoft Family Safety, follow these steps:\n\n1. Click on this URL: {auth_url}\n2. Log in with your Microsoft account\n3. After successful login, you will be redirected to a blank page\n4. Copy the entire URL from your browser's address bar\n5. Extract the token from the URL (it's the value after 'access_token=')\n6. Click Next to enter the token"
+        "description": "To authenticate with Microsoft Family Safety, you need to obtain an authorization code.\n\n**IMPORTANT: Copy this URL and open it in your browser:**\n\n{auth_url}\n\nAfter logging in, you will be redirected to a blank page. The URL of that page will contain a 'code' parameter.\n\nClick Next when ready to enter the redirect URL."
       },
-      "token": {
-        "title": "Enter Authentication Token",
-        "description": "Paste the authentication token you obtained from the redirect URL.\n\nThe token is the long string that appears after 'access_token=' in the URL.\n\nAuthentication URL: {auth_url}",
+      "auth": {
+        "title": "Enter Redirect URL",
+        "description": "Paste the complete URL from your browser's address bar after logging in.\n\nThe URL should look like:\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nYou can paste the entire URL - the code will be extracted automatically.\n\n**Authentication URL (if needed again):**\n{auth_url}",
         "data": {
-          "token": "Authentication Token"
+          "redirect_url": "Redirect URL"
         }
       },
       "reauth_confirm": {
         "title": "Reauthenticate Microsoft Family Safety",
-        "description": "Your authentication token has expired. Please obtain a new token:\n\n1. Click on this URL: {auth_url}\n2. Log in with your Microsoft account\n3. Copy the URL after redirect and extract the token\n4. Enter the new token below",
+        "description": "Your authentication has expired. Please obtain a new authorization code:\n\n1. Open this URL: {auth_url}\n2. Log in with your Microsoft account\n3. Copy the URL from the blank page that appears\n4. Paste it below",
         "data": {
-          "token": "Authentication Token"
+          "redirect_url": "Redirect URL"
         }
       }
     },
     "error": {
-      "auth_failed": "Authentication failed. Please check your token and try again.",
-      "token_expired": "Your authentication token has expired. Please reauthenticate.",
-      "no_token": "Please enter a valid token.",
+      "auth_failed": "Authentication failed. Please check the URL and try again.",
+      "token_expired": "Your authentication has expired. Please reauthenticate.",
+      "no_redirect_url": "Please enter a valid redirect URL.",
       "unknown": "An unexpected error occurred. Please try again."
     },
     "abort": {
