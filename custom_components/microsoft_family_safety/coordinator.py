@@ -173,10 +173,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account = self._accounts[account_id]
 
         try:
-            # Calculate valid_until datetime if duration is specified
-            valid_until = None
+            # Calculate valid_until datetime
+            # If no duration specified, default to 24 hours
+            # OverrideType.UNTIL requires valid_until to be set
             if duration_minutes:
                 valid_until = datetime.now() + timedelta(minutes=duration_minutes)
+            else:
+                # Default: block for 24 hours
+                valid_until = datetime.now() + timedelta(hours=24)
 
             # Override platform to block it
             await account.override_device(
@@ -185,7 +189,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 valid_until=valid_until
             )
 
-            _LOGGER.info("Blocked platform %s for account %s", platform, account_id)
+            _LOGGER.info("Blocked platform %s for account %s until %s", platform, account_id, valid_until)
 
             # Refresh data after action
             await self.async_request_refresh()
