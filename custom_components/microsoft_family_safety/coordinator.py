@@ -136,7 +136,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         This is a temporary debug method to test if Microsoft exposes
         screen time limits via GET /v4/devicelimits/schedules/{USER_ID}
 
-        Check Home Assistant logs for results (filter by 'DEBUG:').
+        Check Home Assistant logs for results (filter by 'DEBUG SCHEDULES:').
         """
         if not self.api or not hasattr(self.api, 'accounts'):
             return
@@ -148,31 +148,38 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 user_id, account.first_name
             )
 
-            # Log available API structure
-            _LOGGER.warning("DEBUG SCHEDULES: API attributes: %s", dir(self.api))
-
-            # Try to access the internal API client
+            # Try to access the internal API client (it's 'api' not '_api')
             api_client = None
-            if hasattr(self.api, '_api'):
-                api_client = self.api._api
-                _LOGGER.warning("DEBUG SCHEDULES: _api attributes: %s", dir(api_client))
+            if hasattr(self.api, 'api'):
+                api_client = self.api.api
+                _LOGGER.warning("DEBUG SCHEDULES: api attributes: %s", dir(api_client))
 
             # Try direct HTTP request if we can find the session
-            if api_client and hasattr(api_client, '_session'):
-                session = api_client._session
+            session = None
+            headers = {}
+
+            if api_client:
+                # Look for session in various possible locations
+                for attr in ['_session', 'session', '_client', 'client']:
+                    if hasattr(api_client, attr):
+                        session = getattr(api_client, attr)
+                        _LOGGER.warning("DEBUG SCHEDULES: Found session at api.%s", attr)
+                        break
+
+                # Look for headers
+                for attr in ['_headers', 'headers']:
+                    if hasattr(api_client, attr):
+                        headers = getattr(api_client, attr)
+                        _LOGGER.warning("DEBUG SCHEDULES: Found headers at api.%s", attr)
+                        break
+
+            if session:
                 base_url = "https://family.microsoft.com/api"
                 schedules_url = f"{base_url}/v4/devicelimits/schedules/{user_id}"
 
                 _LOGGER.warning("DEBUG SCHEDULES: Trying GET %s", schedules_url)
 
                 try:
-                    # Get auth headers if available
-                    headers = {}
-                    if hasattr(api_client, '_headers'):
-                        headers = api_client._headers
-                    elif hasattr(api_client, 'headers'):
-                        headers = api_client.headers
-
                     async with session.get(schedules_url, headers=headers) as resp:
                         status = resp.status
                         text = await resp.text()
@@ -189,6 +196,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning(
                     "DEBUG SCHEDULES: Cannot find HTTP session in API client"
                 )
+
+            # Only test once, not for each account
+            break
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Family Safety API."""
