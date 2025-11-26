@@ -130,66 +130,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
         return device_id, device_data
 
-    async def _debug_fetch_schedules(self) -> None:
-        """DEBUG: Try to fetch screen time schedules/limits from API.
-
-        This is a temporary debug method to test if Microsoft exposes
-        screen time limits via GET /v4/devicelimits/schedules/{USER_ID}
-
-        Check Home Assistant logs for results (filter by 'DEBUG:').
-        """
-        if not self.api or not hasattr(self.api, 'accounts'):
-            return
-
-        for account in self.api.accounts:
-            user_id = account.user_id
-            _LOGGER.warning(
-                "DEBUG SCHEDULES: Testing for user %s (%s)",
-                user_id, account.first_name
-            )
-
-            # Log available API structure
-            _LOGGER.warning("DEBUG SCHEDULES: API attributes: %s", dir(self.api))
-
-            # Try to access the internal API client
-            api_client = None
-            if hasattr(self.api, '_api'):
-                api_client = self.api._api
-                _LOGGER.warning("DEBUG SCHEDULES: _api attributes: %s", dir(api_client))
-
-            # Try direct HTTP request if we can find the session
-            if api_client and hasattr(api_client, '_session'):
-                session = api_client._session
-                base_url = "https://family.microsoft.com/api"
-                schedules_url = f"{base_url}/v4/devicelimits/schedules/{user_id}"
-
-                _LOGGER.warning("DEBUG SCHEDULES: Trying GET %s", schedules_url)
-
-                try:
-                    # Get auth headers if available
-                    headers = {}
-                    if hasattr(api_client, '_headers'):
-                        headers = api_client._headers
-                    elif hasattr(api_client, 'headers'):
-                        headers = api_client.headers
-
-                    async with session.get(schedules_url, headers=headers) as resp:
-                        status = resp.status
-                        text = await resp.text()
-                        _LOGGER.warning(
-                            "DEBUG SCHEDULES: Response status=%s, body=%s",
-                            status, text[:2000] if text else "(empty)"
-                        )
-                except Exception as err:
-                    _LOGGER.warning(
-                        "DEBUG SCHEDULES: HTTP request failed: %s (%s)",
-                        type(err).__name__, err
-                    )
-            else:
-                _LOGGER.warning(
-                    "DEBUG SCHEDULES: Cannot find HTTP session in API client"
-                )
-
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from Family Safety API."""
         if self.api is None:
@@ -201,9 +141,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not hasattr(self.api, 'accounts') or self.api.accounts is None:
                 _LOGGER.warning("API accounts is None after update, initializing to empty list")
                 self.api.accounts = []
-
-            # DEBUG: Try to fetch screen time schedules/limits
-            await self._debug_fetch_schedules()
 
             accounts_data = {}
             devices_data = {}
