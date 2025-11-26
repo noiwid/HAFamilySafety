@@ -20,6 +20,7 @@ from .const import (
     ATTR_ACCOUNT_BALANCE,
     ATTR_ACCOUNT_CURRENCY,
     ATTR_AVERAGE_SCREENTIME,
+    ATTR_BLOCKED,
     ATTR_DEVICE_ID,
     ATTR_DEVICE_MODEL,
     ATTR_DEVICE_NAME,
@@ -84,6 +85,7 @@ def _create_device_sensors(
     return [
         FamilySafetyDeviceScreenTimeSensor(coordinator, entry, device_id),
         FamilySafetyDeviceInfoSensor(coordinator, entry, device_id),
+        FamilySafetyDeviceBlockedSensor(coordinator, entry, device_id),
     ]
 
 
@@ -191,7 +193,9 @@ class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
         if not account_data:
             return {}
 
-        total_seconds = account_data.get("today_screentime_usage", 0)
+        # Value is already in minutes from coordinator, convert to seconds for formatting
+        total_minutes = account_data.get("today_screentime_usage", 0)
+        total_seconds = total_minutes * 60
 
         return {
             ATTR_USER_ID: account_data.get(ATTR_USER_ID),
@@ -354,7 +358,9 @@ class FamilySafetyDeviceScreenTimeSensor(FamilySafetyDeviceSensor):
         if not device_data:
             return {}
 
-        total_seconds = device_data.get(ATTR_TODAY_TIME_USED, 0)
+        # Value is already in minutes from coordinator, convert to seconds for formatting
+        total_minutes = device_data.get(ATTR_TODAY_TIME_USED, 0)
+        total_seconds = total_minutes * 60
 
         return {
             ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
@@ -402,4 +408,50 @@ class FamilySafetyDeviceInfoSensor(FamilySafetyDeviceSensor):
             ATTR_LAST_SEEN: device_data.get(ATTR_LAST_SEEN),
             "device_make": device_data.get("device_make"),
             "device_class": device_data.get("device_class"),
+        }
+
+
+class FamilySafetyDeviceBlockedSensor(FamilySafetyDeviceSensor):
+    """Sensor for device blocked status."""
+
+    _attr_icon = "mdi:lock"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        device_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, device_id)
+        self._attr_unique_id = f"{entry.entry_id}_{device_id}_blocked"
+        self._attr_name = f"{self._get_device_name()} Blocked"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the blocked status."""
+        device_data = self._get_device_data()
+        if not device_data:
+            return None
+        return "blocked" if device_data.get(ATTR_BLOCKED) else "active"
+
+    @property
+    def icon(self) -> str:
+        """Return the icon based on blocked status."""
+        device_data = self._get_device_data()
+        if device_data and device_data.get(ATTR_BLOCKED):
+            return "mdi:lock"
+        return "mdi:lock-open"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        device_data = self._get_device_data()
+        if not device_data:
+            return {}
+
+        return {
+            ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
+            ATTR_DEVICE_NAME: device_data.get(ATTR_DEVICE_NAME),
+            ATTR_BLOCKED: device_data.get(ATTR_BLOCKED),
         }
