@@ -68,31 +68,34 @@ For detailed installation instructions, see **[INSTALL.md](INSTALL.md)**.
 
 ## ⚙️ Configuration
 
-### 1. Obtain Microsoft Token
-
-1. Go to [https://familysafety.microsoft.com](https://familysafety.microsoft.com)
-2. Log in with your Microsoft account (parent account)
-3. Open **Developer Tools** in your browser (F12)
-4. Go to the **Network** tab
-5. Refresh the page
-6. Look for a request to `mobileaggregator.family.microsoft.com`
-7. Click on it and go to the **Headers** tab
-8. Find the **Cookie** header and copy the `wl_at` value
-
-**Example cookie:**
-```
-wl_at=3.1.0.0.3f20fbf...
-```
-
-### 2. Configure the Integration
+### 1. Add the Integration
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **+ Add Integration**
 3. Search for **"Microsoft Family Safety"**
-4. Paste your `wl_at` token
-5. Click **Submit**
+4. Click **Next** - you'll see an authentication URL
+
+### 2. Authenticate with Microsoft
+
+1. **Copy the authentication URL** displayed in Home Assistant
+2. **Open it in your browser** (use a private/incognito window recommended)
+3. **Log in** with your Microsoft account (parent account)
+4. After login, you'll be redirected to a **blank page**
+5. **Copy the entire URL** from your browser's address bar
+
+The redirect URL looks like:
+```
+https://login.live.com/oauth20_desktop.srf?code=M.C123_ABC...&lc=1033
+```
+
+### 3. Complete Setup
+
+1. **Paste the complete redirect URL** in the Home Assistant form
+2. Click **Submit**
 
 The integration will automatically discover all child accounts and their devices.
+
+> **Note:** The authentication token is valid for several weeks. When it expires, Home Assistant will prompt you to reauthenticate using the same process.
 
 ---
 
@@ -101,7 +104,7 @@ The integration will automatically discover all child accounts and their devices
 ### Per Child Account
 
 - **Screen Time** (`sensor.{name}_screen_time`)
-  - Today's usage in seconds
+  - Today's usage in minutes
   - Attributes: `formatted_time`, `hours`, `minutes`, `seconds`, `average_screentime`
 
 - **Account Info** (`sensor.{name}_account_info`)
@@ -119,12 +122,16 @@ The integration will automatically discover all child accounts and their devices
 ### Per Device
 
 - **Device Screen Time** (`sensor.{device}_screen_time`)
-  - Time used today in seconds
+  - Time used today in minutes
   - Attributes: `formatted_time`, `hours`, `minutes`, `seconds`
 
 - **Device Info** (`sensor.{device}_info`)
   - Device name
   - Attributes: Model, OS, last seen, manufacturer, device class
+
+- **Device Blocked** (`sensor.{device}_blocked`)
+  - Lock status: `active` or `blocked`
+  - Dynamic icon based on status
 
 ---
 
@@ -176,11 +183,11 @@ hours_to_show: 168  # 7 days
 
 ### Token Expires
 
-The `wl_at` token expires after a few weeks/months. If you see authentication errors:
+The authentication token expires after a few weeks. If you see authentication errors:
 
-1. Obtain a new token (see Configuration section)
-2. Go to **Settings** → **Devices & Services** → **Microsoft Family Safety**
-3. Click **Configure** and paste the new token
+1. Home Assistant will automatically prompt you to reauthenticate
+2. Follow the same authentication process (see Configuration section)
+3. Copy the new redirect URL and paste it in the form
 
 ### Data Not Updating
 
