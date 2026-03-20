@@ -19,14 +19,14 @@ from .const import (
     ATTR_FIRST_NAME,
     ATTR_PLATFORM,
     ATTR_USER_ID,
+    AVAILABLE_PLATFORMS,
+    CONF_PLATFORMS,
+    DEFAULT_PLATFORMS,
     DOMAIN,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-# Platforms that can be locked via Microsoft Family Safety
-LOCKABLE_PLATFORMS = ["Windows", "Xbox", "Mobile"]
 
 
 async def async_setup_entry(
@@ -52,8 +52,9 @@ async def async_setup_entry(
                     )
                 )
 
-            # Create per-platform lock switches (deprecated, kept for backwards compat)
-            for platform in LOCKABLE_PLATFORMS:
+            # Create per-platform lock switches only for selected platforms
+            enabled_platforms = entry.options.get(CONF_PLATFORMS, DEFAULT_PLATFORMS)
+            for platform in enabled_platforms:
                 entities.append(
                     FamilySafetyPlatformLockSwitch(
                         coordinator, entry, account_id, account_name, platform,

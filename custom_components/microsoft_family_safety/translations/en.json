@@ -10,7 +10,8 @@
         "description": "Paste the complete URL from your browser's address bar after logging in.\n\nThe URL should look like:\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nYou can paste the entire URL - the code will be extracted automatically.\n\n**Authentication URL (if needed again):**\n{auth_url}",
         "data": {
           "redirect_url": "Redirect URL",
-          "update_interval": "Update interval (seconds)"
+          "update_interval": "Update interval (seconds)",
+          "platforms": "Monitored platforms"
         }
       },
       "reauth_confirm": {
@@ -37,9 +38,10 @@
       "init": {
         "title": "Microsoft Family Safety Options",
         "data": {
-          "update_interval": "Update interval (seconds)"
+          "update_interval": "Update interval (seconds)",
+          "platforms": "Monitored platforms"
         },
-        "description": "Configure the polling interval for Microsoft Family Safety data. Minimum: 30 seconds, default: 300 seconds (5 minutes)."
+        "description": "Configure the polling interval and monitored platforms."
       }
     }
   },

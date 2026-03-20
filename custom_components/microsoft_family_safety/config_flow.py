@@ -10,14 +10,18 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
+import homeassistant.helpers.config_validation as cv
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
+    AVAILABLE_PLATFORMS,
+    CONF_PLATFORMS,
     CONF_REDIRECT_URL,
     CONF_REFRESH_TOKEN,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_PLATFORMS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ERROR_AUTH_FAILED,
@@ -111,6 +115,7 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             update_interval = user_input.get(
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
             )
+            platforms = user_input.get(CONF_PLATFORMS, DEFAULT_PLATFORMS)
 
             if not redirect_url:
                 errors["base"] = "no_redirect_url"
@@ -129,6 +134,7 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         },
                         options={
                             CONF_UPDATE_INTERVAL: update_interval,
+                            CONF_PLATFORMS: platforms,
                         },
                     )
 
@@ -151,6 +157,12 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_UPDATE_INTERVAL,
                         default=DEFAULT_UPDATE_INTERVAL,
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+                    vol.Optional(
+                        CONF_PLATFORMS,
+                        default=DEFAULT_PLATFORMS,
+                    ): cv.multi_select(
+                        {p: p for p in AVAILABLE_PLATFORMS}
+                    ),
                 }
             ),
             description_placeholders=description_placeholders,
@@ -228,6 +240,9 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         current_interval = self._config_entry.options.get(
             CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
         )
+        current_platforms = self._config_entry.options.get(
+            CONF_PLATFORMS, DEFAULT_PLATFORMS
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -237,6 +252,12 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                         CONF_UPDATE_INTERVAL,
                         default=current_interval,
                     ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+                    vol.Optional(
+                        CONF_PLATFORMS,
+                        default=current_platforms,
+                    ): cv.multi_select(
+                        {p: p for p in AVAILABLE_PLATFORMS}
+                    ),
                 }
             ),
         )
