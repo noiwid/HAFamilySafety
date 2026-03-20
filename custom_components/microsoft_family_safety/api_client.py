@@ -57,17 +57,32 @@ class FamilySafetyWebAPI:
         self._token_expires: datetime | None = None
 
     async def _ensure_session(self) -> None:
-        """Ensure an active aiohttp session exists."""
+        """Ensure an active aiohttp session exists with cookie jar."""
         if self._session is None or self._session.closed:
+            jar = aiohttp.CookieJar(unsafe=True)
             timeout = aiohttp.ClientTimeout(total=30, connect=10)
-            self._session = aiohttp.ClientSession(timeout=timeout)
+            self._session = aiohttp.ClientSession(timeout=timeout, cookie_jar=jar)
 
     async def _ensure_auth(self) -> None:
-        """Acquire or refresh an access token scoped for account.microsoft.com."""
-        if self._access_token and self._token_expires and self._token_expires > datetime.now():
+        """Establish a full web session: token + cookies + CSRF.
+
+        The account.microsoft.com/family/api/ endpoints use cookie-based
+        authentication. We must:
+        1. Acquire a Bearer token scoped for account.microsoft.com
+        2. Visit the Family Safety web page to establish session cookies
+        3. Extract the CSRF token from the page HTML
+        """
+        # If we already have a valid session (token + CSRF), skip
+        if (
+            self._access_token
+            and self._token_expires
+            and self._token_expires > datetime.now()
+            and self._csrf_token
+        ):
             return
         await self._ensure_session()
-        # Use the refresh token from pyfamilysafety to get a new token with web scope
+
+        # Step 1: Acquire Bearer token
         refresh_token = self._authenticator.refresh_token
         if not refresh_token:
             raise FamilySafetyWebAPIError("No refresh token available")
@@ -79,27 +94,46 @@ class FamilySafetyWebAPI:
         async with self._session.post(_TOKEN_ENDPOINT, data=form) as resp:
             if resp.status != 200:
                 text = await resp.text()
-                _LOGGER.error("Failed to acquire web API token (status %s): %s", resp.status, text[:200])
-                raise FamilySafetyWebAPIError(f"Token request failed with status {resp.status}")
+                _LOGGER.error(
+                    "Failed to acquire web API token (status %s): %s",
+                    resp.status, text[:200],
+                )
+                raise FamilySafetyWebAPIError(
+                    f"Token request failed with status {resp.status}"
+                )
             data = await resp.json()
             self._access_token = data["access_token"]
-            self._token_expires = datetime.now() + timedelta(seconds=data.get("expires_in", 3600))
-            _LOGGER.debug("Acquired web API token (expires in %ss)", data.get("expires_in"))
+            self._token_expires = datetime.now() + timedelta(
+                seconds=data.get("expires_in", 3600)
+            )
+            _LOGGER.debug(
+                "Acquired web API token (expires in %ss)", data.get("expires_in")
+            )
 
-    async def _fetch_csrf_token(self) -> str | None:
-        """Fetch the CSRF token from the Family Safety web page."""
-        await self._ensure_session()
-        await self._ensure_auth()
+        # Step 2: Visit Family Safety page to establish session cookies + CSRF
+        await self._establish_web_session()
 
+    async def _establish_web_session(self) -> None:
+        """Visit the Family Safety web page to set session cookies and get CSRF token."""
         headers = {
             "Authorization": f"Bearer {self._access_token}",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
         }
-
         try:
             async with self._session.get(
-                f"{BASE_URL}/family/settings", headers=headers
+                f"{BASE_URL}/family/settings",
+                headers=headers,
+                allow_redirects=True,
             ) as resp:
+                _LOGGER.debug(
+                    "Web session page status: %s, cookies: %d",
+                    resp.status,
+                    len(self._session.cookie_jar),
+                )
                 if resp.status == 200:
                     html = await resp.text()
                     match = re.search(
@@ -108,15 +142,23 @@ class FamilySafetyWebAPI:
                     )
                     if match:
                         self._csrf_token = match.group(1)
-                        _LOGGER.debug("CSRF token acquired successfully")
-                        return self._csrf_token
-                _LOGGER.warning(
-                    "Could not fetch CSRF token (status %s)", resp.status
-                )
+                        _LOGGER.info(
+                            "Web session established: CSRF token acquired, %d cookies",
+                            len(self._session.cookie_jar),
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "Web session page loaded but no CSRF token found in HTML"
+                        )
+                else:
+                    body = await resp.text()
+                    _LOGGER.warning(
+                        "Failed to establish web session (status %s): %s",
+                        resp.status,
+                        body[:200],
+                    )
         except Exception as err:
-            _LOGGER.warning("Error fetching CSRF token: %s", err)
-
-        return None
+            _LOGGER.warning("Error establishing web session: %s", err)
 
     def _build_headers(self) -> dict[str, str]:
         """Build request headers for the web API."""
@@ -152,20 +194,16 @@ class FamilySafetyWebAPI:
             async with self._session.request(
                 method, url, headers=headers, json=json_data, params=params
             ) as resp:
-                if resp.status == 401:
-                    _LOGGER.info("Got 401, refreshing web API token and retrying")
+                if resp.status in (401, 403):
+                    _LOGGER.info(
+                        "Got %s, re-establishing full web session and retrying",
+                        resp.status,
+                    )
+                    # Invalidate everything and re-establish from scratch
                     self._access_token = None
                     self._token_expires = None
+                    self._csrf_token = None
                     await self._ensure_auth()
-                    headers = self._build_headers()
-                    async with self._session.request(
-                        method, url, headers=headers, json=json_data, params=params
-                    ) as retry_resp:
-                        return await self._handle_response(retry_resp)
-                if resp.status == 403:
-                    _LOGGER.info("Got 403, refreshing CSRF token and retrying")
-                    self._csrf_token = None  # Force re-fetch
-                    await self._fetch_csrf_token()
                     headers = self._build_headers()
                     async with self._session.request(
                         method, url, headers=headers, json=json_data, params=params
