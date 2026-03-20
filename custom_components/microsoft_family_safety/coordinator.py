@@ -284,6 +284,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             screentime = await self.web_api.get_screentime_policy(account_id)
+            _LOGGER.debug("Raw screentime policy response for %s: %s", account_id, screentime)
             result["screentime_policy"] = screentime
         except Exception as err:
             _LOGGER.debug("Could not fetch screen time policy: %s", err)
