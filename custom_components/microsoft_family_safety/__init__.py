@@ -154,6 +154,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Microsoft Family Safety from a config entry."""
     coordinator = FamilySafetyDataUpdateCoordinator(hass, entry)
 
+    # Load persisted screentime policies (for lock/unlock survival across restarts)
+    await coordinator.async_load_saved_screentime()
+
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:

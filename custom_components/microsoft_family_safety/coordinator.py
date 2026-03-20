@@ -15,6 +15,7 @@ from pyfamilysafety.exceptions import HttpException
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
@@ -28,6 +29,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_KEY = f"{DOMAIN}.saved_screentime"
+STORAGE_VERSION = 1
 
 
 def _ms_to_minutes(milliseconds: int | None) -> int:
@@ -55,8 +59,23 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._accounts: dict[str, Account] = {}
         self._devices: dict[str, Device] = {}
         self._is_retrying_auth = False
-        # Saved screentime state for lock/unlock per account
+        # Saved screentime state for lock/unlock per account (persisted via HA Store)
         self._saved_screentime: dict[str, dict[str, Any]] = {}
+        self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+
+    async def async_load_saved_screentime(self) -> None:
+        """Load saved screentime policies from persistent storage."""
+        data = await self._store.async_load()
+        if data and isinstance(data, dict):
+            self._saved_screentime = data
+            _LOGGER.debug(
+                "Loaded saved screentime policies for %d account(s)",
+                len(self._saved_screentime),
+            )
+
+    async def _async_save_screentime(self) -> None:
+        """Persist saved screentime policies to HA storage."""
+        await self._store.async_save(self._saved_screentime)
 
     async def _async_setup_api(self) -> None:
         """Set up the Family Safety API client."""
@@ -313,8 +332,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     break
             if has_nonzero:
                 self._saved_screentime[account_id] = current_policy
+                await self._async_save_screentime()
                 _LOGGER.info(
-                    "Saved screentime policy for account %s before locking", account_id
+                    "Saved screentime policy for account %s before locking (persisted)",
+                    account_id,
                 )
 
         # Set all 7 days to 0 minutes
@@ -371,6 +392,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
 
             self._saved_screentime.pop(account_id, None)
+            await self._async_save_screentime()
             _LOGGER.info("Account %s unlocked (restored saved policy)", account_id)
         else:
             # No saved state — set reasonable defaults (2h/day, 07:00-22:00)
