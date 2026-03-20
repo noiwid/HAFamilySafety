@@ -68,6 +68,7 @@ def _create_account_sensors(
         FamilySafetyScreenTimeSensor(coordinator, entry, account_id),
         FamilySafetyAccountInfoSensor(coordinator, entry, account_id),
         FamilySafetyApplicationCountSensor(coordinator, entry, account_id),
+        FamilySafetyPendingRequestsSensor(coordinator, entry, account_id),
     ]
 
     if account_data.get("account_balance") is not None:
@@ -454,4 +455,47 @@ class FamilySafetyDeviceBlockedSensor(FamilySafetyDeviceSensor):
             ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
             ATTR_DEVICE_NAME: device_data.get(ATTR_DEVICE_NAME),
             ATTR_BLOCKED: device_data.get(ATTR_BLOCKED),
+        }
+
+
+class FamilySafetyPendingRequestsSensor(FamilySafetyAccountSensor):
+    """Sensor for pending screen time requests."""
+
+    _attr_icon = "mdi:message-alert"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_pending_requests"
+        self._attr_name = f"{self._get_account_name()} Pending Requests"
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of pending requests for this account."""
+        if not self.coordinator.data:
+            return 0
+        all_requests = self.coordinator.data.get("pending_requests", [])
+        account_requests = [
+            r for r in all_requests if r.get("puid") == self._account_id
+        ]
+        return len(account_requests)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return pending requests details."""
+        if not self.coordinator.data:
+            return {}
+        all_requests = self.coordinator.data.get("pending_requests", [])
+        account_requests = [
+            r for r in all_requests if r.get("puid") == self._account_id
+        ]
+        return {
+            ATTR_USER_ID: self._account_id,
+            "requests": account_requests,
         }

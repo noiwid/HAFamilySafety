@@ -55,5 +55,22 @@ ATTR_AVERAGE_SCREENTIME: Final = "average_screentime"
 ATTR_ACCOUNT_BALANCE: Final = "account_balance"
 ATTR_ACCOUNT_CURRENCY: Final = "account_currency"
 
+# Control attributes
+ATTR_APP_ID: Final = "app_id"
+ATTR_APP_NAME: Final = "app_name"
+ATTR_PLATFORM: Final = "platform"
+ATTR_OVERRIDE_TYPE: Final = "override_type"
+ATTR_VALID_UNTIL: Final = "valid_until"
+ATTR_REQUEST_ID: Final = "request_id"
+ATTR_EXTENSION_TIME: Final = "extension_time"
+
+# Service names
+SERVICE_BLOCK_APP: Final = "block_app"
+SERVICE_UNBLOCK_APP: Final = "unblock_app"
+SERVICE_LOCK_PLATFORM: Final = "lock_platform"
+SERVICE_UNLOCK_PLATFORM: Final = "unlock_platform"
+SERVICE_APPROVE_REQUEST: Final = "approve_request"
+SERVICE_DENY_REQUEST: Final = "deny_request"
+
 # Platforms
-PLATFORMS: Final = ["sensor"]
+PLATFORMS: Final = ["sensor", "switch", "button"]

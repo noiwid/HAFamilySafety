@@ -7,7 +7,9 @@ from typing import Any
 
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
+from pyfamilysafety.application import Application
 from pyfamilysafety.device import Device
+from pyfamilysafety.enum import OverrideTarget, OverrideType
 from pyfamilysafety.exceptions import HttpException
 
 from homeassistant.config_entries import ConfigEntry
@@ -27,14 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _ms_to_minutes(milliseconds: int | None) -> int:
-    """Convert milliseconds to minutes.
-
-    Args:
-        milliseconds: Duration in milliseconds, can be None
-
-    Returns:
-        Duration in minutes as integer, or 0 if input is None
-    """
+    """Convert milliseconds to minutes."""
     if not milliseconds:
         return 0
     return int(milliseconds / 60000)
@@ -65,7 +60,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.api = await FamilySafety.create(
                 token=refresh_token,
                 use_refresh_token=True,
-                experimental=False
+                experimental=True,
             )
 
             _LOGGER.debug("Family Safety API client initialized successfully")
@@ -73,16 +68,85 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Failed to initialize Family Safety API: %s", err)
             raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
 
+    def get_account(self, account_id: str) -> Account | None:
+        """Get the raw pyfamilysafety Account object."""
+        return self._accounts.get(account_id)
+
+    def get_device(self, device_id: str) -> Device | None:
+        """Get the raw pyfamilysafety Device object."""
+        return self._devices.get(device_id)
+
+    def get_application(self, account_id: str, app_id: str) -> Application | None:
+        """Get a raw pyfamilysafety Application object."""
+        account = self._accounts.get(account_id)
+        if account is None:
+            return None
+        try:
+            return account.get_application(app_id)
+        except (IndexError, ValueError):
+            return None
+
+    async def async_block_app(self, account_id: str, app_id: str) -> None:
+        """Block an application."""
+        app = self.get_application(account_id, app_id)
+        if app is None:
+            raise ValueError(f"Application {app_id} not found for account {account_id}")
+        await app.block_app()
+        await self.async_request_refresh()
+
+    async def async_unblock_app(self, account_id: str, app_id: str) -> None:
+        """Unblock an application."""
+        app = self.get_application(account_id, app_id)
+        if app is None:
+            raise ValueError(f"Application {app_id} not found for account {account_id}")
+        await app.unblock_app()
+        await self.async_request_refresh()
+
+    async def async_lock_platform(
+        self, account_id: str, platform: str, valid_until: datetime | None = None
+    ) -> None:
+        """Lock a platform (Windows/Xbox/Mobile)."""
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise ValueError(f"Account {account_id} not found")
+        target = OverrideTarget.from_pretty(platform)
+        if valid_until is None:
+            valid_until = datetime.now() + timedelta(hours=24)
+        await account.override_device(target, OverrideType.UNTIL, valid_until)
+        await self.async_request_refresh()
+
+    async def async_unlock_platform(self, account_id: str, platform: str) -> None:
+        """Unlock a platform (Windows/Xbox/Mobile)."""
+        account = self._accounts.get(account_id)
+        if account is None:
+            raise ValueError(f"Account {account_id} not found")
+        target = OverrideTarget.from_pretty(platform)
+        await account.override_device(target, OverrideType.CANCEL)
+        await self.async_request_refresh()
+
+    async def async_approve_request(
+        self, request_id: str, extension_time: int = 3600
+    ) -> bool:
+        """Approve a pending screen time request. extension_time in seconds."""
+        if self.api is None:
+            return False
+        return await self.api.approve_pending_request(request_id, extension_time)
+
+    async def async_deny_request(self, request_id: str) -> bool:
+        """Deny a pending screen time request."""
+        if self.api is None:
+            return False
+        return await self.api.deny_pending_request(request_id)
+
     def _transform_account_data(self, account: Account) -> tuple[str, dict[str, Any]]:
-        """Transform an Account object to dictionary format.
-
-        Args:
-            account: The pyfamilysafety Account object
-
-        Returns:
-            Tuple of (account_id, account_data_dict)
-        """
+        """Transform an Account object to dictionary format."""
         account_id = account.user_id
+
+        # Determine blocked platforms
+        blocked_platforms_list = []
+        if account.blocked_platforms:
+            blocked_platforms_list = [str(p) for p in account.blocked_platforms]
+
         account_data = {
             "user_id": account.user_id,
             "first_name": account.first_name,
@@ -92,13 +156,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "average_screentime_usage": _ms_to_minutes(account.average_screentime_usage),
             "account_balance": account.account_balance,
             "account_currency": account.account_currency,
-            "blocked_platforms": account.blocked_platforms,
+            "blocked_platforms": blocked_platforms_list,
             "devices": [],
             "applications": [
                 {
                     "app_id": app.app_id,
                     "app_name": app.name,
                     "blocked": app.blocked,
+                    "icon": app.icon,
+                    "usage_minutes": round(app.usage, 1) if app.usage else 0,
                 }
                 for app in account.applications
             ],
@@ -106,15 +172,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return account_id, account_data
 
     def _transform_device_data(self, device: Device, account_id: str) -> tuple[str, dict[str, Any]]:
-        """Transform a Device object to dictionary format.
-
-        Args:
-            device: The pyfamilysafety Device object
-            account_id: The parent account ID
-
-        Returns:
-            Tuple of (device_id, device_data_dict)
-        """
+        """Transform a Device object to dictionary format."""
         device_id = device.device_id
         device_data = {
             "device_id": device.device_id,
@@ -158,9 +216,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     accounts_data[account_id]["devices"].append(device_id)
                     self._devices[device_id] = device
 
+            # Collect pending requests
+            pending_requests = []
+            if hasattr(self.api, 'pending_requests') and self.api.pending_requests:
+                pending_requests = self.api.pending_requests
+
             return {
                 "accounts": accounts_data,
                 "devices": devices_data,
+                "pending_requests": pending_requests,
             }
 
         except HttpException as err:

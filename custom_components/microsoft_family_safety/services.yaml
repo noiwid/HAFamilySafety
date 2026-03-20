@@ -1,0 +1,117 @@
+block_app:
+  name: Block Application
+  description: Block an application for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    app_id:
+      name: Application ID
+      description: The application ID to block (e.g., "appx:Microsoft.WindowsStore").
+      required: true
+      selector:
+        text:
+
+unblock_app:
+  name: Unblock Application
+  description: Unblock an application for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    app_id:
+      name: Application ID
+      description: The application ID to unblock.
+      required: true
+      selector:
+        text:
+
+lock_platform:
+  name: Lock Platform
+  description: Lock a platform (Windows/Xbox/Mobile) for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform to lock.
+      required: true
+      selector:
+        select:
+          options:
+            - "Windows"
+            - "Xbox"
+            - "Mobile"
+    duration_hours:
+      name: Duration (hours)
+      description: Duration of the lock in hours (default 24).
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 168
+          step: 1
+          unit_of_measurement: hours
+
+unlock_platform:
+  name: Unlock Platform
+  description: Unlock a platform (Windows/Xbox/Mobile) for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform to unlock.
+      required: true
+      selector:
+        select:
+          options:
+            - "Windows"
+            - "Xbox"
+            - "Mobile"
+
+approve_request:
+  name: Approve Pending Request
+  description: Approve a pending screen time extension request.
+  fields:
+    request_id:
+      name: Request ID
+      description: The ID of the pending request to approve.
+      required: true
+      selector:
+        text:
+    extension_minutes:
+      name: Extension (minutes)
+      description: Time extension to grant in minutes (default 60).
+      default: 60
+      selector:
+        number:
+          min: 15
+          max: 480
+          step: 15
+          unit_of_measurement: minutes
+
+deny_request:
+  name: Deny Pending Request
+  description: Deny a pending screen time extension request.
+  fields:
+    request_id:
+      name: Request ID
+      description: The ID of the pending request to deny.
+      required: true
+      selector:
+        text:
