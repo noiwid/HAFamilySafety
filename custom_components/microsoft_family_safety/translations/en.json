@@ -30,5 +30,91 @@
       "already_configured": "This account is already configured.",
       "reauth_successful": "Reauthentication successful!"
     }
+  },
+  "services": {
+    "block_app": {
+      "name": "Block Application",
+      "description": "Block an application for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "app_id": {
+          "name": "Application ID",
+          "description": "The application ID to block."
+        }
+      }
+    },
+    "unblock_app": {
+      "name": "Unblock Application",
+      "description": "Unblock an application for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "app_id": {
+          "name": "Application ID",
+          "description": "The application ID to unblock."
+        }
+      }
+    },
+    "lock_platform": {
+      "name": "Lock Platform",
+      "description": "Lock a platform (Windows/Xbox/Mobile) for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "The platform to lock (Windows, Xbox, or Mobile)."
+        },
+        "duration_hours": {
+          "name": "Duration (hours)",
+          "description": "Duration of the lock in hours."
+        }
+      }
+    },
+    "unlock_platform": {
+      "name": "Unlock Platform",
+      "description": "Unlock a platform (Windows/Xbox/Mobile) for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "The platform to unlock (Windows, Xbox, or Mobile)."
+        }
+      }
+    },
+    "approve_request": {
+      "name": "Approve Pending Request",
+      "description": "Approve a pending screen time extension request.",
+      "fields": {
+        "request_id": {
+          "name": "Request ID",
+          "description": "The ID of the pending request to approve."
+        },
+        "extension_minutes": {
+          "name": "Extension (minutes)",
+          "description": "Time extension to grant in minutes."
+        }
+      }
+    },
+    "deny_request": {
+      "name": "Deny Pending Request",
+      "description": "Deny a pending screen time extension request.",
+      "fields": {
+        "request_id": {
+          "name": "Request ID",
+          "description": "The ID of the pending request to deny."
+        }
+      }
+    }
   }
 }

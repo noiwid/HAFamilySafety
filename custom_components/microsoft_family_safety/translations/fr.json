@@ -30,5 +30,91 @@
       "already_configured": "Ce compte est déjà configuré.",
       "reauth_successful": "Réauthentification réussie !"
     }
+  },
+  "services": {
+    "block_app": {
+      "name": "Bloquer une application",
+      "description": "Bloquer une application pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "app_id": {
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application à bloquer."
+        }
+      }
+    },
+    "unblock_app": {
+      "name": "Débloquer une application",
+      "description": "Débloquer une application pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "app_id": {
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application à débloquer."
+        }
+      }
+    },
+    "lock_platform": {
+      "name": "Verrouiller une plateforme",
+      "description": "Verrouiller une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "La plateforme à verrouiller (Windows, Xbox ou Mobile)."
+        },
+        "duration_hours": {
+          "name": "Durée (heures)",
+          "description": "Durée du verrouillage en heures."
+        }
+      }
+    },
+    "unlock_platform": {
+      "name": "Déverrouiller une plateforme",
+      "description": "Déverrouiller une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "La plateforme à déverrouiller (Windows, Xbox ou Mobile)."
+        }
+      }
+    },
+    "approve_request": {
+      "name": "Approuver une demande",
+      "description": "Approuver une demande d'extension de temps d'écran.",
+      "fields": {
+        "request_id": {
+          "name": "ID de la demande",
+          "description": "L'identifiant de la demande à approuver."
+        },
+        "extension_minutes": {
+          "name": "Extension (minutes)",
+          "description": "Temps d'extension à accorder en minutes."
+        }
+      }
+    },
+    "deny_request": {
+      "name": "Refuser une demande",
+      "description": "Refuser une demande d'extension de temps d'écran.",
+      "fields": {
+        "request_id": {
+          "name": "ID de la demande",
+          "description": "L'identifiant de la demande à refuser."
+        }
+      }
+    }
   }
 }
