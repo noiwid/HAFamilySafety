@@ -69,6 +69,8 @@ def _create_account_sensors(
         FamilySafetyAccountInfoSensor(coordinator, entry, account_id),
         FamilySafetyApplicationCountSensor(coordinator, entry, account_id),
         FamilySafetyPendingRequestsSensor(coordinator, entry, account_id),
+        FamilySafetyWebFilterSensor(coordinator, entry, account_id),
+        FamilySafetyScreenTimePolicySensor(coordinator, entry, account_id),
     ]
 
     if account_data.get("account_balance") is not None:
@@ -499,3 +501,125 @@ class FamilySafetyPendingRequestsSensor(FamilySafetyAccountSensor):
             ATTR_USER_ID: self._account_id,
             "requests": account_requests,
         }
+
+
+class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
+    """Sensor for web filtering status."""
+
+    _attr_icon = "mdi:web"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_web_filter"
+        self._attr_name = f"{self._get_account_name()} Web Filter"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the web filter status."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return None
+        web_data = account_data.get("web_browsing")
+        if web_data is None:
+            return "unknown"
+        if isinstance(web_data, dict):
+            is_enabled = web_data.get("isEnabled", web_data.get("IsEnabled"))
+            if is_enabled is True:
+                return "enabled"
+            if is_enabled is False:
+                return "disabled"
+        return "unknown"
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on filter state."""
+        if self.native_value == "enabled":
+            return "mdi:web-check"
+        if self.native_value == "disabled":
+            return "mdi:web-off"
+        return "mdi:web"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return web filtering details."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return {}
+        web_data = account_data.get("web_browsing")
+        if web_data is None:
+            return {ATTR_USER_ID: self._account_id}
+        attrs = {ATTR_USER_ID: self._account_id}
+        if isinstance(web_data, dict):
+            # Include blocked sites, allowed sites, and other settings
+            for key in ("blockedSites", "allowedSites", "BlockedSites", "AllowedSites",
+                        "isEnabled", "IsEnabled", "contentRatingAge", "ContentRatingAge"):
+                if key in web_data:
+                    attrs[key] = web_data[key]
+        return attrs
+
+
+class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
+    """Sensor for screen time policy details."""
+
+    _attr_icon = "mdi:clock-check"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_screentime_policy"
+        self._attr_name = f"{self._get_account_name()} Screen Time Policy"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return whether screen time limits are enabled."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return None
+        policy = account_data.get("screentime_policy")
+        if policy is None:
+            return "unknown"
+        if isinstance(policy, dict):
+            is_enabled = policy.get("isEnabled", policy.get("IsEnabled"))
+            if is_enabled is True:
+                return "enabled"
+            if is_enabled is False:
+                return "disabled"
+        return "unknown"
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on policy state."""
+        if self.native_value == "enabled":
+            return "mdi:clock-check"
+        if self.native_value == "disabled":
+            return "mdi:clock-remove"
+        return "mdi:clock-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return screen time policy details."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return {}
+        policy = account_data.get("screentime_policy")
+        attrs = {ATTR_USER_ID: self._account_id}
+        if policy and isinstance(policy, dict):
+            # Extract daily restrictions
+            daily = policy.get("dailyRestrictions", policy.get("DailyRestrictions"))
+            if daily and isinstance(daily, dict):
+                for day_name, day_data in daily.items():
+                    if isinstance(day_data, dict):
+                        allowance = day_data.get("allowance", day_data.get("Allowance", ""))
+                        attrs[f"{day_name.lower()}_allowance"] = allowance
+        return attrs

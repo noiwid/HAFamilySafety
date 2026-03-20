@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
 from .const import (
     CONF_REFRESH_TOKEN,
     DEFAULT_UPDATE_INTERVAL,
@@ -48,6 +49,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.entry = entry
         self.api: FamilySafety | None = None
+        self.web_api: FamilySafetyWebAPI | None = None
         self._accounts: dict[str, Account] = {}
         self._devices: dict[str, Device] = {}
         self._is_retrying_auth = False
@@ -62,6 +64,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 use_refresh_token=True,
                 experimental=True,
             )
+
+            # Initialize web API client using the same authenticator
+            self.web_api = FamilySafetyWebAPI(self.api.api.authenticator)
 
             _LOGGER.debug("Family Safety API client initialized successfully")
         except Exception as err:
@@ -85,6 +90,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return account.get_application(app_id)
         except (IndexError, ValueError):
             return None
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Existing controls (via pyfamilysafety)
+    # ──────────────────────────────────────────────────────────────────────
 
     async def async_block_app(self, account_id: str, app_id: str) -> None:
         """Block an application."""
@@ -137,6 +146,139 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.api is None:
             return False
         return await self.api.deny_pending_request(request_id)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # New controls (via web API)
+    # ──────────────────────────────────────────────────────────────────────
+
+    async def async_set_screentime_limit(
+        self, child_id: str, day_of_week: int, hours: int, minutes: int
+    ) -> None:
+        """Set screen time daily allowance."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_screentime_daily_allowance(
+            child_id, day_of_week, hours, minutes
+        )
+        await self.async_request_refresh()
+
+    async def async_set_screentime_intervals(
+        self,
+        child_id: str,
+        day_of_week: int,
+        start_hour: int,
+        start_minute: int,
+        end_hour: int,
+        end_minute: int,
+    ) -> None:
+        """Set screen time allowed intervals."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_screentime_intervals_from_range(
+            child_id, day_of_week, start_hour, start_minute, end_hour, end_minute
+        )
+        await self.async_request_refresh()
+
+    async def async_set_app_time_limit(
+        self,
+        child_id: str,
+        app_id: str,
+        display_name: str,
+        platform: str,
+        allowance: str,
+        start_time: str = "07:00:00",
+        end_time: str = "22:00:00",
+    ) -> None:
+        """Set a per-app time limit."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_app_time_limit(
+            child_id, app_id, display_name, platform, allowance, start_time, end_time
+        )
+        await self.async_request_refresh()
+
+    async def async_remove_app_time_limit(
+        self,
+        child_id: str,
+        app_id: str,
+        display_name: str,
+        platform: str,
+    ) -> None:
+        """Remove a per-app time limit."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.remove_app_time_limit(
+            child_id, app_id, display_name, platform
+        )
+        await self.async_request_refresh()
+
+    async def async_block_website(self, child_id: str, website: str) -> None:
+        """Block a website."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.block_website(child_id, website)
+        await self.async_request_refresh()
+
+    async def async_remove_website(self, child_id: str, website: str) -> None:
+        """Remove a website from block/allow list."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.remove_website(child_id, website)
+        await self.async_request_refresh()
+
+    async def async_toggle_web_filter(self, child_id: str, enabled: bool) -> None:
+        """Toggle web filtering."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.toggle_web_filter(child_id, enabled)
+        await self.async_request_refresh()
+
+    async def async_set_age_rating(self, child_id: str, age: int) -> None:
+        """Set content age rating."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_age_rating(child_id, age)
+        await self.async_request_refresh()
+
+    async def async_set_acquisition_policy(
+        self, child_id: str, require_approval: bool
+    ) -> None:
+        """Set ask-to-buy policy."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+        await self.web_api.set_acquisition_policy(child_id, require_approval)
+        await self.async_request_refresh()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Data fetching (web API enrichment)
+    # ──────────────────────────────────────────────────────────────────────
+
+    async def _fetch_web_api_data(self, account_id: str) -> dict[str, Any]:
+        """Fetch additional data from the web API for an account."""
+        result: dict[str, Any] = {
+            "web_browsing": None,
+            "screentime_policy": None,
+        }
+        if self.web_api is None:
+            return result
+
+        try:
+            web_browsing = await self.web_api.get_web_browsing_settings(account_id)
+            result["web_browsing"] = web_browsing
+        except Exception as err:
+            _LOGGER.debug("Could not fetch web browsing settings: %s", err)
+
+        try:
+            screentime = await self.web_api.get_screentime_policy(account_id)
+            result["screentime_policy"] = screentime
+        except Exception as err:
+            _LOGGER.debug("Could not fetch screen time policy: %s", err)
+
+        return result
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Data transformation
+    # ──────────────────────────────────────────────────────────────────────
 
     def _transform_account_data(self, account: Account) -> tuple[str, dict[str, Any]]:
         """Transform an Account object to dictionary format."""
@@ -216,6 +358,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     accounts_data[account_id]["devices"].append(device_id)
                     self._devices[device_id] = device
 
+                # Fetch web API data for this account
+                web_data = await self._fetch_web_api_data(account_id)
+                accounts_data[account_id]["web_browsing"] = web_data.get("web_browsing")
+                accounts_data[account_id]["screentime_policy"] = web_data.get("screentime_policy")
+
             # Collect pending requests
             pending_requests = []
             if hasattr(self.api, 'pending_requests') and self.api.pending_requests:
@@ -243,4 +390,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Clean up resources."""
         self._accounts.clear()
         self._devices.clear()
+        if self.web_api:
+            await self.web_api.close()
+            self.web_api = None
         self.api = None
