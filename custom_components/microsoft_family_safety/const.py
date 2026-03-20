@@ -72,5 +72,34 @@ SERVICE_UNLOCK_PLATFORM: Final = "unlock_platform"
 SERVICE_APPROVE_REQUEST: Final = "approve_request"
 SERVICE_DENY_REQUEST: Final = "deny_request"
 
+# New service names (web API)
+SERVICE_SET_SCREENTIME_LIMIT: Final = "set_screentime_limit"
+SERVICE_SET_SCREENTIME_INTERVALS: Final = "set_screentime_intervals"
+SERVICE_SET_APP_TIME_LIMIT: Final = "set_app_time_limit"
+SERVICE_REMOVE_APP_TIME_LIMIT: Final = "remove_app_time_limit"
+SERVICE_BLOCK_WEBSITE: Final = "block_website"
+SERVICE_REMOVE_WEBSITE: Final = "remove_website"
+SERVICE_TOGGLE_WEB_FILTER: Final = "toggle_web_filter"
+SERVICE_SET_AGE_RATING: Final = "set_age_rating"
+SERVICE_SET_ACQUISITION_POLICY: Final = "set_acquisition_policy"
+
+ALL_SERVICES: Final = [
+    SERVICE_BLOCK_APP,
+    SERVICE_UNBLOCK_APP,
+    SERVICE_LOCK_PLATFORM,
+    SERVICE_UNLOCK_PLATFORM,
+    SERVICE_APPROVE_REQUEST,
+    SERVICE_DENY_REQUEST,
+    SERVICE_SET_SCREENTIME_LIMIT,
+    SERVICE_SET_SCREENTIME_INTERVALS,
+    SERVICE_SET_APP_TIME_LIMIT,
+    SERVICE_REMOVE_APP_TIME_LIMIT,
+    SERVICE_BLOCK_WEBSITE,
+    SERVICE_REMOVE_WEBSITE,
+    SERVICE_TOGGLE_WEB_FILTER,
+    SERVICE_SET_AGE_RATING,
+    SERVICE_SET_ACQUISITION_POLICY,
+]
+
 # Platforms
 PLATFORMS: Final = ["sensor", "switch", "button"]
