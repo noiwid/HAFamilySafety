@@ -30,6 +30,8 @@ from .const import (
     SERVICE_TOGGLE_WEB_FILTER,
     SERVICE_UNBLOCK_APP,
     SERVICE_UNLOCK_PLATFORM,
+    SERVICE_LOCK_ACCOUNT,
+    SERVICE_UNLOCK_ACCOUNT,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
 
@@ -127,6 +129,14 @@ SERVICE_SET_AGE_RATING_SCHEMA = vol.Schema({
 SERVICE_SET_ACQUISITION_POLICY_SCHEMA = vol.Schema({
     vol.Required("account_id"): cv.string,
     vol.Required("require_approval"): cv.boolean,
+})
+
+SERVICE_LOCK_ACCOUNT_SCHEMA = vol.Schema({
+    vol.Required("account_id"): cv.string,
+})
+
+SERVICE_UNLOCK_ACCOUNT_SCHEMA = vol.Schema({
+    vol.Required("account_id"): cv.string,
 })
 
 
@@ -336,6 +346,22 @@ def _register_services(hass: HomeAssistant) -> None:
             call.data["account_id"], call.data["require_approval"]
         )
 
+    # ── Account lock/unlock (screen time based) ─────────────────────────
+
+    async def handle_lock_account(call: ServiceCall) -> None:
+        coordinator = _get_coordinator(hass)
+        if coordinator is None:
+            _LOGGER.error("No Family Safety coordinator available")
+            return
+        await coordinator.async_lock_account(call.data["account_id"])
+
+    async def handle_unlock_account(call: ServiceCall) -> None:
+        coordinator = _get_coordinator(hass)
+        if coordinator is None:
+            _LOGGER.error("No Family Safety coordinator available")
+            return
+        await coordinator.async_unlock_account(call.data["account_id"])
+
     # ── Register all services ────────────────────────────────────────────
 
     hass.services.async_register(
@@ -391,6 +417,14 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_SET_ACQUISITION_POLICY, handle_set_acquisition_policy,
         schema=SERVICE_SET_ACQUISITION_POLICY_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_LOCK_ACCOUNT, handle_lock_account,
+        schema=SERVICE_LOCK_ACCOUNT_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_UNLOCK_ACCOUNT, handle_unlock_account,
+        schema=SERVICE_UNLOCK_ACCOUNT_SCHEMA,
     )
 
 

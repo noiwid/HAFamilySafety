@@ -52,13 +52,20 @@ async def async_setup_entry(
                     )
                 )
 
-            # Create platform lock switches for each lockable platform
+            # Create per-platform lock switches (deprecated, kept for backwards compat)
             for platform in LOCKABLE_PLATFORMS:
                 entities.append(
                     FamilySafetyPlatformLockSwitch(
                         coordinator, entry, account_id, account_name, platform,
                     )
                 )
+
+            # Create account-wide lock switch (recommended replacement)
+            entities.append(
+                FamilySafetyAccountLockSwitch(
+                    coordinator, entry, account_id, account_name,
+                )
+            )
 
     async_add_entities(entities)
 
@@ -215,15 +222,85 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Lock the platform."""
-        _LOGGER.info(
-            "Locking platform %s for account %s", self._platform, self._account_name
+        """Lock the platform (deprecated — use Account Lock switch instead)."""
+        _LOGGER.warning(
+            "Platform lock switch is deprecated. Use the Account Lock switch instead. "
+            "Attempting legacy lock for %s / %s",
+            self._platform, self._account_name,
         )
         await self.coordinator.async_lock_platform(self._account_id, self._platform)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Unlock the platform."""
-        _LOGGER.info(
-            "Unlocking platform %s for account %s", self._platform, self._account_name
+        """Unlock the platform (deprecated — use Account Lock switch instead)."""
+        _LOGGER.warning(
+            "Platform lock switch is deprecated. Use the Account Lock switch instead. "
+            "Attempting legacy unlock for %s / %s",
+            self._platform, self._account_name,
         )
         await self.coordinator.async_unlock_platform(self._account_id, self._platform)
+
+
+class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to lock/unlock an entire child account via screen time zeroing.
+
+    ON  = account locked (all 7 days screen time set to 0, all intervals blocked)
+    OFF = account unlocked (screen time quotas restored to saved values)
+    """
+
+    _attr_icon = "mdi:lock"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+        account_name: str,
+    ) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator)
+        self._account_id = account_id
+        self._account_name = account_name
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_account_lock"
+        self._attr_name = f"{account_name} Lock"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the account is locked (all screen time = 0)."""
+        return self.coordinator.is_account_locked(self._account_id)
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on state."""
+        if self.is_on:
+            return "mdi:lock"
+        return "mdi:lock-open"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        has_saved = self._account_id in self.coordinator._saved_screentime
+        return {
+            ATTR_USER_ID: self._account_id,
+            "has_saved_policy": has_saved,
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Lock the account."""
+        _LOGGER.info("Locking account %s", self._account_name)
+        await self.coordinator.async_lock_account(self._account_id)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Unlock the account."""
+        _LOGGER.info("Unlocking account %s", self._account_name)
+        await self.coordinator.async_unlock_account(self._account_id)
