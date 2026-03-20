@@ -113,86 +113,202 @@ class FamilySafetyWebAPI:
         # Step 2: Visit Family Safety page to establish session cookies + CSRF
         await self._establish_web_session()
 
+    _USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+
     async def _establish_web_session(self) -> None:
-        """Visit the Family Safety web page to set session cookies and get CSRF token."""
-        headers = {
-            "Authorization": f"Bearer {self._access_token}",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        }
+        """Establish web session via Microsoft SSO flow.
+
+        The MBI_SSL token from login.live.com is a compact ticket, NOT a
+        standard OAuth2 Bearer token. It must be used via the WS-Federation
+        SSO flow through login.live.com/ppsecure/post.srf to set auth cookies
+        on account.microsoft.com.
+        """
         try:
-            async with self._session.get(
-                f"{BASE_URL}/family/settings",
-                headers=headers,
-                allow_redirects=True,
-            ) as resp:
-                _LOGGER.debug(
-                    "Web session page status: %s, cookies: %d",
-                    resp.status,
-                    len(self._session.cookie_jar),
-                )
-                if resp.status == 200:
-                    html = await resp.text()
-                    final_url = str(resp.url)
-                    _LOGGER.debug(
-                        "Web session final URL: %s, HTML length: %d",
-                        final_url,
-                        len(html),
-                    )
-                    # Log first 500 chars to understand what page we got
-                    _LOGGER.debug(
-                        "Web session HTML preview: %s", html[:500]
-                    )
-                    # Try multiple patterns for the CSRF token
-                    match = re.search(
-                        r'name="__RequestVerificationToken"[^>]*value="([^"]+)"',
-                        html,
-                    )
-                    if not match:
-                        # Try reversed attribute order
-                        match = re.search(
-                            r'value="([^"]+)"[^>]*name="__RequestVerificationToken"',
-                            html,
-                        )
-                    if not match:
-                        # Try in script/JSON data
-                        match = re.search(
-                            r'antiForgeryToken["\s:]+["\']([^"\']+)["\']',
-                            html,
-                        )
-                    if not match:
-                        # Try meta tag
-                        match = re.search(
-                            r'<meta[^>]*name="csrf-token"[^>]*content="([^"]+)"',
-                            html,
-                        )
-                    if match:
-                        self._csrf_token = match.group(1)
-                        _LOGGER.info(
-                            "Web session established: CSRF token acquired, %d cookies",
-                            len(self._session.cookie_jar),
-                        )
-                    else:
-                        _LOGGER.warning(
-                            "No CSRF token found. Final URL: %s, HTML length: %d, "
-                            "cookies: %d, HTML start: %.300s",
-                            final_url,
-                            len(html),
-                            len(self._session.cookie_jar),
-                            html[:300],
-                        )
-                else:
-                    body = await resp.text()
-                    _LOGGER.warning(
-                        "Failed to establish web session (status %s): %s",
-                        resp.status,
-                        body[:200],
-                    )
+            # Step 1: POST the compact ticket to login.live.com ppsecure
+            # This simulates the WS-Federation passive sign-in flow
+            await self._sso_via_ppsecure()
+
+            # Step 2: Visit the Family Safety page to get CSRF token
+            await self._fetch_csrf_token()
         except Exception as err:
             _LOGGER.warning("Error establishing web session: %s", err)
+
+    async def _sso_via_ppsecure(self) -> None:
+        """Use the MBI_SSL ticket to establish SSO cookies via login.live.com."""
+        ticket = self._access_token
+        # login.live.com ppsecure expects WS-Federation parameters
+        sso_url = "https://login.live.com/ppsecure/post.srf"
+        params = {
+            "wa": "wsignin1.0",
+            "wreply": f"{BASE_URL}/auth/complete-signin",
+            "wp": "MBI_SSL",
+        }
+        # The ticket is sent as form data: t=<ticket>&p=
+        post_data = f"t={ticket}&p=" if not ticket.startswith("t=") else f"{ticket}&p="
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": self._USER_AGENT,
+        }
+
+        async with self._session.post(
+            sso_url, params=params, data=post_data,
+            headers=headers, allow_redirects=False,
+        ) as resp:
+            body = await resp.text()
+            final_url = str(resp.url)
+            _LOGGER.debug(
+                "ppsecure POST: status=%s, url=%s, cookies=%d, body_len=%d",
+                resp.status, final_url, len(self._session.cookie_jar), len(body),
+            )
+
+            if resp.status in (301, 302, 303, 307):
+                # Simple redirect – follow it
+                redirect_url = resp.headers.get("Location", "")
+                _LOGGER.debug("ppsecure redirect to: %s", redirect_url)
+                if redirect_url:
+                    await self._follow_redirect(redirect_url)
+            elif resp.status == 200:
+                # May be an HTML form that auto-submits to account.microsoft.com
+                await self._handle_sso_form(body)
+            else:
+                _LOGGER.warning(
+                    "ppsecure unexpected status %s: %s",
+                    resp.status, body[:300],
+                )
+
+    async def _handle_sso_form(self, html: str) -> None:
+        """Parse and submit the WS-Federation auto-POST form.
+
+        login.live.com typically returns an HTML page with a hidden form
+        that auto-submits to the relying party (account.microsoft.com).
+        """
+        # Extract form action URL
+        action_match = re.search(r'<form[^>]*action="([^"]+)"', html, re.IGNORECASE)
+        if not action_match:
+            _LOGGER.debug(
+                "No form found in ppsecure response. HTML preview: %.500s",
+                html[:500],
+            )
+            return
+
+        form_action = action_match.group(1)
+        # Unescape HTML entities in URL
+        form_action = form_action.replace("&amp;", "&")
+
+        # Extract all hidden input fields
+        fields: dict[str, str] = {}
+        for m in re.finditer(
+            r'<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"', html, re.IGNORECASE
+        ):
+            fields[m.group(1)] = m.group(2)
+        # Also try reversed attribute order
+        for m in re.finditer(
+            r'<input[^>]*value="([^"]*)"[^>]*name="([^"]*)"', html, re.IGNORECASE
+        ):
+            fields[m.group(2)] = m.group(1)
+
+        _LOGGER.debug(
+            "SSO form: action=%s, fields=%s",
+            form_action, list(fields.keys()),
+        )
+
+        if not fields:
+            _LOGGER.warning("SSO form has no hidden fields")
+            return
+
+        # Submit the form to account.microsoft.com
+        async with self._session.post(
+            form_action,
+            data=fields,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": self._USER_AGENT,
+            },
+            allow_redirects=True,
+        ) as resp:
+            final_url = str(resp.url)
+            _LOGGER.debug(
+                "SSO form submit: status=%s, final_url=%s, cookies=%d",
+                resp.status, final_url, len(self._session.cookie_jar),
+            )
+            # If we end up on account.microsoft.com, check for CSRF token
+            if "account.microsoft.com" in final_url and resp.status == 200:
+                body = await resp.text()
+                self._try_extract_csrf(body, final_url)
+
+    async def _follow_redirect(self, url: str) -> None:
+        """Follow a redirect URL from the SSO flow."""
+        async with self._session.get(
+            url,
+            headers={"User-Agent": self._USER_AGENT},
+            allow_redirects=True,
+        ) as resp:
+            final_url = str(resp.url)
+            _LOGGER.debug(
+                "SSO redirect followed: status=%s, final_url=%s, cookies=%d",
+                resp.status, final_url, len(self._session.cookie_jar),
+            )
+            if "account.microsoft.com" in final_url and resp.status == 200:
+                body = await resp.text()
+                self._try_extract_csrf(body, final_url)
+
+    async def _fetch_csrf_token(self) -> None:
+        """Visit the Family Safety settings page to extract the CSRF token."""
+        if self._csrf_token:
+            return  # Already got it during SSO
+
+        async with self._session.get(
+            f"{BASE_URL}/family/settings",
+            headers={"User-Agent": self._USER_AGENT},
+            allow_redirects=True,
+        ) as resp:
+            final_url = str(resp.url)
+            _LOGGER.debug(
+                "Family settings page: status=%s, url=%s, cookies=%d",
+                resp.status, final_url, len(self._session.cookie_jar),
+            )
+            if resp.status == 200:
+                html = await resp.text()
+                if "account.microsoft.com" in final_url:
+                    self._try_extract_csrf(html, final_url)
+                else:
+                    _LOGGER.warning(
+                        "Redirected away from account.microsoft.com to: %s",
+                        final_url,
+                    )
+            else:
+                body = await resp.text()
+                _LOGGER.warning(
+                    "Family settings page status %s: %s",
+                    resp.status, body[:200],
+                )
+
+    def _try_extract_csrf(self, html: str, url: str) -> None:
+        """Try to extract CSRF token from HTML using multiple patterns."""
+        patterns = [
+            r'name="__RequestVerificationToken"[^>]*value="([^"]+)"',
+            r'value="([^"]+)"[^>]*name="__RequestVerificationToken"',
+            r'antiForgeryToken["\s:]+["\']([^"\']+)["\']',
+            r'<meta[^>]*name="csrf-token"[^>]*content="([^"]+)"',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html)
+            if match:
+                self._csrf_token = match.group(1)
+                _LOGGER.info(
+                    "CSRF token acquired from %s (%d cookies)",
+                    url, len(self._session.cookie_jar),
+                )
+                return
+        _LOGGER.warning(
+            "No CSRF token in page. URL: %s, HTML length: %d, "
+            "cookies: %d, preview: %.300s",
+            url, len(html), len(self._session.cookie_jar), html[:300],
+        )
 
     def _build_headers(self) -> dict[str, str]:
         """Build request headers for the web API.
@@ -207,11 +323,7 @@ class FamilySafetyWebAPI:
             "X-Requested-With": "XMLHttpRequest",
             "Dnt": "1",
             "Referer": f"{BASE_URL}/family/settings",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": self._USER_AGENT,
         }
         if self._csrf_token:
             headers["__RequestVerificationToken"] = self._csrf_token
