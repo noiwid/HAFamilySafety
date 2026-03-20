@@ -3,23 +3,37 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/noiwid/HAFamilySafety.svg?style=for-the-badge)](https://github.com/noiwid/HAFamilySafety/releases)
 [![License](https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge)](LICENSE)
-[![HA Minimum Version](https://img.shields.io/badge/HA-%3E%3D%202023.1-41BDF5?style=for-the-badge)](https://www.home-assistant.io/)
+[![HA Minimum Version](https://img.shields.io/badge/HA-%3E%3D%202024.1-41BDF5?style=for-the-badge)](https://www.home-assistant.io/)
 
-A full-featured Home Assistant custom integration for **Microsoft Family Safety**. Monitor screen time, manage app restrictions, control web filtering, and adjust daily limits — all from your Home Assistant dashboard.
+A full-featured Home Assistant custom integration for **Microsoft Family Safety**. Monitor screen time, manage app restrictions, lock accounts, control web filtering, and adjust daily limits — all from your Home Assistant dashboard.
 
 > **Domain:** `microsoft_family_safety` | **IoT Class:** Cloud Polling | **Languages:** English, French
 
 ---
 
-## What's New in v1.0
+## What's New in v1.0.0
 
-- **15 services** covering app management, platform locking, screen time configuration, web filtering, and more
+### Account Lock — the headline feature
+
+The original per-platform lock (Windows/Xbox/Mobile) relied on a Microsoft API (`override_device`) that **no longer works**. v1.0.0 introduces a new **Account Lock switch** that actually works:
+
+- **`switch.{name}_lock`** — a single toggle per child account
+- **ON** = locks the account by setting all 7-day screen time quotas to 0 and blocking all time intervals
+- **OFF** = unlocks by restoring the previously saved quotas
+- **Persists across HA restarts** — saved policies are stored via HA's native `.storage/` mechanism
+- Works with automations (watchdog pattern, schedules, etc.)
+
+### Full feature list
+
+- **17 services** covering app management, account locking, screen time configuration, web filtering, content restrictions, and purchase controls
 - **Web API client** for capabilities beyond the pyfamilysafety library (daily limits, time windows, web filters, age ratings, purchase controls)
 - **Number entities** for adjusting daily screen time limits per day of the week directly from the UI
-- **Switch entities** for blocking apps and locking platforms (Windows, Xbox, Mobile)
+- **Time entities** for setting allowed screen time intervals (start/end) per day of the week
+- **Switch entities** for blocking apps and locking accounts
 - **Button entities** for approving or denying pending screen time extension requests
-- **New sensors**: Web Filter status, Screen Time Policy, Pending Requests
+- **Sensors**: Screen Time, Account Info, Applications, Balance, Web Filter, Screen Time Policy, Pending Requests
 - **Per-device entities**: dedicated screen time and info sensors for each physical device
+- **Hub architecture** — creates HA devices for each child account and each physical device
 - **Configurable polling interval** (30s to 3600s) via the options flow
 - **Full French translations** for config flow, options, and all services
 
@@ -27,14 +41,15 @@ A full-featured Home Assistant custom integration for **Microsoft Family Safety*
 
 ## Features
 
-- **Screen time monitoring** — track daily usage per child and per device
-- **App management** — block/unblock apps, set per-app time limits and windows
-- **Platform control** — lock Windows, Xbox, or Mobile for a specified duration
-- **Web filtering** — block/unblock domains, toggle content filtering, set PEGI age ratings
-- **Screen time policies** — adjust daily allowances and allowed time intervals
-- **Purchase controls** — enable/disable ask-to-buy via service call
-- **Request handling** — approve or deny pending screen time requests from HA
-- **Hub architecture** — creates HA devices for each child account and each physical device
+| Category | What you can do |
+|----------|----------------|
+| **Account Lock** | Lock/unlock a child's entire account with a single switch |
+| **Screen time monitoring** | Track daily usage per child and per device |
+| **Screen time policies** | Adjust daily allowances and allowed time intervals per day |
+| **App management** | Block/unblock apps, set per-app time limits and windows |
+| **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
+| **Purchase controls** | Enable/disable ask-to-buy via service call |
+| **Request handling** | Approve or deny pending screen time requests from HA |
 
 ---
 
@@ -117,8 +132,9 @@ Physical devices are linked to their parent child account via `via_device`.
 
 | Entity | Entity ID | Behavior |
 |--------|-----------|----------|
+| **Account Lock** | `switch.{name}_lock` | **ON = account locked** (all screen time set to 0). Saves quotas before locking, restores on unlock. Persists across restarts. |
 | App Block | `switch.{name}_app_{appname}` | ON = app blocked. One switch per application. |
-| Platform Lock | `switch.{name}_{platform}_lock` | ON = platform locked for 24h. Platforms: Windows, Xbox, Mobile. |
+| Platform Lock *(deprecated)* | `switch.{name}_{platform}_lock` | ON = platform locked. Kept for backwards compatibility — **use Account Lock instead**. |
 
 ### Buttons — Per Child Account
 
@@ -135,11 +151,36 @@ Physical devices are linked to their parent child account via `via_device`.
 
 One entity per day of the week (Sunday through Saturday). Adjustable directly from the UI.
 
+### Time Entities — Per Child Account
+
+| Entity | Entity ID | Description |
+|--------|-----------|-------------|
+| Interval Start (x7) | `time.{name}_{day}_start` | Start of the allowed screen time window |
+| Interval End (x7) | `time.{name}_{day}_end` | End of the allowed screen time window |
+
+One start/end pair per day of the week.
+
 ---
 
 ## Services
 
-The integration exposes **15 services**, split between the pyfamilysafety library and the web API.
+The integration exposes **17 services**, split between the pyfamilysafety library and the web API.
+
+### Account Lock
+
+```yaml
+# Lock a child account (sets all screen time to 0, saves current policy)
+service: microsoft_family_safety.lock_account
+data:
+  account_id: "child-account-uuid"
+```
+
+```yaml
+# Unlock a child account (restores saved policy)
+service: microsoft_family_safety.unlock_account
+data:
+  account_id: "child-account-uuid"
+```
 
 ### App Management
 
@@ -166,11 +207,11 @@ data:
   account_id: "child-account-uuid"
   app_id: "app-uuid"
   app_name: "Minecraft"
-  platform: "Windows"
+  platform: "windows"
   hours: 1
   minutes: 30
-  start_time: "08:00"
-  end_time: "20:00"
+  start_time: "08:00:00"
+  end_time: "20:00:00"
 ```
 
 ```yaml
@@ -180,10 +221,12 @@ data:
   account_id: "child-account-uuid"
   app_id: "app-uuid"
   app_name: "Minecraft"
-  platform: "Windows"
+  platform: "windows"
 ```
 
-### Platform Control
+### Platform Control *(deprecated)*
+
+> These services rely on `override_device` which Microsoft has broken. Use **Account Lock** instead.
 
 ```yaml
 # Lock a platform for N hours
@@ -291,6 +334,52 @@ data:
 
 ## Automation Examples
 
+### Lock account on schedule
+
+Lock the PC every evening at 21:00 and unlock at 08:00:
+
+```yaml
+automation:
+  - alias: "Lock account at 21:00"
+    trigger:
+      - platform: time
+        at: "21:00:00"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.maceo_collin_lock
+
+  - alias: "Unlock account at 08:00"
+    trigger:
+      - platform: time
+        at: "08:00:00"
+    action:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.maceo_collin_lock
+```
+
+### Watchdog — prevent manual unlock
+
+Re-lock automatically if the child somehow bypasses the lock:
+
+```yaml
+automation:
+  - alias: "Anti-bypass watchdog"
+    trigger:
+      - trigger: state
+        entity_id: switch.maceo_collin_lock
+        to: "off"
+    condition:
+      - condition: time
+        after: "21:00:00"
+        before: "08:00:00"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.maceo_collin_lock
+```
+
 ### Screen Time Alert
 
 Send a notification when a child exceeds 2 hours of screen time:
@@ -300,14 +389,14 @@ automation:
   - alias: "Screen time limit alert"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.maceo_screen_time
+        entity_id: sensor.maceo_collin_screen_time
         above: 120
     action:
-      - service: notify.mobile_app_your_phone
+      - action: notify.mobile_app_your_phone
         data:
           title: "Screen Time Alert"
           message: >
-            {{ state_attr('sensor.maceo_screen_time', 'formatted_time') }}
+            {{ state_attr('sensor.maceo_collin_screen_time', 'formatted_time') }}
             of screen time used today.
 ```
 
@@ -323,14 +412,9 @@ automation:
         at: "00:05:00"
     condition:
       - condition: time
-        weekday:
-          - mon
-          - tue
-          - wed
-          - thu
-          - fri
+        weekday: [mon, tue, wed, thu, fri]
     action:
-      - service: microsoft_family_safety.set_screentime_limit
+      - action: microsoft_family_safety.set_screentime_limit
         data:
           account_id: "child-account-uuid"
           day_of_week: "{{ now().weekday() }}"
@@ -346,16 +430,19 @@ A simple entities card for daily monitoring:
 type: entities
 title: Family Safety
 entities:
-  - entity: sensor.maceo_screen_time
+  - entity: switch.maceo_collin_lock
+    name: Account Lock
+  - type: divider
+  - entity: sensor.maceo_collin_screen_time
     name: Screen Time
-  - entity: sensor.maceo_pending_requests
+  - entity: sensor.maceo_collin_pending_requests
     name: Pending Requests
-  - entity: sensor.maceo_web_filter
+  - entity: sensor.maceo_collin_web_filter
     name: Web Filter
   - type: divider
-  - entity: number.maceo_monday_limit
+  - entity: number.maceo_collin_monday_limit
     name: Monday Limit
-  - entity: number.maceo_tuesday_limit
+  - entity: number.maceo_collin_tuesday_limit
     name: Tuesday Limit
 ```
 
@@ -376,9 +463,11 @@ The web API endpoints reuse the Bearer token from pyfamilysafety. If Microsoft r
 - The default polling interval is 5 minutes. You can lower it to 30 seconds in the integration options.
 - Force refresh: **Settings > Devices & Services > Microsoft Family Safety > Reload**.
 
-### Platform Lock Not Working
+### Account Lock Issues
 
-Device blocking via `lock_platform` / the platform lock switches may not work reliably. This is a known limitation on Microsoft's side — the official Family Safety app has the same issue.
+- **Lock takes a few seconds** — the integration needs to set quotas for all 7 days (14 API calls). This is normal.
+- **Unlock restores defaults if HA storage was cleared** — if `.storage/microsoft_family_safety.saved_screentime` is deleted, unlock will restore 2h/day, 07:00-22:00 as a safe default.
+- **Lock is account-wide** — it affects all platforms (Windows, Xbox, Mobile) simultaneously. There is no per-platform lock available via the web API.
 
 ### Debug Logging
 
@@ -399,8 +488,9 @@ Check logs at **Settings > System > Logs**.
 ## Known Limitations
 
 - **Unofficial API** — Microsoft provides no public API for Family Safety. This integration relies on reverse-engineered endpoints that may change or break at any time.
-- **Platform locking** may not take effect on the actual device, even though the API accepts the command.
+- **Per-platform lock is broken** — Microsoft removed the `override_device` endpoint. The Account Lock switch is the recommended replacement but locks all platforms at once.
 - **Web API authentication** shares the pyfamilysafety token. Some endpoints may reject it depending on Microsoft's server-side validation.
+- **Lock/unlock speed** — locking requires 14 sequential API calls (7 days x 2 endpoints). This takes a few seconds.
 
 ---
 
