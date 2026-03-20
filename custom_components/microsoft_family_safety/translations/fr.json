@@ -308,6 +308,26 @@
           "description": "True pour exiger une approbation, false pour autoriser les achats."
         }
       }
+    },
+    "lock_account": {
+      "name": "Verrouiller le compte",
+      "description": "Verrouiller un compte enfant en mettant tout le temps d'écran à zéro. Sauvegarde la politique actuelle pour restauration ultérieure.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant à verrouiller."
+        }
+      }
+    },
+    "unlock_account": {
+      "name": "Déverrouiller le compte",
+      "description": "Déverrouiller un compte enfant en restaurant la politique de temps d'écran sauvegardée.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant à déverrouiller."
+        }
+      }
     }
   }
 }

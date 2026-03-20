@@ -308,6 +308,26 @@
           "description": "True to require approval, false for unrestricted."
         }
       }
+    },
+    "lock_account": {
+      "name": "Lock Account",
+      "description": "Lock a child account by setting all screen time to zero. Saves current policy for later restoration.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account to lock."
+        }
+      }
+    },
+    "unlock_account": {
+      "name": "Unlock Account",
+      "description": "Unlock a child account by restoring previously saved screen time policy.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account to unlock."
+        }
+      }
     }
   }
 }

@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -205,11 +206,20 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
             "Setting %s interval for %s to %s-%s",
             self._day_key, self._account_name, start, end,
         )
-        await self.coordinator.async_set_screentime_intervals(
-            self._account_id,
-            self._day_index,
-            start.hour,
-            start.minute,
-            end.hour,
-            end.minute,
-        )
+        try:
+            await self.coordinator.async_set_screentime_intervals(
+                self._account_id,
+                self._day_index,
+                start.hour,
+                start.minute,
+                end.hour,
+                end.minute,
+            )
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to set %s interval for %s: %s",
+                self._day_key, self._account_name, err,
+            )
+            raise HomeAssistantError(
+                f"Failed to set screen time interval: {err}"
+            ) from err
