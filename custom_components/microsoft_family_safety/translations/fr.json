@@ -10,7 +10,8 @@
         "description": "Collez l'URL complète depuis la barre d'adresse de votre navigateur après vous être connecté.\n\nL'URL devrait ressembler à :\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nVous pouvez coller l'URL entière - le code sera extrait automatiquement.\n\n**URL d'authentification (si nécessaire à nouveau) :**\n{auth_url}",
         "data": {
           "redirect_url": "URL de redirection",
-          "update_interval": "Intervalle de mise à jour (secondes)"
+          "update_interval": "Intervalle de mise à jour (secondes)",
+          "platforms": "Plateformes surveillées"
         }
       },
       "reauth_confirm": {
@@ -37,9 +38,10 @@
       "init": {
         "title": "Options Microsoft Family Safety",
         "data": {
-          "update_interval": "Intervalle de mise à jour (secondes)"
+          "update_interval": "Intervalle de mise à jour (secondes)",
+          "platforms": "Plateformes surveillées"
         },
-        "description": "Configurer l'intervalle d'interrogation des données Microsoft Family Safety. Minimum : 30 secondes, par défaut : 300 secondes (5 minutes)."
+        "description": "Configurer l'intervalle d'interrogation et les plateformes surveillées."
       }
     }
   },

@@ -15,6 +15,11 @@ CONF_UPDATE_INTERVAL: Final = "update_interval"
 DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes in seconds
 DEFAULT_TIMEOUT: Final = 30
 
+# Platform selection
+CONF_PLATFORMS: Final = "platforms"
+AVAILABLE_PLATFORMS: Final = ["Windows", "Xbox", "Mobile"]
+DEFAULT_PLATFORMS: Final = ["Windows"]
+
 # Authentication URLs
 MS_LOGIN_URL: Final = "https://login.live.com/oauth20_authorize.srf"
 MS_AUTH_PARAMS: Final = {
