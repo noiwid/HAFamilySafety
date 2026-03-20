@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -146,8 +146,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     try:
         await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryAuthFailed:
+        # Real auth failure — let HA trigger reauth flow
+        raise
     except Exception as err:
-        _LOGGER.error("Failed to initialize Microsoft Family Safety: %s", err)
+        _LOGGER.warning("Microsoft Family Safety not ready, will retry: %s", err)
         raise ConfigEntryNotReady from err
 
     hass.data.setdefault(DOMAIN, {})

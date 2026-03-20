@@ -69,9 +69,21 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.web_api = FamilySafetyWebAPI(self.api.api.authenticator)
 
             _LOGGER.debug("Family Safety API client initialized successfully")
+        except HttpException as err:
+            err_str = str(err).lower()
+            if "401" in err_str or "403" in err_str or "authentication" in err_str:
+                _LOGGER.error("Authentication failed during API setup: %s", err)
+                raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
+            # Transient server error (e.g. "upstream aggregator error") — retry later
+            _LOGGER.warning("Transient API error during setup, will retry: %s", err)
+            raise UpdateFailed(f"Transient API error: {err}") from err
         except Exception as err:
-            _LOGGER.error("Failed to initialize Family Safety API: %s", err)
-            raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
+            err_str = str(err).lower()
+            if "auth" in err_str or "token" in err_str or "401" in err_str or "403" in err_str:
+                _LOGGER.error("Authentication failed during API setup: %s", err)
+                raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
+            _LOGGER.warning("Unexpected error during API setup, will retry: %s", err)
+            raise UpdateFailed(f"API setup error: {err}") from err
 
     def get_account(self, account_id: str) -> Account | None:
         """Get the raw pyfamilysafety Account object."""
