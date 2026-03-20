@@ -8,6 +8,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -144,6 +145,15 @@ class FamilySafetyDailyLimitNumber(CoordinatorEntity, NumberEntity):
             "Setting %s screen time limit for %s to %dh%02dm",
             self._day_key, self._account_name, hours, minutes,
         )
-        await self.coordinator.async_set_screentime_limit(
-            self._account_id, self._day_index, hours, minutes
-        )
+        try:
+            await self.coordinator.async_set_screentime_limit(
+                self._account_id, self._day_index, hours, minutes
+            )
+        except Exception as err:
+            _LOGGER.error(
+                "Failed to set %s limit for %s: %s",
+                self._day_key, self._account_name, err,
+            )
+            raise HomeAssistantError(
+                f"Failed to set screen time limit: {err}"
+            ) from err

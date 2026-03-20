@@ -338,18 +338,79 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     account_id,
                 )
 
-        # Set all 7 days to 0 minutes
-        for day_index in range(7):
-            await self.web_api.set_screentime_daily_allowance(
-                account_id, day_index, hours=0, minutes=0
+        # Set all 7 days to 0 minutes with error recovery
+        days_locked = 0
+        try:
+            for day_index in range(7):
+                await self.web_api.set_screentime_daily_allowance(
+                    account_id, day_index, hours=0, minutes=0
+                )
+                await self.web_api.set_screentime_intervals(
+                    account_id, day_index, [False] * 48
+                )
+                days_locked += 1
+        except Exception as err:
+            _LOGGER.error(
+                "Lock failed on day %d/7 for account %s: %s. "
+                "Attempting to complete remaining days...",
+                days_locked, account_id, err,
             )
-            # Also set all intervals to False (blocked all day)
-            await self.web_api.set_screentime_intervals(
-                account_id, day_index, [False] * 48
-            )
+            # Best-effort: try to lock the remaining days individually
+            for remaining in range(days_locked, 7):
+                try:
+                    await self.web_api.set_screentime_daily_allowance(
+                        account_id, remaining, hours=0, minutes=0
+                    )
+                    await self.web_api.set_screentime_intervals(
+                        account_id, remaining, [False] * 48
+                    )
+                    days_locked += 1
+                except Exception:
+                    _LOGGER.warning(
+                        "Could not lock day %d for account %s", remaining, account_id
+                    )
+            if days_locked < 7:
+                _LOGGER.error(
+                    "Partial lock: only %d/7 days locked for account %s",
+                    days_locked, account_id,
+                )
 
-        _LOGGER.info("Account %s locked (all screen time set to 0)", account_id)
+        _LOGGER.info(
+            "Account %s locked (%d/7 days set to 0)", account_id, days_locked
+        )
         await self.async_request_refresh()
+
+    @staticmethod
+    def _default_intervals() -> list[bool]:
+        """Return default allowed intervals: 07:00-22:00 (slots 14-44)."""
+        intervals = [False] * 48
+        for i in range(14, 44):
+            intervals[i] = True
+        return intervals
+
+    async def _restore_day(
+        self, account_id: str, day_index: int, hours: int, minutes: int,
+        intervals: list[bool] | None,
+    ) -> bool:
+        """Restore a single day's screentime. Returns True on success."""
+        try:
+            await self.web_api.set_screentime_daily_allowance(
+                account_id, day_index, hours, minutes
+            )
+            effective_intervals = (
+                intervals if intervals and len(intervals) == 48
+                else self._default_intervals()
+            )
+            await self.web_api.set_screentime_intervals(
+                account_id, day_index, effective_intervals
+            )
+            return True
+        except Exception as err:
+            _LOGGER.warning(
+                "Failed to restore day %d for account %s: %s",
+                day_index, account_id, err,
+            )
+            return False
 
     async def async_unlock_account(self, account_id: str) -> None:
         """Unlock an account by restoring saved screen time quotas."""
@@ -357,14 +418,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise RuntimeError("Web API not initialized")
 
         saved = self._saved_screentime.get(account_id)
+        days_restored = 0
 
         if saved:
-            # Restore saved policy day by day
             daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
             for day_index, day_key in enumerate(self.DAYS_OF_WEEK):
                 day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
                 allowance = day_data.get("allowance") or day_data.get("Allowance") or "02:00:00"
-                # Parse allowance "HH:MM:SS" → hours, minutes
                 try:
                     parts = allowance.split(":")
                     hours = int(parts[0])
@@ -372,44 +432,29 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except (ValueError, IndexError):
                     hours, minutes = 2, 0
 
-                await self.web_api.set_screentime_daily_allowance(
-                    account_id, day_index, hours, minutes
-                )
-
-                # Restore intervals if available
                 intervals = day_data.get("allowedIntervals") or day_data.get("AllowedIntervals")
-                if intervals and isinstance(intervals, list) and len(intervals) == 48:
-                    await self.web_api.set_screentime_intervals(
-                        account_id, day_index, intervals
-                    )
-                else:
-                    # Default: allow 07:00 - 22:00 (slots 14 to 44)
-                    default_intervals = [False] * 48
-                    for i in range(14, 44):
-                        default_intervals[i] = True
-                    await self.web_api.set_screentime_intervals(
-                        account_id, day_index, default_intervals
-                    )
+                if await self._restore_day(account_id, day_index, hours, minutes, intervals):
+                    days_restored += 1
 
             self._saved_screentime.pop(account_id, None)
             await self._async_save_screentime()
-            _LOGGER.info("Account %s unlocked (restored saved policy)", account_id)
+            _LOGGER.info(
+                "Account %s unlocked (%d/7 days restored from saved policy)",
+                account_id, days_restored,
+            )
         else:
-            # No saved state — set reasonable defaults (2h/day, 07:00-22:00)
             _LOGGER.warning(
                 "No saved screentime policy for account %s, restoring defaults (2h/day)",
                 account_id,
             )
             for day_index in range(7):
-                await self.web_api.set_screentime_daily_allowance(
-                    account_id, day_index, hours=2, minutes=0
-                )
-                default_intervals = [False] * 48
-                for i in range(14, 44):
-                    default_intervals[i] = True
-                await self.web_api.set_screentime_intervals(
-                    account_id, day_index, default_intervals
-                )
+                if await self._restore_day(account_id, day_index, 2, 0, None):
+                    days_restored += 1
+
+            _LOGGER.info(
+                "Account %s unlocked (%d/7 days restored with defaults)",
+                account_id, days_restored,
+            )
 
         await self.async_request_refresh()
 

@@ -45,7 +45,8 @@ class FamilySafetyWebAPI:
     async def _ensure_session(self) -> None:
         """Ensure an active aiohttp session exists."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            timeout = aiohttp.ClientTimeout(total=30, connect=10)
+            self._session = aiohttp.ClientSession(timeout=timeout)
 
     async def _ensure_auth(self) -> None:
         """Ensure the authenticator token is fresh."""
@@ -118,8 +119,9 @@ class FamilySafetyWebAPI:
             async with self._session.request(
                 method, url, headers=headers, json=json_data, params=params
             ) as resp:
-                if resp.status == 403 and not self._csrf_token:
-                    _LOGGER.info("Got 403, attempting to fetch CSRF token")
+                if resp.status == 403:
+                    _LOGGER.info("Got 403, refreshing CSRF token and retrying")
+                    self._csrf_token = None  # Force re-fetch
                     await self._fetch_csrf_token()
                     headers = self._build_headers()
                     async with self._session.request(
