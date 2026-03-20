@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -88,6 +89,16 @@ class FamilySafetyAppBlockSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_app_{safe_app_id}"
         self._attr_name = f"{account_name} App {app_name}"
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
     def _get_app_data(self) -> dict[str, Any] | None:
         """Get app data from coordinator."""
         if not self.coordinator.data:
@@ -159,6 +170,16 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_platform_{platform.lower()}"
         self._attr_name = f"{account_name} {platform} Lock"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
 
     @property
     def is_on(self) -> bool | None:

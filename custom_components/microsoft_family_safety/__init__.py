@@ -162,7 +162,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_BLOCK_APP):
         _register_services(hass)
 
+    # Reload on options change (e.g. update interval)
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update — reload the integration."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _register_services(hass: HomeAssistant) -> None:

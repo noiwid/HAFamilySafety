@@ -31,6 +31,17 @@
       "reauth_successful": "Reauthentication successful!"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Microsoft Family Safety Options",
+        "data": {
+          "update_interval": "Update interval (seconds)"
+        },
+        "description": "Configure the polling interval for Microsoft Family Safety data. Minimum: 30 seconds, default: 300 seconds (5 minutes)."
+      }
+    }
+  },
   "services": {
     "block_app": {
       "name": "Block Application",

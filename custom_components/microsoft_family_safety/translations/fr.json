@@ -31,6 +31,17 @@
       "reauth_successful": "Réauthentification réussie !"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options Microsoft Family Safety",
+        "data": {
+          "update_interval": "Intervalle de mise à jour (secondes)"
+        },
+        "description": "Configurer l'intervalle d'interrogation des données Microsoft Family Safety. Minimum : 30 secondes, par défaut : 300 secondes (5 minutes)."
+      }
+    }
+  },
   "services": {
     "block_app": {
       "name": "Bloquer une application",

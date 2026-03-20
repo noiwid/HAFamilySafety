@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -70,6 +71,16 @@ class FamilySafetyApproveRequestButton(CoordinatorEntity, ButtonEntity):
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_approve_request"
         self._attr_name = f"{account_name} Approve Request"
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
     def _get_oldest_request(self) -> dict | None:
         """Get the oldest pending request for this account."""
         if not self.coordinator.data:
@@ -130,6 +141,16 @@ class FamilySafetyDenyRequestButton(CoordinatorEntity, ButtonEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_deny_request"
         self._attr_name = f"{account_name} Deny Request"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
 
     def _get_oldest_request(self) -> dict | None:
         """Get the oldest pending request for this account."""
