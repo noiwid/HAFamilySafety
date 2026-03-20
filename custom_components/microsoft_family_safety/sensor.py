@@ -603,11 +603,20 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
         policy = account_data.get("screentime_policy")
         attrs = {ATTR_USER_ID: self._account_id}
         if policy and isinstance(policy, dict):
-            # Extract daily restrictions
+            # Include raw top-level keys for debugging
+            attrs["raw_keys"] = list(policy.keys())
+            # Try multiple possible structures
             daily = policy.get("dailyRestrictions", policy.get("DailyRestrictions"))
             if daily and isinstance(daily, dict):
                 for day_name, day_data in daily.items():
                     if isinstance(day_data, dict):
                         allowance = day_data.get("allowance", day_data.get("Allowance", ""))
                         attrs[f"{day_name.lower()}_allowance"] = allowance
+            # Expose raw policy for debugging (truncated if too large)
+            import json
+            try:
+                raw = json.dumps(policy, default=str)
+                attrs["raw_policy"] = raw[:2000] if len(raw) > 2000 else raw
+            except Exception:
+                attrs["raw_policy"] = str(policy)[:2000]
         return attrs
