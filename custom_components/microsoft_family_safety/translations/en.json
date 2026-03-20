@@ -9,7 +9,8 @@
         "title": "Enter Redirect URL",
         "description": "Paste the complete URL from your browser's address bar after logging in.\n\nThe URL should look like:\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nYou can paste the entire URL - the code will be extracted automatically.\n\n**Authentication URL (if needed again):**\n{auth_url}",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "Redirect URL",
+          "update_interval": "Update interval (seconds)"
         }
       },
       "reauth_confirm": {

@@ -108,6 +108,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             redirect_url = user_input.get(CONF_REDIRECT_URL, "").strip()
+            update_interval = user_input.get(
+                CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+            )
 
             if not redirect_url:
                 errors["base"] = "no_redirect_url"
@@ -123,6 +126,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         title=info["title"],
                         data={
                             CONF_REFRESH_TOKEN: refresh_token,
+                        },
+                        options={
+                            CONF_UPDATE_INTERVAL: update_interval,
                         },
                     )
 
@@ -141,6 +147,10 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_REDIRECT_URL): str,
+                    vol.Optional(
+                        CONF_UPDATE_INTERVAL,
+                        default=DEFAULT_UPDATE_INTERVAL,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
                 }
             ),
             description_placeholders=description_placeholders,
