@@ -161,14 +161,23 @@ class FamilySafetyWebAPI:
             _LOGGER.warning("Error establishing web session: %s", err)
 
     def _build_headers(self) -> dict[str, str]:
-        """Build request headers for the web API."""
+        """Build request headers for the web API.
+
+        API calls use cookie-based auth (no Bearer token).
+        The CSRF token is required on every request (including GET).
+        """
         headers = {
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._access_token}",
-            "X-AMC-JsonMode": "CamelCase",
+            "X-Amc-Jsonmode": "CamelCase",
             "X-Requested-With": "XMLHttpRequest",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Dnt": "1",
+            "Referer": f"{BASE_URL}/family/settings",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
         }
         if self._csrf_token:
             headers["__RequestVerificationToken"] = self._csrf_token
@@ -196,13 +205,11 @@ class FamilySafetyWebAPI:
             ) as resp:
                 if resp.status in (401, 403):
                     _LOGGER.info(
-                        "Got %s, re-establishing full web session and retrying",
+                        "Got %s, closing session and re-establishing from scratch",
                         resp.status,
                     )
-                    # Invalidate everything and re-establish from scratch
-                    self._access_token = None
-                    self._token_expires = None
-                    self._csrf_token = None
+                    # Close the old session (stale cookies) and start fresh
+                    await self.close()
                     await self._ensure_auth()
                     headers = self._build_headers()
                     async with self._session.request(
