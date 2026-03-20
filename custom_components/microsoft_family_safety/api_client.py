@@ -3,12 +3,16 @@
 This module provides direct HTTP access to the Microsoft Family Safety
 web API at account.microsoft.com/family/api/, bypassing the pyfamilysafety
 library for features not yet supported by the library.
+
+The web API requires a token scoped for account.microsoft.com, which is
+different from the familymobile.microsoft.com token used by pyfamilysafety.
+This client acquires its own token using the same refresh token.
 """
 from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -16,6 +20,11 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://account.microsoft.com"
+
+# OAuth constants (same client_id / endpoint as pyfamilysafety, different scope)
+_TOKEN_ENDPOINT = "https://login.live.com/oauth20_token.srf"
+_CLIENT_ID = "000000000004893A"
+_WEB_SCOPE = "service::account.microsoft.com::MBI_SSL"
 
 # Days of week mapping
 DAYS_OF_WEEK = {
@@ -37,10 +46,15 @@ class FamilySafetyWebAPI:
 
         Args:
             authenticator: The pyfamilysafety Authenticator instance.
+                           We use its refresh_token to acquire our own
+                           access token for account.microsoft.com.
         """
         self._authenticator = authenticator
         self._session: aiohttp.ClientSession | None = None
         self._csrf_token: str | None = None
+        # Separate token for account.microsoft.com scope
+        self._access_token: str | None = None
+        self._token_expires: datetime | None = None
 
     async def _ensure_session(self) -> None:
         """Ensure an active aiohttp session exists."""
@@ -49,9 +63,28 @@ class FamilySafetyWebAPI:
             self._session = aiohttp.ClientSession(timeout=timeout)
 
     async def _ensure_auth(self) -> None:
-        """Ensure the authenticator token is fresh."""
-        if self._authenticator.expires <= datetime.now():
-            await self._authenticator.perform_refresh()
+        """Acquire or refresh an access token scoped for account.microsoft.com."""
+        if self._access_token and self._token_expires and self._token_expires > datetime.now():
+            return
+        await self._ensure_session()
+        # Use the refresh token from pyfamilysafety to get a new token with web scope
+        refresh_token = self._authenticator.refresh_token
+        if not refresh_token:
+            raise FamilySafetyWebAPIError("No refresh token available")
+        form = aiohttp.FormData()
+        form.add_field("client_id", _CLIENT_ID)
+        form.add_field("refresh_token", refresh_token)
+        form.add_field("grant_type", "refresh_token")
+        form.add_field("scope", _WEB_SCOPE)
+        async with self._session.post(_TOKEN_ENDPOINT, data=form) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                _LOGGER.error("Failed to acquire web API token (status %s): %s", resp.status, text[:200])
+                raise FamilySafetyWebAPIError(f"Token request failed with status {resp.status}")
+            data = await resp.json()
+            self._access_token = data["access_token"]
+            self._token_expires = datetime.now() + timedelta(seconds=data.get("expires_in", 3600))
+            _LOGGER.debug("Acquired web API token (expires in %ss)", data.get("expires_in"))
 
     async def _fetch_csrf_token(self) -> str | None:
         """Fetch the CSRF token from the Family Safety web page."""
@@ -59,7 +92,7 @@ class FamilySafetyWebAPI:
         await self._ensure_auth()
 
         headers = {
-            "Authorization": f"Bearer {self._authenticator.access_token}",
+            "Authorization": f"Bearer {self._access_token}",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
 
@@ -90,7 +123,7 @@ class FamilySafetyWebAPI:
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._authenticator.access_token}",
+            "Authorization": f"Bearer {self._access_token}",
             "X-AMC-JsonMode": "CamelCase",
             "X-Requested-With": "XMLHttpRequest",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -119,6 +152,16 @@ class FamilySafetyWebAPI:
             async with self._session.request(
                 method, url, headers=headers, json=json_data, params=params
             ) as resp:
+                if resp.status == 401:
+                    _LOGGER.info("Got 401, refreshing web API token and retrying")
+                    self._access_token = None
+                    self._token_expires = None
+                    await self._ensure_auth()
+                    headers = self._build_headers()
+                    async with self._session.request(
+                        method, url, headers=headers, json=json_data, params=params
+                    ) as retry_resp:
+                        return await self._handle_response(retry_resp)
                 if resp.status == 403:
                     _LOGGER.info("Got 403, refreshing CSRF token and retrying")
                     self._csrf_token = None  # Force re-fetch
@@ -455,6 +498,8 @@ class FamilySafetyWebAPI:
             await self._session.close()
             self._session = None
         self._csrf_token = None
+        self._access_token = None
+        self._token_expires = None
 
 
 class FamilySafetyWebAPIError(Exception):
