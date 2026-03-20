@@ -55,6 +55,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._accounts: dict[str, Account] = {}
         self._devices: dict[str, Device] = {}
         self._is_retrying_auth = False
+        # Saved screentime state for lock/unlock per account
+        self._saved_screentime: dict[str, dict[str, Any]] = {}
 
     async def _async_setup_api(self) -> None:
         """Set up the Family Safety API client."""
@@ -261,6 +263,132 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.web_api is None:
             raise RuntimeError("Web API not initialized")
         await self.web_api.set_acquisition_policy(child_id, require_approval)
+        await self.async_request_refresh()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Account lock/unlock (screen time based)
+    # ──────────────────────────────────────────────────────────────────────
+
+    DAYS_OF_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+
+    def is_account_locked(self, account_id: str) -> bool | None:
+        """Check if an account is currently locked (all 7 days at 0 minutes)."""
+        if not self.data:
+            return None
+        account = self.data.get("accounts", {}).get(account_id)
+        if not account:
+            return None
+        policy = account.get("screentime_policy")
+        if not policy or not isinstance(policy, dict):
+            return None
+        daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
+        if not daily or not isinstance(daily, dict):
+            return None
+        # Check if all 7 days have 0 allowance
+        for day_key in self.DAYS_OF_WEEK:
+            day_data = daily.get(day_key) or daily.get(day_key.capitalize())
+            if not day_data:
+                return None  # Can't determine
+            allowance = day_data.get("allowance") or day_data.get("Allowance") or "00:00:00"
+            if allowance != "00:00:00":
+                return False
+        return True
+
+    async def async_lock_account(self, account_id: str) -> None:
+        """Lock an account by setting all 7-day screen time quotas to 0."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+
+        # Save current screentime policy before zeroing
+        current_policy = await self.web_api.get_screentime_policy(account_id)
+        if current_policy:
+            daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
+            # Only save if not already locked (avoid overwriting saved state with zeros)
+            has_nonzero = False
+            for day_key in self.DAYS_OF_WEEK:
+                day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
+                allowance = day_data.get("allowance") or day_data.get("Allowance") or "00:00:00"
+                if allowance != "00:00:00":
+                    has_nonzero = True
+                    break
+            if has_nonzero:
+                self._saved_screentime[account_id] = current_policy
+                _LOGGER.info(
+                    "Saved screentime policy for account %s before locking", account_id
+                )
+
+        # Set all 7 days to 0 minutes
+        for day_index in range(7):
+            await self.web_api.set_screentime_daily_allowance(
+                account_id, day_index, hours=0, minutes=0
+            )
+            # Also set all intervals to False (blocked all day)
+            await self.web_api.set_screentime_intervals(
+                account_id, day_index, [False] * 48
+            )
+
+        _LOGGER.info("Account %s locked (all screen time set to 0)", account_id)
+        await self.async_request_refresh()
+
+    async def async_unlock_account(self, account_id: str) -> None:
+        """Unlock an account by restoring saved screen time quotas."""
+        if self.web_api is None:
+            raise RuntimeError("Web API not initialized")
+
+        saved = self._saved_screentime.get(account_id)
+
+        if saved:
+            # Restore saved policy day by day
+            daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
+            for day_index, day_key in enumerate(self.DAYS_OF_WEEK):
+                day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
+                allowance = day_data.get("allowance") or day_data.get("Allowance") or "02:00:00"
+                # Parse allowance "HH:MM:SS" → hours, minutes
+                try:
+                    parts = allowance.split(":")
+                    hours = int(parts[0])
+                    minutes = int(parts[1]) if len(parts) > 1 else 0
+                except (ValueError, IndexError):
+                    hours, minutes = 2, 0
+
+                await self.web_api.set_screentime_daily_allowance(
+                    account_id, day_index, hours, minutes
+                )
+
+                # Restore intervals if available
+                intervals = day_data.get("allowedIntervals") or day_data.get("AllowedIntervals")
+                if intervals and isinstance(intervals, list) and len(intervals) == 48:
+                    await self.web_api.set_screentime_intervals(
+                        account_id, day_index, intervals
+                    )
+                else:
+                    # Default: allow 07:00 - 22:00 (slots 14 to 44)
+                    default_intervals = [False] * 48
+                    for i in range(14, 44):
+                        default_intervals[i] = True
+                    await self.web_api.set_screentime_intervals(
+                        account_id, day_index, default_intervals
+                    )
+
+            self._saved_screentime.pop(account_id, None)
+            _LOGGER.info("Account %s unlocked (restored saved policy)", account_id)
+        else:
+            # No saved state — set reasonable defaults (2h/day, 07:00-22:00)
+            _LOGGER.warning(
+                "No saved screentime policy for account %s, restoring defaults (2h/day)",
+                account_id,
+            )
+            for day_index in range(7):
+                await self.web_api.set_screentime_daily_allowance(
+                    account_id, day_index, hours=2, minutes=0
+                )
+                default_intervals = [False] * 48
+                for i in range(14, 44):
+                    default_intervals[i] = True
+                await self.web_api.set_screentime_intervals(
+                    account_id, day_index, default_intervals
+                )
+
         await self.async_request_refresh()
 
     # ──────────────────────────────────────────────────────────────────────

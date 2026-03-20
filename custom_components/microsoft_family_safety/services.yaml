@@ -397,3 +397,25 @@ set_acquisition_policy:
       required: true
       selector:
         boolean:
+
+lock_account:
+  name: Lock Account
+  description: Lock a child account by setting all screen time to zero (all 7 days, all intervals). Saves current policy for later restoration.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account to lock.
+      required: true
+      selector:
+        text:
+
+unlock_account:
+  name: Unlock Account
+  description: Unlock a child account by restoring previously saved screen time policy. If no saved policy exists, restores defaults (2h/day, 07:00-22:00).
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account to unlock.
+      required: true
+      selector:
+        text:
