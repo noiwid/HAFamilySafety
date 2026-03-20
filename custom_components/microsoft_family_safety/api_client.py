@@ -136,10 +136,39 @@ class FamilySafetyWebAPI:
                 )
                 if resp.status == 200:
                     html = await resp.text()
+                    final_url = str(resp.url)
+                    _LOGGER.debug(
+                        "Web session final URL: %s, HTML length: %d",
+                        final_url,
+                        len(html),
+                    )
+                    # Log first 500 chars to understand what page we got
+                    _LOGGER.debug(
+                        "Web session HTML preview: %s", html[:500]
+                    )
+                    # Try multiple patterns for the CSRF token
                     match = re.search(
                         r'name="__RequestVerificationToken"[^>]*value="([^"]+)"',
                         html,
                     )
+                    if not match:
+                        # Try reversed attribute order
+                        match = re.search(
+                            r'value="([^"]+)"[^>]*name="__RequestVerificationToken"',
+                            html,
+                        )
+                    if not match:
+                        # Try in script/JSON data
+                        match = re.search(
+                            r'antiForgeryToken["\s:]+["\']([^"\']+)["\']',
+                            html,
+                        )
+                    if not match:
+                        # Try meta tag
+                        match = re.search(
+                            r'<meta[^>]*name="csrf-token"[^>]*content="([^"]+)"',
+                            html,
+                        )
                     if match:
                         self._csrf_token = match.group(1)
                         _LOGGER.info(
@@ -148,7 +177,12 @@ class FamilySafetyWebAPI:
                         )
                     else:
                         _LOGGER.warning(
-                            "Web session page loaded but no CSRF token found in HTML"
+                            "No CSRF token found. Final URL: %s, HTML length: %d, "
+                            "cookies: %d, HTML start: %.300s",
+                            final_url,
+                            len(html),
+                            len(self._session.cookie_jar),
+                            html[:300],
                         )
                 else:
                     body = await resp.text()
