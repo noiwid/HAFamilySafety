@@ -102,4 +102,4 @@ ALL_SERVICES: Final = [
 ]
 
 # Platforms
-PLATFORMS: Final = ["sensor", "switch", "button"]
+PLATFORMS: Final = ["sensor", "switch", "button", "number"]
