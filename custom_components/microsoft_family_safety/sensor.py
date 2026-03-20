@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -88,7 +89,6 @@ def _create_device_sensors(
     return [
         FamilySafetyDeviceScreenTimeSensor(coordinator, entry, device_id),
         FamilySafetyDeviceInfoSensor(coordinator, entry, device_id),
-        FamilySafetyDeviceBlockedSensor(coordinator, entry, device_id),
     ]
 
 
@@ -137,6 +137,21 @@ class FamilySafetyAccountSensor(CoordinatorEntity, SensorEntity):
         account_data = self._get_account_data()
         return account_data.get(ATTR_FIRST_NAME, "Unknown") if account_data else "Unknown"
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        account_data = self._get_account_data()
+        first_name = account_data.get(ATTR_FIRST_NAME, "Unknown") if account_data else "Unknown"
+        surname = account_data.get(ATTR_SURNAME, "") if account_data else ""
+        full_name = f"{first_name} {surname}".strip()
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{full_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+            entry_type=None,
+        )
+
 
 class FamilySafetyDeviceSensor(CoordinatorEntity, SensorEntity):
     """Base class for device-related sensors."""
@@ -162,6 +177,25 @@ class FamilySafetyDeviceSensor(CoordinatorEntity, SensorEntity):
         """Get the device name for entity naming."""
         device_data = self._get_device_data()
         return device_data.get(ATTR_DEVICE_NAME, "Unknown Device") if device_data else "Unknown Device"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a physical device."""
+        device_data = self._get_device_data()
+        if not device_data:
+            return DeviceInfo(
+                identifiers={(DOMAIN, self._device_id)},
+                name="Unknown Device",
+                manufacturer="Microsoft",
+            )
+        account_id = device_data.get("account_id")
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            name=device_data.get(ATTR_DEVICE_NAME, "Unknown Device"),
+            manufacturer=device_data.get("device_make", "Unknown"),
+            model=device_data.get("device_model"),
+            via_device=(DOMAIN, account_id) if account_id else None,
+        )
 
 
 class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
@@ -411,52 +445,6 @@ class FamilySafetyDeviceInfoSensor(FamilySafetyDeviceSensor):
             ATTR_LAST_SEEN: device_data.get(ATTR_LAST_SEEN),
             "device_make": device_data.get("device_make"),
             "device_class": device_data.get("device_class"),
-        }
-
-
-class FamilySafetyDeviceBlockedSensor(FamilySafetyDeviceSensor):
-    """Sensor for device blocked status."""
-
-    _attr_icon = "mdi:lock"
-
-    def __init__(
-        self,
-        coordinator: FamilySafetyDataUpdateCoordinator,
-        entry: ConfigEntry,
-        device_id: str,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator, entry, device_id)
-        self._attr_unique_id = f"{entry.entry_id}_{device_id}_blocked"
-        self._attr_name = f"{self._get_device_name()} Blocked"
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the blocked status."""
-        device_data = self._get_device_data()
-        if not device_data:
-            return None
-        return "blocked" if device_data.get(ATTR_BLOCKED) else "active"
-
-    @property
-    def icon(self) -> str:
-        """Return the icon based on blocked status."""
-        device_data = self._get_device_data()
-        if device_data and device_data.get(ATTR_BLOCKED):
-            return "mdi:lock"
-        return "mdi:lock-open"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        device_data = self._get_device_data()
-        if not device_data:
-            return {}
-
-        return {
-            ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
-            ATTR_DEVICE_NAME: device_data.get(ATTR_DEVICE_NAME),
-            ATTR_BLOCKED: device_data.get(ATTR_BLOCKED),
         }
 
 

@@ -17,6 +17,8 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import (
     CONF_REDIRECT_URL,
     CONF_REFRESH_TOKEN,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ERROR_AUTH_FAILED,
     INTEGRATION_NAME,
@@ -69,6 +71,13 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Microsoft Family Safety."""
 
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> FamilySafetyOptionsFlow:
+        """Get the options flow for this handler."""
+        return FamilySafetyOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -189,6 +198,37 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             description_placeholders=description_placeholders,
             errors=errors,
+        )
+
+
+class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
+    """Handle options flow for Microsoft Family Safety."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current_interval = self._config_entry.options.get(
+            CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_UPDATE_INTERVAL,
+                        default=current_interval,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+                }
+            ),
         )
 
 
