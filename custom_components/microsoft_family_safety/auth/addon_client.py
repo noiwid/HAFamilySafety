@@ -165,3 +165,41 @@ class AddonCookieClient:
 
         cookies = await self.load_cookies()
         return cookies is not None and len(cookies) > 0
+
+    async def fetch_screentime(self, child_id: str) -> dict | None:
+        """Fetch screen time policy via the addon's browser-based endpoint.
+
+        The addon launches a headless browser with saved cookies and calls
+        Microsoft's API via fetch() from within the authenticated page context.
+        This avoids the 401 errors that occur when replaying cookies with aiohttp.
+        """
+        url = self._detected_url or self.auth_url or DEFAULT_AUTH_URL
+        api_url = f"{url.rstrip('/')}/api/screentime"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    api_url,
+                    params={"childId": child_id},
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result = data.get("data")
+                        _LOGGER.info(
+                            "Screen time fetched via addon browser for child %s",
+                            child_id,
+                        )
+                        return result
+                    text = await response.text()
+                    _LOGGER.warning(
+                        "Addon screentime API returned %s: %s",
+                        response.status,
+                        text[:200],
+                    )
+                    return None
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("Failed to fetch screentime from addon: %s", err)
+            return None
+        except Exception as err:
+            _LOGGER.error("Unexpected error fetching screentime: %s", err)
+            return None
