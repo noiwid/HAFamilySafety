@@ -223,10 +223,14 @@ class FamilySafetyWebAPI:
         cookie_jar = self._build_cookie_jar()
         headers = {
             "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
             "X-Requested-With": "XMLHttpRequest",
             "Origin": "https://account.microsoft.com",
             "Referer": "https://account.microsoft.com/family",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -245,7 +249,9 @@ class FamilySafetyWebAPI:
                     _LOGGER.debug("Found CSRF/canary token in cookie: %s", name)
                     break
         if canary:
+            # Microsoft uses both header names depending on the endpoint
             headers["canary"] = canary
+            headers["X-Canary"] = canary
 
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         async with aiohttp.ClientSession(
@@ -355,15 +361,21 @@ class FamilySafetyWebAPI:
             )
             return None
 
+        # Always warm up the session first to extract canary token
+        if not getattr(self, "_web_canary", None):
+            _LOGGER.debug("Web API: warming up session to extract canary token...")
+            canary = await self._warm_web_session()
+            if canary:
+                self._web_canary = canary
+
         url = f"{self.WEB_API_BASE}/family/api/st"
         result = await self._web_request("GET", url, params={"childId": child_id})
 
-        # If first attempt fails, warm up the session and retry
+        # If first attempt fails, warm up the session again and retry
         if result is None and self._web_cookies:
-            _LOGGER.debug("Web API returned None, warming up session and retrying...")
+            _LOGGER.debug("Web API returned None, re-warming session and retrying...")
             canary = await self._warm_web_session()
             if canary:
-                # Store canary for subsequent requests
                 self._web_canary = canary
             result = await self._web_request("GET", url, params={"childId": child_id})
 
