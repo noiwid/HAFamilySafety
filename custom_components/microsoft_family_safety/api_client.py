@@ -7,11 +7,17 @@ library for features not yet supported by the library.
 The web API requires a token scoped for account.microsoft.com, which is
 different from the familymobile.microsoft.com token used by pyfamilysafety.
 This client acquires its own token using the same refresh token.
+
+Authentication strategy:
+We try multiple token endpoints and auth methods to find one that works:
+1. Azure AD (login.microsoftonline.com/consumers) – returns a JWT
+2. MSA (login.live.com) with MBI_SSL scope – returns a compact ticket
+3. MSA (login.live.com) with MBI_SSL_SHORT scope
+Each token is tried as Bearer auth on the API endpoints.
 """
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -21,10 +27,34 @@ _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://account.microsoft.com"
 
-# OAuth constants (same client_id / endpoint as pyfamilysafety, different scope)
-_TOKEN_ENDPOINT = "https://login.live.com/oauth20_token.srf"
+# OAuth constants
+_MSA_TOKEN_ENDPOINT = "https://login.live.com/oauth20_token.srf"
+_AAD_TOKEN_ENDPOINT = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
 _CLIENT_ID = "000000000004893A"
-_WEB_SCOPE = "service::account.microsoft.com::MBI_SSL"
+
+# Token strategies to try in order
+_TOKEN_STRATEGIES = [
+    {
+        "name": "AAD_openid",
+        "endpoint": _AAD_TOKEN_ENDPOINT,
+        "scope": "openid profile offline_access",
+    },
+    {
+        "name": "AAD_account",
+        "endpoint": _AAD_TOKEN_ENDPOINT,
+        "scope": "https://account.microsoft.com/.default",
+    },
+    {
+        "name": "MSA_MBI_SSL",
+        "endpoint": _MSA_TOKEN_ENDPOINT,
+        "scope": "service::account.microsoft.com::MBI_SSL",
+    },
+    {
+        "name": "MSA_MBI_SSL_SHORT",
+        "endpoint": _MSA_TOKEN_ENDPOINT,
+        "scope": "service::account.microsoft.com::MBI_SSL_SHORT",
+    },
+]
 
 # Days of week mapping
 DAYS_OF_WEEK = {
@@ -52,9 +82,10 @@ class FamilySafetyWebAPI:
         self._authenticator = authenticator
         self._session: aiohttp.ClientSession | None = None
         self._csrf_token: str | None = None
-        # Separate token for account.microsoft.com scope
         self._access_token: str | None = None
         self._token_expires: datetime | None = None
+        # Track which strategy worked so we reuse it
+        self._working_strategy: dict | None = None
 
     async def _ensure_session(self) -> None:
         """Ensure an active aiohttp session exists with cookie jar."""
@@ -64,54 +95,86 @@ class FamilySafetyWebAPI:
             self._session = aiohttp.ClientSession(timeout=timeout, cookie_jar=jar)
 
     async def _ensure_auth(self) -> None:
-        """Establish a full web session: token + cookies + CSRF.
+        """Acquire a valid access token for account.microsoft.com.
 
-        The account.microsoft.com/family/api/ endpoints use cookie-based
-        authentication. We must:
-        1. Acquire a Bearer token scoped for account.microsoft.com
-        2. Visit the Family Safety web page to establish session cookies
-        3. Extract the CSRF token from the page HTML
+        Tries multiple token endpoints and scopes. Once a strategy works
+        (returns a token that the API accepts), it is remembered.
         """
-        # If we already have a valid session (token + CSRF), skip
         if (
             self._access_token
             and self._token_expires
             and self._token_expires > datetime.now()
-            and self._csrf_token
         ):
             return
         await self._ensure_session()
 
-        # Step 1: Acquire Bearer token
         refresh_token = self._authenticator.refresh_token
         if not refresh_token:
             raise FamilySafetyWebAPIError("No refresh token available")
-        form = aiohttp.FormData()
-        form.add_field("client_id", _CLIENT_ID)
-        form.add_field("refresh_token", refresh_token)
-        form.add_field("grant_type", "refresh_token")
-        form.add_field("scope", _WEB_SCOPE)
-        async with self._session.post(_TOKEN_ENDPOINT, data=form) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                _LOGGER.error(
-                    "Failed to acquire web API token (status %s): %s",
-                    resp.status, text[:200],
-                )
-                raise FamilySafetyWebAPIError(
-                    f"Token request failed with status {resp.status}"
-                )
-            data = await resp.json()
-            self._access_token = data["access_token"]
-            self._token_expires = datetime.now() + timedelta(
-                seconds=data.get("expires_in", 3600)
-            )
-            _LOGGER.debug(
-                "Acquired web API token (expires in %ss)", data.get("expires_in")
-            )
 
-        # Step 2: Visit Family Safety page to establish session cookies + CSRF
-        await self._establish_web_session()
+        # If we have a known working strategy, try that first
+        if self._working_strategy:
+            token = await self._try_token_strategy(
+                self._working_strategy, refresh_token
+            )
+            if token:
+                return
+
+        # Try each strategy until one returns a token
+        for strategy in _TOKEN_STRATEGIES:
+            token = await self._try_token_strategy(strategy, refresh_token)
+            if token:
+                return
+
+        raise FamilySafetyWebAPIError(
+            "Could not acquire token from any endpoint"
+        )
+
+    async def _try_token_strategy(
+        self, strategy: dict, refresh_token: str
+    ) -> bool:
+        """Try to acquire a token using a specific strategy.
+
+        Returns True if a token was obtained.
+        """
+        name = strategy["name"]
+        endpoint = strategy["endpoint"]
+        scope = strategy["scope"]
+
+        form_data = {
+            "client_id": _CLIENT_ID,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+            "scope": scope,
+        }
+
+        try:
+            async with self._session.post(
+                endpoint,
+                data=aiohttp.FormData(form_data),
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    _LOGGER.debug(
+                        "Token strategy %s failed (status %s): %s",
+                        name, resp.status, text[:200],
+                    )
+                    return False
+                data = await resp.json(content_type=None)
+                self._access_token = data["access_token"]
+                self._token_expires = datetime.now() + timedelta(
+                    seconds=data.get("expires_in", 3600)
+                )
+                token_preview = self._access_token[:20] + "..."
+                _LOGGER.debug(
+                    "Token strategy %s succeeded (expires in %ss, "
+                    "token starts with: %s)",
+                    name, data.get("expires_in"), token_preview,
+                )
+                return True
+        except Exception as err:
+            _LOGGER.debug("Token strategy %s error: %s", name, err)
+            return False
 
     _USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -119,204 +182,13 @@ class FamilySafetyWebAPI:
         "Chrome/120.0.0.0 Safari/537.36"
     )
 
-    async def _establish_web_session(self) -> None:
-        """Establish web session via Microsoft SSO flow.
-
-        The MBI_SSL token from login.live.com is a compact ticket, NOT a
-        standard OAuth2 Bearer token. It must be used via the WS-Federation
-        SSO flow through login.live.com/ppsecure/post.srf to set auth cookies
-        on account.microsoft.com.
-        """
-        try:
-            # Step 1: POST the compact ticket to login.live.com ppsecure
-            # This simulates the WS-Federation passive sign-in flow
-            await self._sso_via_ppsecure()
-
-            # Step 2: Visit the Family Safety page to get CSRF token
-            await self._fetch_csrf_token()
-        except Exception as err:
-            _LOGGER.warning("Error establishing web session: %s", err)
-
-    async def _sso_via_ppsecure(self) -> None:
-        """Use the MBI_SSL ticket to establish SSO cookies via login.live.com."""
-        ticket = self._access_token
-        # login.live.com ppsecure expects WS-Federation parameters
-        sso_url = "https://login.live.com/ppsecure/post.srf"
-        params = {
-            "wa": "wsignin1.0",
-            "wreply": f"{BASE_URL}/auth/complete-signin",
-            "wp": "MBI_SSL",
-        }
-        # The ticket is sent as form data: t=<ticket>&p=
-        post_data = f"t={ticket}&p=" if not ticket.startswith("t=") else f"{ticket}&p="
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": self._USER_AGENT,
-        }
-
-        async with self._session.post(
-            sso_url, params=params, data=post_data,
-            headers=headers, allow_redirects=False,
-        ) as resp:
-            body = await resp.text()
-            final_url = str(resp.url)
-            _LOGGER.debug(
-                "ppsecure POST: status=%s, url=%s, cookies=%d, body_len=%d",
-                resp.status, final_url, len(self._session.cookie_jar), len(body),
-            )
-
-            if resp.status in (301, 302, 303, 307):
-                # Simple redirect – follow it
-                redirect_url = resp.headers.get("Location", "")
-                _LOGGER.debug("ppsecure redirect to: %s", redirect_url)
-                if redirect_url:
-                    await self._follow_redirect(redirect_url)
-            elif resp.status == 200:
-                # May be an HTML form that auto-submits to account.microsoft.com
-                await self._handle_sso_form(body)
-            else:
-                _LOGGER.warning(
-                    "ppsecure unexpected status %s: %s",
-                    resp.status, body[:300],
-                )
-
-    async def _handle_sso_form(self, html: str) -> None:
-        """Parse and submit the WS-Federation auto-POST form.
-
-        login.live.com typically returns an HTML page with a hidden form
-        that auto-submits to the relying party (account.microsoft.com).
-        """
-        # Extract form action URL
-        action_match = re.search(r'<form[^>]*action="([^"]+)"', html, re.IGNORECASE)
-        if not action_match:
-            _LOGGER.debug(
-                "No form found in ppsecure response. HTML preview: %.500s",
-                html[:500],
-            )
-            return
-
-        form_action = action_match.group(1)
-        # Unescape HTML entities in URL
-        form_action = form_action.replace("&amp;", "&")
-
-        # Extract all hidden input fields
-        fields: dict[str, str] = {}
-        for m in re.finditer(
-            r'<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"', html, re.IGNORECASE
-        ):
-            fields[m.group(1)] = m.group(2)
-        # Also try reversed attribute order
-        for m in re.finditer(
-            r'<input[^>]*value="([^"]*)"[^>]*name="([^"]*)"', html, re.IGNORECASE
-        ):
-            fields[m.group(2)] = m.group(1)
-
-        _LOGGER.debug(
-            "SSO form: action=%s, fields=%s",
-            form_action, list(fields.keys()),
-        )
-
-        if not fields:
-            _LOGGER.warning("SSO form has no hidden fields")
-            return
-
-        # Submit the form to account.microsoft.com
-        async with self._session.post(
-            form_action,
-            data=fields,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": self._USER_AGENT,
-            },
-            allow_redirects=True,
-        ) as resp:
-            final_url = str(resp.url)
-            _LOGGER.debug(
-                "SSO form submit: status=%s, final_url=%s, cookies=%d",
-                resp.status, final_url, len(self._session.cookie_jar),
-            )
-            # If we end up on account.microsoft.com, check for CSRF token
-            if "account.microsoft.com" in final_url and resp.status == 200:
-                body = await resp.text()
-                self._try_extract_csrf(body, final_url)
-
-    async def _follow_redirect(self, url: str) -> None:
-        """Follow a redirect URL from the SSO flow."""
-        async with self._session.get(
-            url,
-            headers={"User-Agent": self._USER_AGENT},
-            allow_redirects=True,
-        ) as resp:
-            final_url = str(resp.url)
-            _LOGGER.debug(
-                "SSO redirect followed: status=%s, final_url=%s, cookies=%d",
-                resp.status, final_url, len(self._session.cookie_jar),
-            )
-            if "account.microsoft.com" in final_url and resp.status == 200:
-                body = await resp.text()
-                self._try_extract_csrf(body, final_url)
-
-    async def _fetch_csrf_token(self) -> None:
-        """Visit the Family Safety settings page to extract the CSRF token."""
-        if self._csrf_token:
-            return  # Already got it during SSO
-
-        async with self._session.get(
-            f"{BASE_URL}/family/settings",
-            headers={"User-Agent": self._USER_AGENT},
-            allow_redirects=True,
-        ) as resp:
-            final_url = str(resp.url)
-            _LOGGER.debug(
-                "Family settings page: status=%s, url=%s, cookies=%d",
-                resp.status, final_url, len(self._session.cookie_jar),
-            )
-            if resp.status == 200:
-                html = await resp.text()
-                if "account.microsoft.com" in final_url:
-                    self._try_extract_csrf(html, final_url)
-                else:
-                    _LOGGER.warning(
-                        "Redirected away from account.microsoft.com to: %s",
-                        final_url,
-                    )
-            else:
-                body = await resp.text()
-                _LOGGER.warning(
-                    "Family settings page status %s: %s",
-                    resp.status, body[:200],
-                )
-
-    def _try_extract_csrf(self, html: str, url: str) -> None:
-        """Try to extract CSRF token from HTML using multiple patterns."""
-        patterns = [
-            r'name="__RequestVerificationToken"[^>]*value="([^"]+)"',
-            r'value="([^"]+)"[^>]*name="__RequestVerificationToken"',
-            r'antiForgeryToken["\s:]+["\']([^"\']+)["\']',
-            r'<meta[^>]*name="csrf-token"[^>]*content="([^"]+)"',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, html)
-            if match:
-                self._csrf_token = match.group(1)
-                _LOGGER.info(
-                    "CSRF token acquired from %s (%d cookies)",
-                    url, len(self._session.cookie_jar),
-                )
-                return
-        _LOGGER.warning(
-            "No CSRF token in page. URL: %s, HTML length: %d, "
-            "cookies: %d, preview: %.300s",
-            url, len(html), len(self._session.cookie_jar), html[:300],
-        )
-
     def _build_headers(self) -> dict[str, str]:
         """Build request headers for the web API.
 
-        API calls use cookie-based auth (no Bearer token).
-        The CSRF token is required on every request (including GET).
+        Uses Bearer token auth. Also includes CSRF token if available.
         """
         headers = {
+            "Authorization": f"Bearer {self._access_token}",
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
             "X-Amc-Jsonmode": "CamelCase",
@@ -336,7 +208,10 @@ class FamilySafetyWebAPI:
         json_data: dict | None = None,
         params: dict | None = None,
     ) -> dict | list | None:
-        """Make an authenticated request to the web API."""
+        """Make an authenticated request to the web API.
+
+        If the current token gets 401, tries other token strategies.
+        """
         await self._ensure_session()
         await self._ensure_auth()
 
@@ -351,17 +226,59 @@ class FamilySafetyWebAPI:
             ) as resp:
                 if resp.status in (401, 403):
                     _LOGGER.info(
-                        "Got %s, closing session and re-establishing from scratch",
+                        "Got %s with strategy %s, trying other strategies",
                         resp.status,
+                        self._working_strategy["name"] if self._working_strategy else "unknown",
                     )
-                    # Close the old session (stale cookies) and start fresh
-                    await self.close()
-                    await self._ensure_auth()
-                    headers = self._build_headers()
-                    async with self._session.request(
-                        method, url, headers=headers, json=json_data, params=params
-                    ) as retry_resp:
-                        return await self._handle_response(retry_resp)
+                    # Current strategy failed — clear it and try others
+                    failed_strategy = self._working_strategy
+                    self._working_strategy = None
+                    self._access_token = None
+                    self._token_expires = None
+
+                    refresh_token = self._authenticator.refresh_token
+                    for strategy in _TOKEN_STRATEGIES:
+                        if strategy is failed_strategy:
+                            continue
+                        got_token = await self._try_token_strategy(
+                            strategy, refresh_token
+                        )
+                        if not got_token:
+                            continue
+                        # Test this token on the API
+                        headers = self._build_headers()
+                        async with self._session.request(
+                            method, url, headers=headers,
+                            json=json_data, params=params,
+                        ) as retry_resp:
+                            if retry_resp.status in (401, 403):
+                                _LOGGER.debug(
+                                    "Strategy %s also got %s",
+                                    strategy["name"], retry_resp.status,
+                                )
+                                continue
+                            # This strategy works!
+                            self._working_strategy = strategy
+                            _LOGGER.info(
+                                "Strategy %s works for API auth",
+                                strategy["name"],
+                            )
+                            return await self._handle_response(retry_resp)
+
+                    # All strategies failed
+                    _LOGGER.error(
+                        "All token strategies failed for %s %s", method, path
+                    )
+                    raise FamilySafetyWebAPIError(
+                        "All token strategies returned 401"
+                    )
+
+                # First attempt succeeded — remember strategy
+                if not self._working_strategy:
+                    # Find which strategy we used (it's the first one that gave a token)
+                    for strategy in _TOKEN_STRATEGIES:
+                        self._working_strategy = strategy
+                        break
                 return await self._handle_response(resp)
         except aiohttp.ClientError as err:
             _LOGGER.error("Web API request failed: %s", err)
@@ -691,6 +608,7 @@ class FamilySafetyWebAPI:
         self._csrf_token = None
         self._access_token = None
         self._token_expires = None
+        self._working_strategy = None
 
 
 class FamilySafetyWebAPIError(Exception):
