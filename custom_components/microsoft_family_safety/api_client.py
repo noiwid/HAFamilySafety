@@ -1,18 +1,19 @@
-"""API client for Microsoft Family Safety mobile endpoints.
+"""API client for Microsoft Family Safety.
 
-This module provides HTTP access to the Microsoft Family Safety mobile API
-at mobileaggregator.family.microsoft.com/api/, for features not yet exposed
-by the pyfamilysafety library (web browsing settings, screen time policy,
-content restrictions, etc.).
+This module provides two authentication strategies:
 
-It reuses the same authentication as pyfamilysafety: an MSA token scoped for
-familymobile.microsoft.com, sent as MSAuth1.0 in the Authorization header.
+1. **Mobile API** (MSAuth1.0 token) — for WRITE operations (PATCH endpoints)
+   Uses mobileaggregator.family.microsoft.com with MSA tokens from pyfamilysafety.
+
+2. **Web API** (browser cookies) — for READ operations (screen time schedule)
+   Uses account.microsoft.com/family/api/* with cookies from the Playwright addon.
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
 from typing import Any
+from yarl import URL
 
 import aiohttp
 
@@ -43,16 +44,34 @@ DAYS_OF_WEEK = {
 
 
 class FamilySafetyWebAPI:
-    """API client for Microsoft Family Safety mobile endpoints.
+    """API client for Microsoft Family Safety.
 
-    Named WebAPI for backward compatibility with coordinator imports.
+    Combines mobile API (token auth) for writes and web API (cookie auth) for reads.
     """
+
+    # Web API base URL
+    WEB_API_BASE = "https://account.microsoft.com"
 
     def __init__(self, authenticator) -> None:
         self._authenticator = authenticator
         self._session: aiohttp.ClientSession | None = None
         self._access_token: str | None = None
         self._token_expires: datetime | None = None
+        # Browser cookies for web API reads
+        self._web_cookies: list[dict[str, Any]] | None = None
+
+    def set_web_cookies(self, cookies: list[dict[str, Any]]) -> None:
+        """Set browser cookies for web API access (from Playwright addon)."""
+        self._web_cookies = cookies
+        _LOGGER.info(
+            "Web API cookies configured (%d cookies)",
+            len(cookies) if cookies else 0,
+        )
+
+    @property
+    def has_web_cookies(self) -> bool:
+        """Return True if web cookies are available."""
+        return bool(self._web_cookies)
 
     async def _ensure_session(self) -> None:
         if self._session is None or self._session.closed:
@@ -167,6 +186,110 @@ class FamilySafetyWebAPI:
         )
 
     # ──────────────────────────────────────────────────────────────────────
+    # Web API (cookie-based) — READ operations
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _build_cookie_jar(self) -> aiohttp.CookieJar:
+        """Build a cookie jar from Playwright browser cookies."""
+        jar = aiohttp.CookieJar(unsafe=True)
+        if not self._web_cookies:
+            return jar
+
+        for cookie in self._web_cookies:
+            name = cookie.get("name", "")
+            value = cookie.get("value", "")
+            domain = cookie.get("domain", "")
+
+            # Build a morsel-compatible SimpleCookie
+            jar.update_cookies(
+                {name: value},
+                URL(f"https://{domain.lstrip('.')}/"),
+            )
+        return jar
+
+    async def _web_request(
+        self,
+        method: str,
+        url: str,
+        params: dict | None = None,
+        json_data: dict | None = None,
+    ) -> dict | list | None:
+        """Make an authenticated request to the web API using browser cookies."""
+        if not self._web_cookies:
+            _LOGGER.warning("No web cookies available for web API request")
+            return None
+
+        cookie_jar = self._build_cookie_jar()
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        }
+
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        async with aiohttp.ClientSession(
+            cookie_jar=cookie_jar, timeout=timeout
+        ) as session:
+            _LOGGER.debug("Web API %s %s", method, url)
+            async with session.request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                json=json_data,
+                allow_redirects=False,
+            ) as resp:
+                if resp.status == 200:
+                    if resp.content_type and "json" in resp.content_type:
+                        data = await resp.json()
+                        _LOGGER.debug("Web API success: %s", str(data)[:300])
+                        return data
+                    return None
+
+                if resp.status in (301, 302, 303, 307, 308):
+                    _LOGGER.warning(
+                        "Web API redirected (status %s) — cookies may be expired",
+                        resp.status,
+                    )
+                    return None
+
+                text = await resp.text()
+                _LOGGER.warning(
+                    "Web API error %s: %s", resp.status, text[:200]
+                )
+                return None
+
+    async def get_screentime_policy(
+        self, child_id: str, platform: str = "Windows"
+    ) -> dict | None:
+        """Get screen time policy via the web API (cookie-based).
+
+        Requires browser cookies from the Playwright auth addon.
+        Falls back gracefully if cookies are not available.
+        """
+        if not self._web_cookies:
+            _LOGGER.debug(
+                "No web cookies — screen time policy not available. "
+                "Install the Family Safety Auth add-on for full read support."
+            )
+            return None
+
+        url = f"{self.WEB_API_BASE}/family/api/st"
+        result = await self._web_request("GET", url, params={"childId": child_id})
+
+        if result:
+            _LOGGER.info(
+                "Successfully read screen time policy for child %s via web API",
+                child_id,
+            )
+        return result
+
+    # ──────────────────────────────────────────────────────────────────────
     # GET Endpoints (mobile API)
     # ──────────────────────────────────────────────────────────────────────
 
@@ -177,184 +300,6 @@ class FamilySafetyWebAPI:
         )
         _LOGGER.debug("WebRestrictions response for %s: %s", child_id, result)
         return result
-
-    async def get_screentime_policy(
-        self, child_id: str, platform: str = "Windows"
-    ) -> dict | None:
-        """Get screen time policy via the account.microsoft.com web API.
-
-        The mobile API does not support GET for schedules. The web API at
-        account.microsoft.com/family/api/st does. This method tries multiple
-        authentication approaches against the web API.
-        """
-        await self._ensure_session()
-        await self._ensure_auth()
-
-        web_base = "https://account.microsoft.com"
-        web_url = f"{web_base}/family/api/st"
-        params = {"childId": child_id}
-
-        # ---------- Approach 1: MSAuth1.0 token (same as mobile API) ----------
-        headers_a1 = {
-            "Authorization": f'MSAuth1.0 usertoken="{self._access_token}", type="MSACT"',
-            "Accept": "application/json",
-            "X-AMC-JsonMode": "CamelCase",
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with self._session.get(
-                web_url, params=params, headers=headers_a1, allow_redirects=False,
-            ) as resp:
-                _LOGGER.info(
-                    "WebAPI probe [MSAuth1.0]: status=%s, headers=%s",
-                    resp.status, dict(resp.headers),
-                )
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    _LOGGER.info("WebAPI probe [MSAuth1.0] SUCCESS: %s", str(data)[:500])
-                    return data
-                text = await resp.text()
-                _LOGGER.debug(
-                    "WebAPI probe [MSAuth1.0] body: %s", text[:300]
-                )
-        except Exception as err:
-            _LOGGER.debug("WebAPI probe [MSAuth1.0] error: %s", err)
-
-        # ---------- Approach 2: Bearer token ----------
-        headers_a2 = {
-            "Authorization": f"Bearer {self._access_token}",
-            "Accept": "application/json",
-            "X-AMC-JsonMode": "CamelCase",
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/json",
-        }
-        try:
-            async with self._session.get(
-                web_url, params=params, headers=headers_a2, allow_redirects=False,
-            ) as resp:
-                _LOGGER.info(
-                    "WebAPI probe [Bearer]: status=%s", resp.status
-                )
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    _LOGGER.info("WebAPI probe [Bearer] SUCCESS: %s", str(data)[:500])
-                    return data
-                text = await resp.text()
-                _LOGGER.debug("WebAPI probe [Bearer] body: %s", text[:300])
-        except Exception as err:
-            _LOGGER.debug("WebAPI probe [Bearer] error: %s", err)
-
-        # ---------- Approach 3: Token for account.microsoft.com scope ----------
-        web_scope = "service::account.microsoft.com::MBI_SSL"
-        refresh_token = self._authenticator.refresh_token
-        try:
-            form_data = {
-                "client_id": _CLIENT_ID,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-                "scope": web_scope,
-            }
-            async with self._session.post(
-                _TOKEN_ENDPOINT, data=aiohttp.FormData(form_data)
-            ) as token_resp:
-                _LOGGER.info(
-                    "WebAPI scope token request: status=%s", token_resp.status
-                )
-                if token_resp.status == 200:
-                    token_data = await token_resp.json(content_type=None)
-                    web_token = token_data.get("access_token", "")
-                    _LOGGER.info(
-                        "WebAPI scope token acquired (expires_in=%s)",
-                        token_data.get("expires_in"),
-                    )
-                    # Try MSAuth1.0 with web token
-                    headers_a3 = {
-                        "Authorization": f'MSAuth1.0 usertoken="{web_token}", type="MSACT"',
-                        "Accept": "application/json",
-                        "X-AMC-JsonMode": "CamelCase",
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Content-Type": "application/json",
-                    }
-                    async with self._session.get(
-                        web_url, params=params, headers=headers_a3,
-                        allow_redirects=False,
-                    ) as resp:
-                        _LOGGER.info(
-                            "WebAPI probe [WebScope+MSAuth]: status=%s", resp.status
-                        )
-                        if resp.status == 200:
-                            data = await resp.json(content_type=None)
-                            _LOGGER.info(
-                                "WebAPI probe [WebScope+MSAuth] SUCCESS: %s",
-                                str(data)[:500],
-                            )
-                            return data
-                        text = await resp.text()
-                        _LOGGER.debug(
-                            "WebAPI probe [WebScope+MSAuth] body: %s", text[:300]
-                        )
-
-                    # Try Bearer with web token
-                    headers_a4 = {
-                        "Authorization": f"Bearer {web_token}",
-                        "Accept": "application/json",
-                        "X-AMC-JsonMode": "CamelCase",
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Content-Type": "application/json",
-                    }
-                    async with self._session.get(
-                        web_url, params=params, headers=headers_a4,
-                        allow_redirects=False,
-                    ) as resp:
-                        _LOGGER.info(
-                            "WebAPI probe [WebScope+Bearer]: status=%s", resp.status
-                        )
-                        if resp.status == 200:
-                            data = await resp.json(content_type=None)
-                            _LOGGER.info(
-                                "WebAPI probe [WebScope+Bearer] SUCCESS: %s",
-                                str(data)[:500],
-                            )
-                            return data
-                        text = await resp.text()
-                        _LOGGER.debug(
-                            "WebAPI probe [WebScope+Bearer] body: %s", text[:300]
-                        )
-                else:
-                    text = await token_resp.text()
-                    _LOGGER.info(
-                        "WebAPI scope token FAILED: %s", text[:300]
-                    )
-        except Exception as err:
-            _LOGGER.debug("WebAPI probe [WebScope] error: %s", err)
-
-        # ---------- Approach 4: SSO cookie flow ----------
-        # Try to establish web session via login.live.com redirect chain
-        try:
-            sso_url = (
-                "https://login.live.com/oauth20_authorize.srf"
-                "?client_id=000000000004893A"
-                "&response_type=code"
-                "&redirect_uri=https://login.live.com/oauth20_desktop.srf"
-                "&scope=service::account.microsoft.com::MBI_SSL"
-                "&lw=1&fl=easi2"
-            )
-            async with self._session.get(
-                sso_url, allow_redirects=True
-            ) as resp:
-                _LOGGER.info(
-                    "WebAPI probe [SSO redirect]: final_url=%s, status=%s, cookies=%s",
-                    resp.url, resp.status,
-                    [c.key for c in self._session.cookie_jar],
-                )
-        except Exception as err:
-            _LOGGER.debug("WebAPI probe [SSO] error: %s", err)
-
-        _LOGGER.warning(
-            "All web API probes failed for schedule data (child=%s)", child_id
-        )
-        return None
 
     async def get_device_overrides(self, child_id: str) -> dict | None:
         """Get device lock/unlock overrides."""
@@ -375,7 +320,7 @@ class FamilySafetyWebAPI:
         )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Screen Time Controls
+    # Screen Time Controls (mobile API — WRITE)
     # ──────────────────────────────────────────────────────────────────────
 
     async def set_screentime_daily_allowance(
@@ -386,10 +331,7 @@ class FamilySafetyWebAPI:
         minutes: int,
         platform: str = "Windows",
     ) -> dict | None:
-        """Set daily screen time allowance via device limits schedule.
-
-        Uses PATCH /v4/devicelimits/schedules/{USER_ID}.
-        """
+        """Set daily screen time allowance via device limits schedule."""
         day_names = [
             "sunday", "monday", "tuesday", "wednesday",
             "thursday", "friday", "saturday",
@@ -413,10 +355,7 @@ class FamilySafetyWebAPI:
         allowed_intervals: list[bool],
         platform: str = "Windows",
     ) -> dict | None:
-        """Set allowed time intervals for a specific day.
-
-        Uses PATCH /v4/devicelimits/schedules/{USER_ID}.
-        """
+        """Set allowed time intervals for a specific day."""
         if len(allowed_intervals) != 48:
             raise ValueError("allowed_intervals must contain exactly 48 booleans")
         day_names = [
@@ -425,7 +364,6 @@ class FamilySafetyWebAPI:
         ]
         day_name = day_names[day_of_week]
 
-        # Convert 48 booleans to interval ranges
         intervals = []
         i = 0
         while i < 48:
@@ -474,7 +412,7 @@ class FamilySafetyWebAPI:
         return await self.set_screentime_intervals(child_id, day_of_week, intervals)
 
     # ──────────────────────────────────────────────────────────────────────
-    # App Limits Controls
+    # App Limits Controls (mobile API — WRITE)
     # ──────────────────────────────────────────────────────────────────────
 
     async def set_app_time_limit(
@@ -487,10 +425,7 @@ class FamilySafetyWebAPI:
         start_time: str = "07:00:00",
         end_time: str = "22:00:00",
     ) -> dict | None:
-        """Set a per-app time limit.
-
-        Uses PATCH /v3/appLimits/policies/{USER_ID}/{APP_ID}.
-        """
+        """Set a per-app time limit."""
         day_schedule = {
             "allowance": allowance,
             "allottedIntervalsEnabled": True,
@@ -532,14 +467,11 @@ class FamilySafetyWebAPI:
         )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Web Filtering Controls
+    # Web Filtering Controls (mobile API — WRITE)
     # ──────────────────────────────────────────────────────────────────────
 
     async def block_website(self, child_id: str, website: str) -> dict | None:
-        """Block a website for a child.
-
-        Uses PATCH /v1/WebRestrictions/{USER_ID}.
-        """
+        """Block a website for a child."""
         return await self._request(
             "PATCH",
             f"/v1/WebRestrictions/{child_id}",
@@ -547,11 +479,7 @@ class FamilySafetyWebAPI:
         )
 
     async def remove_website(self, child_id: str, website: str) -> dict | None:
-        """Remove a website from blocked list.
-
-        Uses PATCH /v1/WebRestrictions/{USER_ID}.
-        """
-        # First get current restrictions to remove from list
+        """Remove a website from blocked list."""
         current = await self.get_web_browsing_settings(child_id)
         if not current:
             return None
@@ -566,10 +494,7 @@ class FamilySafetyWebAPI:
         )
 
     async def toggle_web_filter(self, child_id: str, enabled: bool) -> dict | None:
-        """Toggle web filtering on/off.
-
-        Uses PATCH /v1/WebRestrictions/{USER_ID}.
-        """
+        """Toggle web filtering on/off."""
         return await self._request(
             "PATCH",
             f"/v1/WebRestrictions/{child_id}",
@@ -577,14 +502,11 @@ class FamilySafetyWebAPI:
         )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Content / Age Restrictions
+    # Content / Age Restrictions (mobile API — WRITE)
     # ──────────────────────────────────────────────────────────────────────
 
     async def set_age_rating(self, child_id: str, age: int) -> dict | None:
-        """Set content age rating restriction.
-
-        Uses PATCH /v1/ContentRestrictions/{USER_ID}.
-        """
+        """Set content age rating restriction."""
         if not 3 <= age <= 21:
             raise ValueError("age must be between 3 and 21 (21 = no restriction)")
         return await self._request(
@@ -600,10 +522,7 @@ class FamilySafetyWebAPI:
     async def set_acquisition_policy(
         self, child_id: str, require_approval: bool
     ) -> dict | None:
-        """Set the ask-to-buy policy.
-
-        Uses PATCH /v1/ContentRestrictions/{USER_ID}.
-        """
+        """Set the ask-to-buy policy."""
         policy = "freeOnly" if require_approval else "unrestricted"
         return await self._request(
             "PATCH",

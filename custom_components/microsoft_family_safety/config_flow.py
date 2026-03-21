@@ -17,6 +17,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     AVAILABLE_PLATFORMS,
+    CONF_AUTH_URL,
     CONF_PLATFORMS,
     CONF_REDIRECT_URL,
     CONF_REFRESH_TOKEN,
@@ -86,17 +87,38 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._redirect_url: str | None = None
+        self._detected_source: str | None = None
+        self._detected_url: str | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step - show authentication instructions."""
+        """Handle the initial step - detect auth addon and show instructions."""
+        from .auth.addon_client import AddonCookieClient
+
+        # Detect available auth source (addon API or encrypted file)
+        addon_client = AddonCookieClient(self.hass)
+        source_type, detected_url = await addon_client.detect_auth_source()
+
+        self._detected_source = source_type
+        self._detected_url = detected_url
+
+        _LOGGER.debug("Detected auth source: %s, URL: %s", source_type, detected_url)
+
         if user_input is not None:
             return await self.async_step_auth()
 
         description_placeholders = {
             "auth_url": _build_auth_url(),
         }
+
+        # Add addon status info to placeholders
+        if source_type == "api":
+            description_placeholders["addon_status"] = f"Family Safety Auth addon detected at {detected_url}"
+        elif source_type == "file":
+            description_placeholders["addon_status"] = "Cookies found in shared storage"
+        else:
+            description_placeholders["addon_status"] = "No addon detected - web API features (screen time reads) will be unavailable until configured"
 
         return self.async_show_form(
             step_id="user",
@@ -116,6 +138,17 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
             )
             platforms = user_input.get(CONF_PLATFORMS, DEFAULT_PLATFORMS)
+            auth_url = user_input.get(CONF_AUTH_URL, "").strip() or None
+
+            # If user provided a custom auth URL, validate it
+            if auth_url:
+                from .auth.addon_client import AddonCookieClient
+
+                addon_client = AddonCookieClient(self.hass, auth_url=auth_url)
+                if not await addon_client._check_url_available(auth_url):
+                    _LOGGER.warning(
+                        "Custom auth URL %s is not reachable, saving anyway", auth_url
+                    )
 
             if not redirect_url:
                 errors["base"] = "no_redirect_url"
@@ -127,11 +160,18 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(refresh_token[:20])
                     self._abort_if_unique_id_configured()
 
+                    # Build data dict with auth_url if we have one
+                    data = {
+                        CONF_REFRESH_TOKEN: refresh_token,
+                    }
+                    # Store auth URL: user-provided > auto-detected
+                    effective_auth_url = auth_url or self._detected_url
+                    if effective_auth_url:
+                        data[CONF_AUTH_URL] = effective_auth_url
+
                     return self.async_create_entry(
                         title=info["title"],
-                        data={
-                            CONF_REFRESH_TOKEN: refresh_token,
-                        },
+                        data=data,
                         options={
                             CONF_UPDATE_INTERVAL: update_interval,
                             CONF_PLATFORMS: platforms,
@@ -148,23 +188,28 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "auth_url": _build_auth_url(),
         }
 
+        # Build schema - include auth URL field if no addon was auto-detected
+        schema_fields = {
+            vol.Required(CONF_REDIRECT_URL): str,
+            vol.Optional(
+                CONF_UPDATE_INTERVAL,
+                default=DEFAULT_UPDATE_INTERVAL,
+            ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+            vol.Optional(
+                CONF_PLATFORMS,
+                default=DEFAULT_PLATFORMS,
+            ): cv.multi_select(
+                {p: p for p in AVAILABLE_PLATFORMS}
+            ),
+        }
+
+        # Only show auth URL field if addon was NOT auto-detected
+        if self._detected_source == "none":
+            schema_fields[vol.Optional(CONF_AUTH_URL, default="")] = str
+
         return self.async_show_form(
             step_id="auth",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_REDIRECT_URL): str,
-                    vol.Optional(
-                        CONF_UPDATE_INTERVAL,
-                        default=DEFAULT_UPDATE_INTERVAL,
-                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
-                    vol.Optional(
-                        CONF_PLATFORMS,
-                        default=DEFAULT_PLATFORMS,
-                    ): cv.multi_select(
-                        {p: p for p in AVAILABLE_PLATFORMS}
-                    ),
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
             description_placeholders=description_placeholders,
             errors=errors,
         )
@@ -192,11 +237,16 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self.context["entry_id"]
                     )
                     if entry:
+                        # Preserve existing auth_url when reauthing
+                        new_data = {
+                            CONF_REFRESH_TOKEN: info["refresh_token"],
+                        }
+                        if CONF_AUTH_URL in entry.data:
+                            new_data[CONF_AUTH_URL] = entry.data[CONF_AUTH_URL]
+
                         self.hass.config_entries.async_update_entry(
                             entry,
-                            data={
-                                CONF_REFRESH_TOKEN: info["refresh_token"],
-                            },
+                            data=new_data,
                         )
                         await self.hass.config_entries.async_reload(entry.entry_id)
                         return self.async_abort(reason="reauth_successful")
@@ -243,6 +293,7 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         current_platforms = self._config_entry.options.get(
             CONF_PLATFORMS, DEFAULT_PLATFORMS
         )
+        current_auth_url = self._config_entry.data.get(CONF_AUTH_URL, "")
 
         return self.async_show_form(
             step_id="init",
@@ -258,6 +309,10 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                     ): cv.multi_select(
                         {p: p for p in AVAILABLE_PLATFORMS}
                     ),
+                    vol.Optional(
+                        CONF_AUTH_URL,
+                        default=current_auth_url,
+                    ): str,
                 }
             ),
         )

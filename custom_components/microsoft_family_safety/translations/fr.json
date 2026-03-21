@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Authentification Microsoft Family Safety",
-        "description": "Pour vous authentifier avec Microsoft Family Safety, vous devez obtenir un code d'autorisation.\n\n**IMPORTANT : Copiez cette URL et ouvrez-la dans votre navigateur :**\n\n{auth_url}\n\nAprès vous être connecté, vous serez redirigé vers une page vierge. L'URL de cette page contiendra un paramètre 'code'.\n\nCliquez sur Suivant lorsque vous êtes prêt à entrer l'URL de redirection."
+        "description": "Pour vous authentifier avec Microsoft Family Safety, vous devez obtenir un code d'autorisation.\n\n**IMPORTANT : Copiez cette URL et ouvrez-la dans votre navigateur :**\n\n{auth_url}\n\n**Statut de l'addon :** {addon_status}\n\nAprès vous être connecté, vous serez redirigé vers une page vierge. L'URL de cette page contiendra un paramètre 'code'.\n\nCliquez sur Suivant lorsque vous êtes prêt à entrer l'URL de redirection."
       },
       "auth": {
         "title": "Entrez l'URL de redirection",
@@ -11,7 +11,8 @@
         "data": {
           "redirect_url": "URL de redirection",
           "update_interval": "Intervalle de mise à jour (secondes)",
-          "platforms": "Plateformes surveillées"
+          "platforms": "Plateformes surveillées",
+          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)"
         }
       },
       "reauth_confirm": {
@@ -39,9 +40,10 @@
         "title": "Options Microsoft Family Safety",
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
-          "platforms": "Plateformes surveillées"
+          "platforms": "Plateformes surveillées",
+          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)"
         },
-        "description": "Configurer l'intervalle d'interrogation et les plateformes surveillées."
+        "description": "Configurer l'intervalle d'interrogation, les plateformes surveillées et l'URL de l'addon auth."
       }
     }
   },
