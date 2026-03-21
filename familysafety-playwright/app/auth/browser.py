@@ -567,17 +567,53 @@ class BrowserAuthManager:
                     final_url,
                 )
 
-                # Detect login redirect — session expired, need re-auth
-                if any(
-                    domain in final_url
-                    for domain in (
-                        "login.microsoftonline.com",
-                        "login.live.com",
-                        "login.microsoft.com",
+                # If we landed on an intermediate OAuth page (e.g. after
+                # fresh auth), wait for the redirect chain to complete
+                _OAUTH_INTERMEDIATE = (
+                    "complete-signin-oauth",
+                    "complete-client-signin",
+                    "oauth20_authorize",
+                )
+                if any(frag in final_url for frag in _OAUTH_INTERMEDIATE):
+                    _LOGGER.info(
+                        "browser_fetch: on OAuth intermediate page, "
+                        "waiting for redirect to family dashboard..."
                     )
+                    try:
+                        await page.wait_for_url(
+                            "**/family**",
+                            timeout=15000,
+                            wait_until="domcontentloaded",
+                        )
+                    except Exception:
+                        _LOGGER.warning(
+                            "browser_fetch: timed out waiting for family "
+                            "redirect, current URL: %s",
+                            page.url,
+                        )
+                    final_url = page.url
+                    _LOGGER.info(
+                        "browser_fetch: after OAuth wait, final_url=%s",
+                        final_url,
+                    )
+
+                # Detect login redirect — session expired, need re-auth
+                _LOGIN_DOMAINS = (
+                    "login.microsoftonline.com",
+                    "login.live.com",
+                    "login.microsoft.com",
+                )
+                _NOT_AUTH_PATTERNS = (
+                    "microsoft.com/fr-fr/microsoft-365/family-safety",
+                    "microsoft.com/en-us/microsoft-365/family-safety",
+                    "microsoft.com/microsoft-365/family-safety",
+                )
+                if any(domain in final_url for domain in _LOGIN_DOMAINS) or any(
+                    pat in final_url for pat in _NOT_AUTH_PATTERNS
                 ):
                     _LOGGER.error(
-                        "browser_fetch: redirected to login (%s) — session expired",
+                        "browser_fetch: redirected to login/marketing (%s) "
+                        "— session expired",
                         final_url,
                     )
                     return {
