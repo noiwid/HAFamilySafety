@@ -392,12 +392,23 @@ class BrowserAuthManager:
 
     _FETCH_JS = """async (url) => {
         try {
+            // Read canary cookie for the __requestverificationtoken header
+            const cookies = document.cookie.split(';').map(c => c.trim());
+            const canaryCookie = cookies.find(c => c.startsWith('canary='));
+            const canary = canaryCookie ? canaryCookie.split('=').slice(1).join('=') : '';
+
+            const hdrs = {
+                'Accept': 'application/json, text/plain, */*',
+                'X-Requested-With': '3742,HttpRequest',
+                'X-Anc-Jsonmode': 'CamelCase'
+            };
+            if (canary) {
+                hdrs['__requestverificationtoken'] = canary;
+            }
+
             const resp = await fetch(url, {
                 credentials: 'include',
-                headers: {
-                    'Accept': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
+                headers: hdrs
             });
             const text = await resp.text();
             if (!resp.ok) {
@@ -523,10 +534,12 @@ class BrowserAuthManager:
         cookie_header = self._build_cookie_header(cookies, full_url)
 
         headers = {
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
+            "X-Requested-With": "3742,HttpRequest",
+            "X-Anc-Jsonmode": "CamelCase",
+            "Dnt": "1",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -540,8 +553,7 @@ class BrowserAuthManager:
             "Cookie": cookie_header,
         }
         if canary:
-            headers["canary"] = canary
-            headers["X-Canary"] = canary
+            headers["__requestverificationtoken"] = canary
 
         _LOGGER.info("browser_fetch: attempt 1 — API request %s", full_url)
 
