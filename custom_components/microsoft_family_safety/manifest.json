@@ -1,7 +1,7 @@
 {
   "domain": "microsoft_family_safety",
   "name": "Microsoft Family Safety",
-  "version": "1.0.0-rc24",
+  "version": "1.0.0-rc25",
   "codeowners": [
     "@noiwid"
   ],
