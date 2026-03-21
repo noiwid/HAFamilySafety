@@ -517,7 +517,8 @@ class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
         if web_data is None:
             return "unknown"
         if isinstance(web_data, dict):
-            is_enabled = web_data.get("isEnabled", web_data.get("IsEnabled"))
+            # API returns "enabled" (not "isEnabled")
+            is_enabled = web_data.get("enabled", web_data.get("isEnabled", web_data.get("IsEnabled")))
             if is_enabled is True:
                 return "enabled"
             if is_enabled is False:
@@ -544,9 +545,19 @@ class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
             return {ATTR_USER_ID: self._account_id}
         attrs = {ATTR_USER_ID: self._account_id}
         if isinstance(web_data, dict):
-            # Include blocked sites, allowed sites, and other settings
-            for key in ("blockedSites", "allowedSites", "BlockedSites", "AllowedSites",
-                        "isEnabled", "IsEnabled", "contentRatingAge", "ContentRatingAge"):
+            # Include all useful fields from the API response
+            for key in (
+                "enabled", "isEnabled", "IsEnabled",
+                "filterLevel", "FilterLevel",
+                "categories", "Categories",
+                "useAllowedListOnly", "UseAllowedListOnly",
+                "blockedBrowsersEnabled", "BlockedBrowsersEnabled",
+                "restrictUnknown", "RestrictUnknown",
+                "warnWhenRestricted", "WarnWhenRestricted",
+                "exceptions", "Exceptions",
+                "blockedSites", "allowedSites", "BlockedSites", "AllowedSites",
+                "contentRatingAge", "ContentRatingAge",
+            ):
                 if key in web_data:
                     attrs[key] = web_data[key]
         return attrs
