@@ -389,13 +389,18 @@ class BrowserAuthManager:
                     "created_at": session.get("created_at"),
                 }
 
-    async def browser_fetch(self, url: str, params: dict | None = None) -> dict | None:
+    async def browser_fetch(
+        self, url: str, params: dict | None = None
+    ) -> dict | None:
         """Make an API call through an authenticated browser session.
 
         Launches a temporary Chromium instance with saved cookies,
         navigates to the family page to establish the session,
         then uses fetch() from within the page to call the API.
         This ensures all JS-managed tokens (canary, CSRF, etc.) are present.
+
+        Returns the JSON response dict on success, or a dict with
+        ``__error`` key on failure (None only for setup issues).
         """
         if not self._storage:
             _LOGGER.warning("No storage configured for browser_fetch")
@@ -409,6 +414,10 @@ class BrowserAuthManager:
 
         if not cookies:
             return None
+
+        _LOGGER.info(
+            "browser_fetch: loaded %d cookies from storage", len(cookies)
+        )
 
         browser = None
         try:
@@ -439,15 +448,37 @@ class BrowserAuthManager:
             page = await context.new_page()
 
             # Navigate to family page to establish full session
-            _LOGGER.debug("browser_fetch: loading family page...")
+            _LOGGER.info("browser_fetch: loading family page...")
             resp = await page.goto(
                 "https://account.microsoft.com/family",
-                wait_until="networkidle",
+                wait_until="load",
                 timeout=30000,
             )
 
-            if resp and resp.status != 200:
-                _LOGGER.warning("browser_fetch: family page returned %s", resp.status)
+            final_url = page.url
+            resp_status = resp.status if resp else "no response"
+            _LOGGER.info(
+                "browser_fetch: family page status=%s, final_url=%s",
+                resp_status,
+                final_url,
+            )
+
+            # Detect login redirect — cookies are likely expired
+            if "login.microsoftonline.com" in final_url or "login.live.com" in final_url or "login.microsoft.com" in final_url:
+                _LOGGER.error(
+                    "browser_fetch: redirected to login page (%s) — cookies are expired or invalid. "
+                    "Please re-authenticate via the addon.",
+                    final_url,
+                )
+                return {
+                    "__error": True,
+                    "status": 401,
+                    "text": f"Redirected to login: {final_url}",
+                    "code": "LOGIN_REDIRECT",
+                }
+
+            # Wait a bit for any JS-based session tokens to be set
+            await page.wait_for_timeout(2000)
 
             # Build the full URL with params
             query = ""
@@ -457,18 +488,31 @@ class BrowserAuthManager:
             full_url = url + query
 
             # Use browser's fetch() — this includes all session tokens automatically
-            _LOGGER.debug("browser_fetch: calling %s", full_url)
+            _LOGGER.info("browser_fetch: calling %s", full_url)
             result = await page.evaluate(
                 """async (url) => {
                     try {
                         const resp = await fetch(url, {
                             credentials: 'include',
-                            headers: { 'Accept': 'application/json' }
+                            headers: {
+                                'Accept': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest'
+                            }
                         });
+                        const text = await resp.text();
                         if (!resp.ok) {
-                            return { __error: true, status: resp.status, text: await resp.text() };
+                            return {
+                                __error: true,
+                                status: resp.status,
+                                text: text,
+                                headers: Object.fromEntries(resp.headers.entries())
+                            };
                         }
-                        return await resp.json();
+                        try {
+                            return JSON.parse(text);
+                        } catch (e) {
+                            return { __error: true, status: resp.status, text: text.substring(0, 500), message: 'Invalid JSON response' };
+                        }
                     } catch (e) {
                         return { __error: true, message: e.message };
                     }
@@ -483,15 +527,15 @@ class BrowserAuthManager:
                 _LOGGER.warning(
                     "browser_fetch error: status=%s text=%s",
                     result.get("status", "?"),
-                    str(result.get("text", result.get("message", "")))[:200],
+                    str(result.get("text", result.get("message", "")))[:500],
                 )
-                return None
+                return result
 
             _LOGGER.info("browser_fetch: success for %s", full_url)
             return result
 
         except Exception as exc:
-            _LOGGER.error("browser_fetch failed: %s", exc)
+            _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
             return None
         finally:
             if browser:
