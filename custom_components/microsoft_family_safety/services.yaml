@@ -1,0 +1,421 @@
+block_app:
+  name: Block Application
+  description: Block an application for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    app_id:
+      name: Application ID
+      description: The application ID to block (e.g., "appx:Microsoft.WindowsStore").
+      required: true
+      selector:
+        text:
+
+unblock_app:
+  name: Unblock Application
+  description: Unblock an application for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    app_id:
+      name: Application ID
+      description: The application ID to unblock.
+      required: true
+      selector:
+        text:
+
+lock_platform:
+  name: Lock Platform
+  description: Lock a platform (Windows/Xbox/Mobile) for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform to lock.
+      required: true
+      selector:
+        select:
+          options:
+            - "Windows"
+            - "Xbox"
+            - "Mobile"
+    duration_hours:
+      name: Duration (hours)
+      description: Duration of the lock in hours (default 24).
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 168
+          step: 1
+          unit_of_measurement: hours
+
+unlock_platform:
+  name: Unlock Platform
+  description: Unlock a platform (Windows/Xbox/Mobile) for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform to unlock.
+      required: true
+      selector:
+        select:
+          options:
+            - "Windows"
+            - "Xbox"
+            - "Mobile"
+
+approve_request:
+  name: Approve Pending Request
+  description: Approve a pending screen time extension request.
+  fields:
+    request_id:
+      name: Request ID
+      description: The ID of the pending request to approve.
+      required: true
+      selector:
+        text:
+    extension_minutes:
+      name: Extension (minutes)
+      description: Time extension to grant in minutes (default 60).
+      default: 60
+      selector:
+        number:
+          min: 15
+          max: 480
+          step: 15
+          unit_of_measurement: minutes
+
+deny_request:
+  name: Deny Pending Request
+  description: Deny a pending screen time extension request.
+  fields:
+    request_id:
+      name: Request ID
+      description: The ID of the pending request to deny.
+      required: true
+      selector:
+        text:
+
+set_screentime_limit:
+  name: Set Screen Time Limit
+  description: Set the daily screen time allowance for a specific day of the week.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    day_of_week:
+      name: Day of Week
+      description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 6
+          step: 1
+    hours:
+      name: Hours
+      description: Allowed hours of screen time (0-24).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 24
+          step: 1
+          unit_of_measurement: hours
+    minutes:
+      name: Minutes
+      description: Additional minutes of screen time (0-59).
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 59
+          step: 15
+          unit_of_measurement: minutes
+
+set_screentime_intervals:
+  name: Set Screen Time Intervals
+  description: Set the allowed time window for screen time on a specific day.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    day_of_week:
+      name: Day of Week
+      description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 6
+          step: 1
+    start_hour:
+      name: Start Hour
+      description: Start of allowed window (0-23).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 23
+          step: 1
+    start_minute:
+      name: Start Minute
+      description: Start minute (0 or 30).
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 30
+    end_hour:
+      name: End Hour
+      description: End of allowed window (0-23).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 23
+          step: 1
+    end_minute:
+      name: End Minute
+      description: End minute (0 or 30).
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 30
+
+set_app_time_limit:
+  name: Set App Time Limit
+  description: Set a daily time limit for a specific application.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    app_id:
+      name: Application ID
+      description: The application ID (e.g., "x:windowsplt:61f08e27aff06317").
+      required: true
+      selector:
+        text:
+    app_name:
+      name: Application Name
+      description: The display name of the application.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform (windows, xbox, or mobile).
+      default: "windows"
+      selector:
+        select:
+          options:
+            - "windows"
+            - "xbox"
+            - "mobile"
+    hours:
+      name: Hours
+      description: Allowed hours per day (0-24).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 24
+          step: 1
+          unit_of_measurement: hours
+    minutes:
+      name: Minutes
+      description: Additional minutes per day (0-59).
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 59
+          step: 15
+          unit_of_measurement: minutes
+    start_time:
+      name: Start Time
+      description: "Start of allowed window (format: HH:MM:SS, default 07:00:00)."
+      default: "07:00:00"
+      selector:
+        text:
+    end_time:
+      name: End Time
+      description: "End of allowed window (format: HH:MM:SS, default 22:00:00)."
+      default: "22:00:00"
+      selector:
+        text:
+
+remove_app_time_limit:
+  name: Remove App Time Limit
+  description: Remove the time limit for a specific application.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    app_id:
+      name: Application ID
+      description: The application ID.
+      required: true
+      selector:
+        text:
+    app_name:
+      name: Application Name
+      description: The display name of the application.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: The platform (windows, xbox, or mobile).
+      default: "windows"
+      selector:
+        select:
+          options:
+            - "windows"
+            - "xbox"
+            - "mobile"
+
+block_website:
+  name: Block Website
+  description: Block a website for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    website:
+      name: Website
+      description: The domain to block (e.g., "example.com").
+      required: true
+      selector:
+        text:
+
+remove_website:
+  name: Remove Website
+  description: Remove a website from blocked/allowed list.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    website:
+      name: Website
+      description: The domain to remove.
+      required: true
+      selector:
+        text:
+
+toggle_web_filter:
+  name: Toggle Web Filter
+  description: Enable or disable web filtering for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: True to enable web filtering, false to disable.
+      required: true
+      selector:
+        boolean:
+
+set_age_rating:
+  name: Set Age Rating
+  description: Set the content age rating restriction for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    age:
+      name: Age Rating
+      description: "Age limit (3-20, or 21 for no restriction)."
+      required: true
+      selector:
+        number:
+          min: 3
+          max: 21
+          step: 1
+
+set_acquisition_policy:
+  name: Set Ask-to-Buy Policy
+  description: Enable or disable ask-to-buy (purchase approval) for a child account.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    require_approval:
+      name: Require Approval
+      description: True = require approval for purchases, false = unrestricted.
+      required: true
+      selector:
+        boolean:
+
+lock_account:
+  name: Lock Account
+  description: Lock a child account by setting all screen time to zero (all 7 days, all intervals). Saves current policy for later restoration.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account to lock.
+      required: true
+      selector:
+        text:
+
+unlock_account:
+  name: Unlock Account
+  description: Unlock a child account by restoring previously saved screen time policy. If no saved policy exists, restores defaults (2h/day, 07:00-22:00).
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account to unlock.
+      required: true
+      selector:
+        text:

@@ -1,202 +1,477 @@
-# Microsoft Family Safety for Home Assistant 👨‍👩‍👧‍👦
+# Microsoft Family Safety for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/release/noiwid/HAFamilySafety.svg)](https://github.com/noiwid/HAFamilySafety/releases)
-[![License](https://img.shields.io/github/license/noiwid/HAFamilySafety.svg)](LICENSE)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![GitHub Release](https://img.shields.io/github/release/noiwid/HAFamilySafety.svg?style=for-the-badge)](https://github.com/noiwid/HAFamilySafety/releases)
+[![License](https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge)](LICENSE)
+[![HA Minimum Version](https://img.shields.io/badge/HA-%3E%3D%202024.1-41BDF5?style=for-the-badge)](https://www.home-assistant.io/)
 
-> **Read-only monitoring integration for Home Assistant to track Microsoft Family Safety accounts and device usage.**
+A full-featured Home Assistant custom integration for **Microsoft Family Safety**. Monitor screen time, manage app restrictions, lock accounts, control web filtering, and adjust daily limits — all from your Home Assistant dashboard.
 
-This integration allows you to monitor your children's screen time and device usage from Home Assistant. **Note: Remote device control is not functional.**
-
----
-
-## ⚠️ IMPORTANT LIMITATIONS
-
-### What Works ✅
-
-- **Screen time monitoring** - Today's usage and daily averages
-- **Last usage tracking** - Date and time of last device connection
-- **Account information** - First name, surname, and profile picture
-- **Account balance** - Allowance tracking (if enabled)
-- **Device list** - All devices associated with child accounts
-- **Application data** - Installed applications and their status
-
-### What Does NOT Work ❌
-
-**Remote device control (blocking/unblocking) does not work.**
-
-- API commands are accepted (HTTP 201 status)
-- Status changes in Home Assistant
-- **BUT devices don't actually block/unblock**
-
-### Why This Limitation?
-
-This is a **Microsoft Family Safety limitation**, not an integration issue:
-
-1. **No official API** - Microsoft provides no public API for Family Safety
-2. **Disabled functionality** - The "Lock device" button in Microsoft's official app no longer works
-3. **Original integration archived** - The [ha-familysafety](https://github.com/pantherale0/ha-familysafety) integration by pantherale0 was archived in October 2025, likely for the same reasons
-
-This integration uses an **unofficial, undocumented API** discovered through reverse engineering. Microsoft may modify or disable it at any time.
+> **Domain:** `microsoft_family_safety` | **IoT Class:** Cloud Polling | **Languages:** English, French
 
 ---
 
-## 📦 Installation
+## What's New in v1.0.0
 
-For detailed installation instructions, see **[INSTALL.md](INSTALL.md)**.
+### Account Lock — the headline feature
 
-### Via HACS (Recommended) 🔥
+The original per-platform lock (Windows/Xbox/Mobile) relied on a Microsoft API (`override_device`) that **no longer works**. v1.0.0 introduces a new **Account Lock switch** that actually works:
+
+- **`switch.{name}_lock`** — a single toggle per child account
+- **ON** = locks the account by setting all 7-day screen time quotas to 0 and blocking all time intervals
+- **OFF** = unlocks by restoring the previously saved quotas
+- **Persists across HA restarts** — saved policies are stored via HA's native `.storage/` mechanism
+- Works with automations (watchdog pattern, schedules, etc.)
+
+### Full feature list
+
+- **17 services** covering app management, account locking, screen time configuration, web filtering, content restrictions, and purchase controls
+- **Web API client** for capabilities beyond the pyfamilysafety library (daily limits, time windows, web filters, age ratings, purchase controls)
+- **Number entities** for adjusting daily screen time limits per day of the week directly from the UI
+- **Time entities** for setting allowed screen time intervals (start/end) per day of the week
+- **Switch entities** for blocking apps and locking accounts
+- **Button entities** for approving or denying pending screen time extension requests
+- **Sensors**: Screen Time, Account Info, Applications, Balance, Web Filter, Screen Time Policy, Pending Requests
+- **Per-device entities**: dedicated screen time and info sensors for each physical device
+- **Hub architecture** — creates HA devices for each child account and each physical device
+- **Configurable polling interval** (30s to 3600s) via the options flow
+- **Full French translations** for config flow, options, and all services
+
+---
+
+## Features
+
+| Category | What you can do |
+|----------|----------------|
+| **Account Lock** | Lock/unlock a child's entire account with a single switch |
+| **Screen time monitoring** | Track daily usage per child and per device |
+| **Screen time policies** | Adjust daily allowances and allowed time intervals per day |
+| **App management** | Block/unblock apps, set per-app time limits and windows |
+| **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
+| **Purchase controls** | Enable/disable ask-to-buy via service call |
+| **Request handling** | Approve or deny pending screen time requests from HA |
+
+---
+
+## Installation
+
+### Via HACS (Recommended)
 
 1. Open **HACS** in Home Assistant
-2. Click on **Integrations**
-3. Click the **⋮** menu in the top right corner
-4. Select **Custom repositories**
-5. Add the repository URL: `https://github.com/noiwid/HAFamilySafety`
-6. Category: **Integration**
-7. Click **Add**
-8. Search for **"Microsoft Family Safety"** in HACS
-9. Click **Download**
-10. **Restart Home Assistant**
+2. Go to **Integrations** and click the three-dot menu in the top right
+3. Select **Custom repositories**
+4. Add `https://github.com/noiwid/HAFamilySafety` with category **Integration**
+5. Search for **Microsoft Family Safety** in HACS and click **Download**
+6. Restart Home Assistant
 
-### Manual Installation 🛠️
+### Manual Installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/noiwid/HAFamilySafety/releases)
-2. Extract the `custom_components/microsoft_family_safety` folder to your `config/custom_components/` directory
+2. Copy the `custom_components/microsoft_family_safety` folder into your `config/custom_components/` directory
 3. Restart Home Assistant
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-### 1. Add the Integration
+### Initial Setup
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **+ Add Integration**
-3. Search for **"Microsoft Family Safety"**
-4. Click **Next** - you'll see an authentication URL
+1. Go to **Settings > Devices & Services > Add Integration**
+2. Search for **Microsoft Family Safety**
+3. An authentication URL is displayed — copy it and open it in your browser (incognito recommended)
+4. Sign in with your **Microsoft parent account**
+5. You will be redirected to a blank page. Copy the **entire URL** from the address bar:
+   ```
+   https://login.live.com/oauth20_desktop.srf?code=M.C123_ABC...&lc=1033
+   ```
+6. Paste the redirect URL back into the Home Assistant form and submit
 
-### 2. Authenticate with Microsoft
+The integration will discover all child accounts and their associated devices automatically.
 
-1. **Copy the authentication URL** displayed in Home Assistant
-2. **Open it in your browser** (use a private/incognito window recommended)
-3. **Log in** with your Microsoft account (parent account)
-4. After login, you'll be redirected to a **blank page**
-5. **Copy the entire URL** from your browser's address bar
+### Options
 
-The redirect URL looks like:
-```
-https://login.live.com/oauth20_desktop.srf?code=M.C123_ABC...&lc=1033
-```
+After setup, go to **Settings > Devices & Services > Microsoft Family Safety > Configure** to adjust:
 
-### 3. Complete Setup
-
-1. **Paste the complete redirect URL** in the Home Assistant form
-2. Click **Submit**
-
-The integration will automatically discover all child accounts and their devices.
-
-> **Note:** The authentication token is valid for several weeks. When it expires, Home Assistant will prompt you to reauthenticate using the same process.
+| Option | Range | Default |
+|--------|-------|---------|
+| Update interval | 30 – 3600 seconds | 300 seconds (5 min) |
 
 ---
 
-## 📊 Available Sensors
+## Devices & Entities
 
-### Per Child Account
+The integration creates two types of HA devices:
 
-- **Screen Time** (`sensor.{name}_screen_time`)
-  - Today's usage in minutes
-  - Attributes: `formatted_time`, `hours`, `minutes`, `seconds`, `average_screentime`
+| Device Type | Name Example | Manufacturer | Model |
+|-------------|-------------|--------------|-------|
+| Child account | Maceo Collin (Family Safety) | Microsoft | Family Safety Account |
+| Physical device | DESKTOP-9N6PNLL | From API | From API |
 
-- **Account Info** (`sensor.{name}_account_info`)
-  - Full name
-  - Attributes: Profile picture, device count, application count
+Physical devices are linked to their parent child account via `via_device`.
 
-- **Applications** (`sensor.{name}_applications`)
-  - Total application count
-  - Attributes: Blocked app count, full application list
+### Sensors — Per Child Account
 
-- **Balance** (`sensor.{name}_balance`) *(if enabled)*
-  - Account balance/allowance
-  - Currency unit
+| Entity | Entity ID | State | Key Attributes |
+|--------|-----------|-------|----------------|
+| Screen Time | `sensor.{name}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `seconds`, `average_screentime`, `date` |
+| Account Info | `sensor.{name}_account_info` | Full name | `user_id`, `first_name`, `surname`, `profile_picture`, `device_count`, `application_count` |
+| Applications | `sensor.{name}_applications` | App count | `blocked_count`, `applications` |
+| Balance | `sensor.{name}_balance` | Account balance | *(monetary sensor, only if available)* |
+| Pending Requests | `sensor.{name}_pending_requests` | Request count | `requests` |
+| Web Filter | `sensor.{name}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge` |
+| Screen Time Policy | `sensor.{name}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` ... `sunday_allowance` |
 
-### Per Device
+### Sensors — Per Physical Device
 
-- **Device Screen Time** (`sensor.{device}_screen_time`)
-  - Time used today in minutes
-  - Attributes: `formatted_time`, `hours`, `minutes`, `seconds`
+| Entity | Entity ID | State | Key Attributes |
+|--------|-----------|-------|----------------|
+| Device Screen Time | `sensor.{device}_screen_time` | Minutes used today | — |
+| Device Info | `sensor.{device}_info` | Device name | `model`, `OS`, `last_seen`, `manufacturer`, `device_class` |
 
-- **Device Info** (`sensor.{device}_info`)
-  - Device name
-  - Attributes: Model, OS, last seen, manufacturer, device class
+### Switches — Per Child Account
 
-- **Device Blocked** (`sensor.{device}_blocked`)
-  - Lock status: `active` or `blocked`
-  - Dynamic icon based on status
+| Entity | Entity ID | Behavior |
+|--------|-----------|----------|
+| **Account Lock** | `switch.{name}_lock` | **ON = account locked** (all screen time set to 0). Saves quotas before locking, restores on unlock. Persists across restarts. |
+| App Block | `switch.{name}_app_{appname}` | ON = app blocked. One switch per application. |
+| Platform Lock *(deprecated)* | `switch.{name}_{platform}_lock` | ON = platform locked. Kept for backwards compatibility — **use Account Lock instead**. |
+
+### Buttons — Per Child Account
+
+| Entity | Entity ID | Action |
+|--------|-----------|--------|
+| Approve Request | `button.{name}_approve_request` | Approves the oldest pending screen time request (+1 hour) |
+| Deny Request | `button.{name}_deny_request` | Denies the oldest pending request |
+
+### Number Entities — Per Child Account
+
+| Entity | Entity ID | Range | Step |
+|--------|-----------|-------|------|
+| Daily Limit (x7) | `number.{name}_{day}_limit` | 0 – 1440 minutes | 15 min |
+
+One entity per day of the week (Sunday through Saturday). Adjustable directly from the UI.
+
+### Time Entities — Per Child Account
+
+| Entity | Entity ID | Description |
+|--------|-----------|-------------|
+| Interval Start (x7) | `time.{name}_{day}_start` | Start of the allowed screen time window |
+| Interval End (x7) | `time.{name}_{day}_end` | End of the allowed screen time window |
+
+One start/end pair per day of the week.
 
 ---
 
-## 💡 Example Automations
+## Services
 
-### Alert on Excessive Screen Time
+The integration exposes **17 services**, split between the pyfamilysafety library and the web API.
+
+### Account Lock
+
+```yaml
+# Lock a child account (sets all screen time to 0, saves current policy)
+service: microsoft_family_safety.lock_account
+data:
+  account_id: "child-account-uuid"
+```
+
+```yaml
+# Unlock a child account (restores saved policy)
+service: microsoft_family_safety.unlock_account
+data:
+  account_id: "child-account-uuid"
+```
+
+### App Management
+
+```yaml
+# Block an application
+service: microsoft_family_safety.block_app
+data:
+  account_id: "child-account-uuid"
+  app_id: "app-uuid"
+```
+
+```yaml
+# Unblock an application
+service: microsoft_family_safety.unblock_app
+data:
+  account_id: "child-account-uuid"
+  app_id: "app-uuid"
+```
+
+```yaml
+# Set a per-app daily time limit with allowed window
+service: microsoft_family_safety.set_app_time_limit
+data:
+  account_id: "child-account-uuid"
+  app_id: "app-uuid"
+  app_name: "Minecraft"
+  platform: "windows"
+  hours: 1
+  minutes: 30
+  start_time: "08:00:00"
+  end_time: "20:00:00"
+```
+
+```yaml
+# Remove a per-app time limit
+service: microsoft_family_safety.remove_app_time_limit
+data:
+  account_id: "child-account-uuid"
+  app_id: "app-uuid"
+  app_name: "Minecraft"
+  platform: "windows"
+```
+
+### Platform Control *(deprecated)*
+
+> These services rely on `override_device` which Microsoft has broken. Use **Account Lock** instead.
+
+```yaml
+# Lock a platform for N hours
+service: microsoft_family_safety.lock_platform
+data:
+  account_id: "child-account-uuid"
+  platform: "Xbox"
+  duration_hours: 2
+```
+
+```yaml
+# Unlock a platform
+service: microsoft_family_safety.unlock_platform
+data:
+  account_id: "child-account-uuid"
+  platform: "Xbox"
+```
+
+### Screen Time
+
+```yaml
+# Set daily screen time allowance
+service: microsoft_family_safety.set_screentime_limit
+data:
+  account_id: "child-account-uuid"
+  day_of_week: 1  # 0=Sunday, 6=Saturday
+  hours: 2
+  minutes: 0
+```
+
+```yaml
+# Set allowed time window (30-min precision)
+service: microsoft_family_safety.set_screentime_intervals
+data:
+  account_id: "child-account-uuid"
+  day_of_week: 1
+  start_hour: 8
+  start_minute: 0
+  end_hour: 20
+  end_minute: 30
+```
+
+### Request Handling
+
+```yaml
+# Approve a pending screen time request (+N minutes)
+service: microsoft_family_safety.approve_request
+data:
+  request_id: "request-uuid"
+  extension_minutes: 60
+```
+
+```yaml
+# Deny a pending request
+service: microsoft_family_safety.deny_request
+data:
+  request_id: "request-uuid"
+```
+
+### Web Filtering
+
+```yaml
+# Block a website
+service: microsoft_family_safety.block_website
+data:
+  account_id: "child-account-uuid"
+  website: "example.com"
+```
+
+```yaml
+# Remove a blocked website
+service: microsoft_family_safety.remove_website
+data:
+  account_id: "child-account-uuid"
+  website: "example.com"
+```
+
+```yaml
+# Toggle web content filtering
+service: microsoft_family_safety.toggle_web_filter
+data:
+  account_id: "child-account-uuid"
+  enabled: true
+```
+
+### Content & Purchase Controls
+
+```yaml
+# Set age rating (PEGI 3-20, or 21 for unrestricted)
+service: microsoft_family_safety.set_age_rating
+data:
+  account_id: "child-account-uuid"
+  age: 12
+```
+
+```yaml
+# Enable or disable ask-to-buy
+service: microsoft_family_safety.set_acquisition_policy
+data:
+  account_id: "child-account-uuid"
+  require_approval: true
+```
+
+---
+
+## Automation Examples
+
+### Lock account on schedule
+
+Lock the PC every evening at 21:00 and unlock at 08:00:
 
 ```yaml
 automation:
-  - alias: "Screen Time Alert"
+  - alias: "Lock account at 21:00"
+    trigger:
+      - platform: time
+        at: "21:00:00"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.maceo_collin_lock
+
+  - alias: "Unlock account at 08:00"
+    trigger:
+      - platform: time
+        at: "08:00:00"
+    action:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.maceo_collin_lock
+```
+
+### Watchdog — prevent manual unlock
+
+Re-lock automatically if the child somehow bypasses the lock:
+
+```yaml
+automation:
+  - alias: "Anti-bypass watchdog"
+    trigger:
+      - trigger: state
+        entity_id: switch.maceo_collin_lock
+        to: "off"
+    condition:
+      - condition: time
+        after: "21:00:00"
+        before: "08:00:00"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.maceo_collin_lock
+```
+
+### Screen Time Alert
+
+Send a notification when a child exceeds 2 hours of screen time:
+
+```yaml
+automation:
+  - alias: "Screen time limit alert"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.child_screen_time
-        above: 7200  # 2 hours
+        entity_id: sensor.maceo_collin_screen_time
+        above: 120
     action:
-      - service: notify.mobile_app
+      - action: notify.mobile_app_your_phone
         data:
-          title: "⚠️ Screen Time Alert"
-          message: "Child has exceeded 2 hours of screen time today"
+          title: "Screen Time Alert"
+          message: >
+            {{ state_attr('sensor.maceo_collin_screen_time', 'formatted_time') }}
+            of screen time used today.
+```
+
+### Weekday Screen Time Limit
+
+Automatically set a 1.5-hour limit on school days:
+
+```yaml
+automation:
+  - alias: "Set weekday screen time limits"
+    trigger:
+      - platform: time
+        at: "00:05:00"
+    condition:
+      - condition: time
+        weekday: [mon, tue, wed, thu, fri]
+    action:
+      - action: microsoft_family_safety.set_screentime_limit
+        data:
+          account_id: "child-account-uuid"
+          day_of_week: "{{ now().weekday() }}"
+          hours: 1
+          minutes: 30
 ```
 
 ### Dashboard Card
 
+A simple entities card for daily monitoring:
+
 ```yaml
 type: entities
-title: Family Screen Time
+title: Family Safety
 entities:
-  - entity: sensor.child_screen_time
-    name: Today
-  - entity: sensor.child_screen_time
-    type: attribute
-    attribute: average_screentime
-    name: Daily Average
-```
-
-### History Graph
-
-```yaml
-type: history-graph
-title: Screen Time Evolution
-entities:
-  - sensor.child_screen_time
-hours_to_show: 168  # 7 days
+  - entity: switch.maceo_collin_lock
+    name: Account Lock
+  - type: divider
+  - entity: sensor.maceo_collin_screen_time
+    name: Screen Time
+  - entity: sensor.maceo_collin_pending_requests
+    name: Pending Requests
+  - entity: sensor.maceo_collin_web_filter
+    name: Web Filter
+  - type: divider
+  - entity: number.maceo_collin_monday_limit
+    name: Monday Limit
+  - entity: number.maceo_collin_tuesday_limit
+    name: Tuesday Limit
 ```
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
-### Token Expires
+### Authentication Errors
 
-The authentication token expires after a few weeks. If you see authentication errors:
+The OAuth token expires after a few weeks. Home Assistant will prompt you to reauthenticate using the same redirect URL flow described above.
 
-1. Home Assistant will automatically prompt you to reauthenticate
-2. Follow the same authentication process (see Configuration section)
-3. Copy the new redirect URL and paste it in the form
+### Web API Services Return 401/403
+
+The web API endpoints reuse the Bearer token from pyfamilysafety. If Microsoft rejects it for certain endpoints, the affected services will fail with a 401 or 403 error. Try reauthenticating.
 
 ### Data Not Updating
 
-- The integration polls the API every **5 minutes**
-- You can force an update: **Settings** → **Devices & Services** → **Microsoft Family Safety** → **⋮** → **Reload**
+- The default polling interval is 5 minutes. You can lower it to 30 seconds in the integration options.
+- Force refresh: **Settings > Devices & Services > Microsoft Family Safety > Reload**.
 
-### Debug Logs
+### Account Lock Issues
 
-To enable detailed logging, add to `configuration.yaml`:
+- **Lock takes a few seconds** — the integration needs to set quotas for all 7 days (14 API calls). This is normal.
+- **Unlock restores defaults if HA storage was cleared** — if `.storage/microsoft_family_safety.saved_screentime` is deleted, unlock will restore 2h/day, 07:00-22:00 as a safe default.
+- **Lock is account-wide** — it affects all platforms (Windows, Xbox, Mobile) simultaneously. There is no per-platform lock available via the web API.
+
+### Debug Logging
+
+Add the following to `configuration.yaml` and restart:
 
 ```yaml
 logger:
@@ -206,123 +481,55 @@ logger:
     pyfamilysafety: debug
 ```
 
-Then restart Home Assistant and check **Settings** → **System** → **Logs**.
+Check logs at **Settings > System > Logs**.
 
 ---
 
-## 🤝 Contributing
+## Known Limitations
 
-**This integration needs your help!**
-
-### Known Issues Needing Contributors
-
-#### 1. Device Control 🔐
-
-Remote blocking/unblocking doesn't work.
-
-**What's needed:**
-- Network traffic analysis of Microsoft Family Safety mobile app
-- Reverse engineering of device control API endpoints
-- Testing different request structures
-- API documentation
-
-**Required skills:**
-- Python
-- Network analysis (Wireshark, mitmproxy, Charles Proxy)
-- REST API reverse engineering
-- Testing and debugging
-
-#### 2. API Documentation 📚
-
-Microsoft Family Safety API is not publicly documented.
-
-**What's needed:**
-- Complete endpoint mapping
-- Request/response structure documentation
-- Rate limits and quota identification
-- Error code documentation
-
-**Required skills:**
-- Technical writing
-- API analysis
-- Python (for testing)
-
-#### 3. Authentication Improvements 🔑
-
-Current system requires manual token retrieval.
-
-**What's needed:**
-- Automatic token refresh implementation
-- Full OAuth2 flow support
-- Better authentication error handling
-- Authentication process documentation
-
-**Required skills:**
-- OAuth2 / JWT
-- Python
-- Home Assistant config flow
-- Security best practices
-
-### How to Contribute
-
-1. **Fork** the project
-2. **Create a branch** for your feature (`git checkout -b feature/AmazingFeature`)
-3. **Commit** your changes (`git commit -m 'Add some AmazingFeature'`)
-4. **Push** to the branch (`git push origin feature/AmazingFeature`)
-5. **Open a Pull Request**
-
-For more details, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Useful Resources
-
-- [Home Assistant Developer Documentation](https://developers.home-assistant.io/)
-- [pyfamilysafety library](https://github.com/pantherale0/pyfamilysafety)
-- [Home Assistant Integration Blueprint](https://github.com/custom-components/blueprint)
-- [Burp Suite](https://portswigger.net/burp) / [Charles Proxy](https://www.charlesproxy.com/) for network analysis
+- **Unofficial API** — Microsoft provides no public API for Family Safety. This integration relies on reverse-engineered endpoints that may change or break at any time.
+- **Per-platform lock is broken** — Microsoft removed the `override_device` endpoint. The Account Lock switch is the recommended replacement but locks all platforms at once.
+- **Web API authentication** shares the pyfamilysafety token. Some endpoints may reject it depending on Microsoft's server-side validation.
+- **Lock/unlock speed** — locking requires 14 sequential API calls (7 days x 2 endpoints). This takes a few seconds.
 
 ---
 
-## 📝 License
+## Contributing
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for more information.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
----
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes and open a pull request
 
-## ⚖️ Disclaimer
-
-This integration uses an **unofficial API** for Microsoft Family Safety. It is neither approved nor supported by Microsoft.
-
-- ⚠️ Microsoft may modify or disable the API at any time
-- ⚠️ Use at your own risk
-- ⚠️ No guarantee of functionality is provided
-- ⚠️ Use this integration responsibly and in compliance with Microsoft's terms of service
-
----
-
-## 🙏 Acknowledgments
-
-- **[pantherale0](https://github.com/pantherale0)** for the original [ha-familysafety](https://github.com/pantherale0/ha-familysafety) integration and [pyfamilysafety](https://github.com/pantherale0/pyfamilysafety) library
-- The **Home Assistant** community for support and feedback
+Areas where help is especially appreciated:
+- Microsoft API endpoint documentation and analysis
+- Authentication improvements (automatic token refresh)
+- Additional language translations
+- Testing across different Family Safety account configurations
 
 ---
 
-## 📞 Support
+## Acknowledgments
 
-- **Issues**: [GitHub Issues](https://github.com/noiwid/HAFamilySafety/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/noiwid/HAFamilySafety/discussions)
-- **Home Assistant Forum**: [Community Forum](https://community.home-assistant.io/)
-
-### When Reporting Issues
-
-Please provide:
-- Home Assistant version
-- Microsoft Family Safety integration version
-- Relevant logs (with debug enabled)
-- Detailed problem description
-- Steps to reproduce
+- **[pantherale0](https://github.com/pantherale0)** — original [ha-familysafety](https://github.com/pantherale0/ha-familysafety) integration and [pyfamilysafety](https://github.com/pantherale0/pyfamilysafety) library
+- The **Home Assistant** community for feedback and testing
 
 ---
 
-**Made with ❤️ for the Home Assistant community**
+## License
 
-> If this integration is useful to you, consider giving it a ⭐ on GitHub!
+This project is licensed under the [MIT License](LICENSE).
+
+## Disclaimer
+
+This integration uses an **unofficial, undocumented API** for Microsoft Family Safety. It is not approved, endorsed, or supported by Microsoft. Microsoft may modify or disable the underlying API at any time. Use at your own risk and in compliance with Microsoft's terms of service.
+
+---
+
+## Support
+
+- [GitHub Issues](https://github.com/noiwid/HAFamilySafety/issues)
+- [GitHub Discussions](https://github.com/noiwid/HAFamilySafety/discussions)
+
+When reporting an issue, please include: HA version, integration version, debug logs, and steps to reproduce.

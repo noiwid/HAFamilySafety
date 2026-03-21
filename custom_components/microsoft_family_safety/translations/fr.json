@@ -3,13 +3,16 @@
     "step": {
       "user": {
         "title": "Authentification Microsoft Family Safety",
-        "description": "Pour vous authentifier avec Microsoft Family Safety, vous devez obtenir un code d'autorisation.\n\n**IMPORTANT : Copiez cette URL et ouvrez-la dans votre navigateur :**\n\n{auth_url}\n\nAprès vous être connecté, vous serez redirigé vers une page vierge. L'URL de cette page contiendra un paramètre 'code'.\n\nCliquez sur Suivant lorsque vous êtes prêt à entrer l'URL de redirection."
+        "description": "Pour vous authentifier avec Microsoft Family Safety, vous devez obtenir un code d'autorisation.\n\n**IMPORTANT : Copiez cette URL et ouvrez-la dans votre navigateur :**\n\n{auth_url}\n\n**Statut de l'addon :** {addon_status}\n\nAprès vous être connecté, vous serez redirigé vers une page vierge. L'URL de cette page contiendra un paramètre 'code'.\n\nCliquez sur Suivant lorsque vous êtes prêt à entrer l'URL de redirection."
       },
       "auth": {
         "title": "Entrez l'URL de redirection",
         "description": "Collez l'URL complète depuis la barre d'adresse de votre navigateur après vous être connecté.\n\nL'URL devrait ressembler à :\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nVous pouvez coller l'URL entière - le code sera extrait automatiquement.\n\n**URL d'authentification (si nécessaire à nouveau) :**\n{auth_url}",
         "data": {
-          "redirect_url": "URL de redirection"
+          "redirect_url": "URL de redirection",
+          "update_interval": "Intervalle de mise à jour (secondes)",
+          "platforms": "Plateformes surveillées",
+          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)"
         }
       },
       "reauth_confirm": {
@@ -29,6 +32,307 @@
     "abort": {
       "already_configured": "Ce compte est déjà configuré.",
       "reauth_successful": "Réauthentification réussie !"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options Microsoft Family Safety",
+        "data": {
+          "update_interval": "Intervalle de mise à jour (secondes)",
+          "platforms": "Plateformes surveillées",
+          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)"
+        },
+        "description": "Configurer l'intervalle d'interrogation, les plateformes surveillées et l'URL de l'addon auth."
+      }
+    }
+  },
+  "services": {
+    "block_app": {
+      "name": "Bloquer une application",
+      "description": "Bloquer une application pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "app_id": {
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application à bloquer."
+        }
+      }
+    },
+    "unblock_app": {
+      "name": "Débloquer une application",
+      "description": "Débloquer une application pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "app_id": {
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application à débloquer."
+        }
+      }
+    },
+    "lock_platform": {
+      "name": "Verrouiller une plateforme",
+      "description": "Verrouiller une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "La plateforme à verrouiller (Windows, Xbox ou Mobile)."
+        },
+        "duration_hours": {
+          "name": "Durée (heures)",
+          "description": "Durée du verrouillage en heures."
+        }
+      }
+    },
+    "unlock_platform": {
+      "name": "Déverrouiller une plateforme",
+      "description": "Déverrouiller une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "La plateforme à déverrouiller (Windows, Xbox ou Mobile)."
+        }
+      }
+    },
+    "approve_request": {
+      "name": "Approuver une demande",
+      "description": "Approuver une demande d'extension de temps d'écran.",
+      "fields": {
+        "request_id": {
+          "name": "ID de la demande",
+          "description": "L'identifiant de la demande à approuver."
+        },
+        "extension_minutes": {
+          "name": "Extension (minutes)",
+          "description": "Temps d'extension à accorder en minutes."
+        }
+      }
+    },
+    "deny_request": {
+      "name": "Refuser une demande",
+      "description": "Refuser une demande d'extension de temps d'écran.",
+      "fields": {
+        "request_id": {
+          "name": "ID de la demande",
+          "description": "L'identifiant de la demande à refuser."
+        }
+      }
+    },
+    "set_screentime_limit": {
+      "name": "Définir la limite de temps d'écran",
+      "description": "Définir la durée journalière de temps d'écran autorisé pour un jour de la semaine.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "day_of_week": {
+          "name": "Jour de la semaine",
+          "description": "Jour de la semaine (0=Dimanche, 1=Lundi, ..., 6=Samedi)."
+        },
+        "hours": {
+          "name": "Heures",
+          "description": "Heures de temps d'écran autorisées."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Minutes supplémentaires de temps d'écran."
+        }
+      }
+    },
+    "set_screentime_intervals": {
+      "name": "Définir les plages horaires",
+      "description": "Définir la plage horaire autorisée pour le temps d'écran sur un jour donné.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "day_of_week": {
+          "name": "Jour de la semaine",
+          "description": "Jour de la semaine (0=Dimanche, 1=Lundi, ..., 6=Samedi)."
+        },
+        "start_hour": {
+          "name": "Heure de début",
+          "description": "Début de la plage autorisée (0-23)."
+        },
+        "start_minute": {
+          "name": "Minute de début",
+          "description": "Minute de début (0 ou 30)."
+        },
+        "end_hour": {
+          "name": "Heure de fin",
+          "description": "Fin de la plage autorisée (0-23)."
+        },
+        "end_minute": {
+          "name": "Minute de fin",
+          "description": "Minute de fin (0 ou 30)."
+        }
+      }
+    },
+    "set_app_time_limit": {
+      "name": "Définir une limite par application",
+      "description": "Définir une limite de temps journalière pour une application spécifique.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "app_id": {
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application."
+        },
+        "app_name": {
+          "name": "Nom de l'application",
+          "description": "Le nom d'affichage de l'application."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "La plateforme (windows, xbox ou mobile)."
+        },
+        "hours": {
+          "name": "Heures",
+          "description": "Heures autorisées par jour."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Minutes supplémentaires par jour."
+        },
+        "start_time": {
+          "name": "Heure de début",
+          "description": "Début de la plage autorisée (HH:MM:SS)."
+        },
+        "end_time": {
+          "name": "Heure de fin",
+          "description": "Fin de la plage autorisée (HH:MM:SS)."
+        }
+      }
+    },
+    "remove_app_time_limit": {
+      "name": "Supprimer la limite par application",
+      "description": "Supprimer la limite de temps pour une application spécifique.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "app_id": {
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application."
+        },
+        "app_name": {
+          "name": "Nom de l'application",
+          "description": "Le nom d'affichage de l'application."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "La plateforme (windows, xbox ou mobile)."
+        }
+      }
+    },
+    "block_website": {
+      "name": "Bloquer un site web",
+      "description": "Bloquer un site web pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "website": {
+          "name": "Site web",
+          "description": "Le domaine à bloquer."
+        }
+      }
+    },
+    "remove_website": {
+      "name": "Supprimer un site web",
+      "description": "Supprimer un site web de la liste de blocage/autorisation.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "website": {
+          "name": "Site web",
+          "description": "Le domaine à supprimer."
+        }
+      }
+    },
+    "toggle_web_filter": {
+      "name": "Activer/Désactiver le filtre web",
+      "description": "Activer ou désactiver le filtrage web pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "enabled": {
+          "name": "Activé",
+          "description": "True pour activer, false pour désactiver."
+        }
+      }
+    },
+    "set_age_rating": {
+      "name": "Définir la limite d'âge",
+      "description": "Définir la restriction d'âge pour le contenu.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "age": {
+          "name": "Limite d'âge",
+          "description": "Limite d'âge (3-20, ou 21 pour aucune restriction)."
+        }
+      }
+    },
+    "set_acquisition_policy": {
+      "name": "Définir la politique d'achat",
+      "description": "Activer ou désactiver l'approbation des achats pour un compte enfant.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "require_approval": {
+          "name": "Approbation requise",
+          "description": "True pour exiger une approbation, false pour autoriser les achats."
+        }
+      }
+    },
+    "lock_account": {
+      "name": "Verrouiller le compte",
+      "description": "Verrouiller un compte enfant en mettant tout le temps d'écran à zéro. Sauvegarde la politique actuelle pour restauration ultérieure.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant à verrouiller."
+        }
+      }
+    },
+    "unlock_account": {
+      "name": "Déverrouiller le compte",
+      "description": "Déverrouiller un compte enfant en restaurant la politique de temps d'écran sauvegardée.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant à déverrouiller."
+        }
+      }
     }
   }
 }

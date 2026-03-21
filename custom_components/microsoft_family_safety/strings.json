@@ -3,13 +3,16 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety Authentication",
-        "description": "To authenticate with Microsoft Family Safety, you need to obtain an authorization code.\n\n**IMPORTANT: Copy this URL and open it in your browser:**\n\n{auth_url}\n\nAfter logging in, you will be redirected to a blank page. The URL of that page will contain a 'code' parameter.\n\nClick Next when ready to enter the redirect URL."
+        "description": "To authenticate with Microsoft Family Safety, you need to obtain an authorization code.\n\n**IMPORTANT: Copy this URL and open it in your browser:**\n\n{auth_url}\n\n**Addon status:** {addon_status}\n\nAfter logging in, you will be redirected to a blank page. The URL of that page will contain a 'code' parameter.\n\nClick Next when ready to enter the redirect URL."
       },
       "auth": {
         "title": "Enter Redirect URL",
         "description": "Paste the complete URL from your browser's address bar after logging in.\n\nThe URL should look like:\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nYou can paste the entire URL - the code will be extracted automatically.\n\n**Authentication URL (if needed again):**\n{auth_url}",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "Redirect URL",
+          "update_interval": "Update interval (seconds)",
+          "platforms": "Monitored platforms",
+          "auth_url": "Auth addon URL (optional, for Docker standalone)"
         }
       },
       "reauth_confirm": {
@@ -29,6 +32,307 @@
     "abort": {
       "already_configured": "This account is already configured.",
       "reauth_successful": "Reauthentication successful!"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Microsoft Family Safety Options",
+        "data": {
+          "update_interval": "Update interval (seconds)",
+          "platforms": "Monitored platforms",
+          "auth_url": "Auth addon URL (optional, for Docker standalone)"
+        },
+        "description": "Configure the polling interval, monitored platforms, and auth addon URL."
+      }
+    }
+  },
+  "services": {
+    "block_app": {
+      "name": "Block Application",
+      "description": "Block an application for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "app_id": {
+          "name": "Application ID",
+          "description": "The application ID to block."
+        }
+      }
+    },
+    "unblock_app": {
+      "name": "Unblock Application",
+      "description": "Unblock an application for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "app_id": {
+          "name": "Application ID",
+          "description": "The application ID to unblock."
+        }
+      }
+    },
+    "lock_platform": {
+      "name": "Lock Platform",
+      "description": "Lock a platform (Windows/Xbox/Mobile) for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "The platform to lock (Windows, Xbox, or Mobile)."
+        },
+        "duration_hours": {
+          "name": "Duration (hours)",
+          "description": "Duration of the lock in hours."
+        }
+      }
+    },
+    "unlock_platform": {
+      "name": "Unlock Platform",
+      "description": "Unlock a platform (Windows/Xbox/Mobile) for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "The platform to unlock (Windows, Xbox, or Mobile)."
+        }
+      }
+    },
+    "approve_request": {
+      "name": "Approve Pending Request",
+      "description": "Approve a pending screen time extension request.",
+      "fields": {
+        "request_id": {
+          "name": "Request ID",
+          "description": "The ID of the pending request to approve."
+        },
+        "extension_minutes": {
+          "name": "Extension (minutes)",
+          "description": "Time extension to grant in minutes."
+        }
+      }
+    },
+    "deny_request": {
+      "name": "Deny Pending Request",
+      "description": "Deny a pending screen time extension request.",
+      "fields": {
+        "request_id": {
+          "name": "Request ID",
+          "description": "The ID of the pending request to deny."
+        }
+      }
+    },
+    "set_screentime_limit": {
+      "name": "Set Screen Time Limit",
+      "description": "Set the daily screen time allowance for a specific day of the week.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "day_of_week": {
+          "name": "Day of Week",
+          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)."
+        },
+        "hours": {
+          "name": "Hours",
+          "description": "Allowed hours of screen time."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Additional minutes of screen time."
+        }
+      }
+    },
+    "set_screentime_intervals": {
+      "name": "Set Screen Time Intervals",
+      "description": "Set the allowed time window for screen time on a specific day.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "day_of_week": {
+          "name": "Day of Week",
+          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)."
+        },
+        "start_hour": {
+          "name": "Start Hour",
+          "description": "Start of allowed window (0-23)."
+        },
+        "start_minute": {
+          "name": "Start Minute",
+          "description": "Start minute (0 or 30)."
+        },
+        "end_hour": {
+          "name": "End Hour",
+          "description": "End of allowed window (0-23)."
+        },
+        "end_minute": {
+          "name": "End Minute",
+          "description": "End minute (0 or 30)."
+        }
+      }
+    },
+    "set_app_time_limit": {
+      "name": "Set App Time Limit",
+      "description": "Set a daily time limit for a specific application.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "app_id": {
+          "name": "Application ID",
+          "description": "The application ID."
+        },
+        "app_name": {
+          "name": "Application Name",
+          "description": "The display name of the application."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "The platform (windows, xbox, or mobile)."
+        },
+        "hours": {
+          "name": "Hours",
+          "description": "Allowed hours per day."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Additional minutes per day."
+        },
+        "start_time": {
+          "name": "Start Time",
+          "description": "Start of allowed window (HH:MM:SS)."
+        },
+        "end_time": {
+          "name": "End Time",
+          "description": "End of allowed window (HH:MM:SS)."
+        }
+      }
+    },
+    "remove_app_time_limit": {
+      "name": "Remove App Time Limit",
+      "description": "Remove the time limit for a specific application.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "app_id": {
+          "name": "Application ID",
+          "description": "The application ID."
+        },
+        "app_name": {
+          "name": "Application Name",
+          "description": "The display name of the application."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "The platform (windows, xbox, or mobile)."
+        }
+      }
+    },
+    "block_website": {
+      "name": "Block Website",
+      "description": "Block a website for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "website": {
+          "name": "Website",
+          "description": "The domain to block."
+        }
+      }
+    },
+    "remove_website": {
+      "name": "Remove Website",
+      "description": "Remove a website from blocked/allowed list.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "website": {
+          "name": "Website",
+          "description": "The domain to remove."
+        }
+      }
+    },
+    "toggle_web_filter": {
+      "name": "Toggle Web Filter",
+      "description": "Enable or disable web filtering for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "True to enable, false to disable."
+        }
+      }
+    },
+    "set_age_rating": {
+      "name": "Set Age Rating",
+      "description": "Set the content age rating restriction.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "age": {
+          "name": "Age Rating",
+          "description": "Age limit (3-20, or 21 for no restriction)."
+        }
+      }
+    },
+    "set_acquisition_policy": {
+      "name": "Set Ask-to-Buy Policy",
+      "description": "Enable or disable purchase approval for a child account.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "require_approval": {
+          "name": "Require Approval",
+          "description": "True to require approval, false for unrestricted."
+        }
+      }
+    },
+    "lock_account": {
+      "name": "Lock Account",
+      "description": "Lock a child account by setting all screen time to zero. Saves current policy for later restoration.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account to lock."
+        }
+      }
+    },
+    "unlock_account": {
+      "name": "Unlock Account",
+      "description": "Unlock a child account by restoring previously saved screen time policy.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account to unlock."
+        }
+      }
     }
   }
 }

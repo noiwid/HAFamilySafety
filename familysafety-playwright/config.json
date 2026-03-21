@@ -1,0 +1,40 @@
+{
+  "name": "Microsoft Family Safety Auth",
+  "version": "1.0.0",
+  "slug": "familysafety-playwright",
+  "description": "Authentication service for Microsoft Family Safety integration using browser automation",
+  "url": "https://github.com/noiwid/HAFamilySafety",
+  "arch": ["amd64", "aarch64"],
+  "startup": "application",
+  "boot": "auto",
+  "init": false,
+  "ports": {
+    "8098/tcp": 8098,
+    "6081/tcp": 6081
+  },
+  "ports_description": {
+    "8098/tcp": "Web interface for Microsoft authentication",
+    "6081/tcp": "noVNC web interface for browser access"
+  },
+  "map": ["share:rw"],
+  "options": {
+    "log_level": "info",
+    "auth_timeout": 300,
+    "session_duration": 86400,
+    "language": "",
+    "timezone": "",
+    "vnc_password": "familysafety"
+  },
+  "schema": {
+    "log_level": "list(trace|debug|info|warning|error)?",
+    "auth_timeout": "int(60,600)?",
+    "session_duration": "int(3600,604800)?",
+    "language": "str?",
+    "timezone": "str?",
+    "vnc_password": "password?"
+  },
+  "webui": "http://[HOST]:[PORT:8098]",
+  "host_network": false,
+  "hassio_api": true,
+  "hassio_role": "default"
+}
