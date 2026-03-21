@@ -1,4 +1,9 @@
-"""DataUpdateCoordinator for Microsoft Family Safety."""
+"""DataUpdateCoordinator for Microsoft Family Safety.
+
+Dual authentication strategy:
+- Mobile API (MSAuth1.0 token via pyfamilysafety) — for writes and basic reads
+- Web API (browser cookies from Playwright addon) — for screen time schedule reads
+"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -19,7 +24,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
+from .auth.addon_client import AddonCookieClient
 from .const import (
+    CONF_AUTH_URL,
     CONF_REFRESH_TOKEN,
     CONF_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL,
@@ -62,6 +69,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Saved screentime state for lock/unlock per account (persisted via HA Store)
         self._saved_screentime: dict[str, dict[str, Any]] = {}
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        # Addon cookie client for web API reads
+        auth_url = entry.data.get(CONF_AUTH_URL) or entry.options.get(CONF_AUTH_URL)
+        self._addon_client = AddonCookieClient(hass, auth_url=auth_url)
+        self._web_cookies_loaded = False
+        self._auth_notification_sent = False
 
     async def async_load_saved_screentime(self) -> None:
         """Load saved screentime policies from persistent storage."""
@@ -97,7 +109,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if "401" in err_str or "403" in err_str or "authentication" in err_str:
                 _LOGGER.error("Authentication failed during API setup: %s", err)
                 raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
-            # Transient server error (e.g. "upstream aggregator error") — retry later
             _LOGGER.warning("Transient API error during setup, will retry: %s", err)
             raise UpdateFailed(f"Transient API error: {err}") from err
         except Exception as err:
@@ -107,6 +118,29 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
             _LOGGER.warning("Unexpected error during API setup, will retry: %s", err)
             raise UpdateFailed(f"API setup error: {err}") from err
+
+    async def _async_load_web_cookies(self) -> None:
+        """Load browser cookies from the Playwright auth addon."""
+        try:
+            cookies = await self._addon_client.load_cookies()
+            if cookies and self.web_api:
+                self.web_api.set_web_cookies(cookies)
+                self._web_cookies_loaded = True
+                if self._auth_notification_sent:
+                    self._auth_notification_sent = False
+                _LOGGER.info(
+                    "Web cookies loaded from addon (%d cookies) — "
+                    "screen time schedule reading enabled",
+                    len(cookies),
+                )
+            else:
+                _LOGGER.debug(
+                    "No web cookies available from addon — "
+                    "screen time schedule reading disabled. "
+                    "Install the Family Safety Auth add-on for full support."
+                )
+        except Exception as err:
+            _LOGGER.debug("Could not load web cookies: %s", err)
 
     def get_account(self, account_id: str) -> Account | None:
         """Get the raw pyfamilysafety Account object."""
@@ -171,7 +205,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_approve_request(
         self, request_id: str, extension_time: int = 3600
     ) -> bool:
-        """Approve a pending screen time request. extension_time in seconds."""
+        """Approve a pending screen time request."""
         if self.api is None:
             return False
         return await self.api.approve_pending_request(request_id, extension_time)
@@ -183,7 +217,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return await self.api.deny_pending_request(request_id)
 
     # ──────────────────────────────────────────────────────────────────────
-    # New controls (via web API)
+    # Controls via web API (mobile API writes)
     # ──────────────────────────────────────────────────────────────────────
 
     async def async_set_screentime_limit(
@@ -233,11 +267,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
 
     async def async_remove_app_time_limit(
-        self,
-        child_id: str,
-        app_id: str,
-        display_name: str,
-        platform: str,
+        self, child_id: str, app_id: str, display_name: str, platform: str
     ) -> None:
         """Remove a per-app time limit."""
         if self.web_api is None:
@@ -303,11 +333,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
         if not daily or not isinstance(daily, dict):
             return None
-        # Check if all 7 days have 0 allowance
         for day_key in self.DAYS_OF_WEEK:
             day_data = daily.get(day_key) or daily.get(day_key.capitalize())
             if not day_data:
-                return None  # Can't determine
+                return None
             allowance = day_data.get("allowance") or day_data.get("Allowance") or "00:00:00"
             if allowance != "00:00:00":
                 return False
@@ -322,7 +351,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_policy = await self.web_api.get_screentime_policy(account_id)
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
-            # Only save if not already locked (avoid overwriting saved state with zeros)
             has_nonzero = False
             for day_key in self.DAYS_OF_WEEK:
                 day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
@@ -334,11 +362,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._saved_screentime[account_id] = current_policy
                 await self._async_save_screentime()
                 _LOGGER.info(
-                    "Saved screentime policy for account %s before locking (persisted)",
+                    "Saved screentime policy for account %s before locking",
                     account_id,
                 )
 
-        # Set all 7 days to 0 minutes with error recovery
+        # Set all 7 days to 0 minutes
         days_locked = 0
         try:
             for day_index in range(7):
@@ -351,11 +379,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 days_locked += 1
         except Exception as err:
             _LOGGER.error(
-                "Lock failed on day %d/7 for account %s: %s. "
-                "Attempting to complete remaining days...",
+                "Lock failed on day %d/7 for account %s: %s",
                 days_locked, account_id, err,
             )
-            # Best-effort: try to lock the remaining days individually
             for remaining in range(days_locked, 7):
                 try:
                     await self.web_api.set_screentime_daily_allowance(
@@ -369,11 +395,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.warning(
                         "Could not lock day %d for account %s", remaining, account_id
                     )
-            if days_locked < 7:
-                _LOGGER.error(
-                    "Partial lock: only %d/7 days locked for account %s",
-                    days_locked, account_id,
-                )
 
         _LOGGER.info(
             "Account %s locked (%d/7 days set to 0)", account_id, days_locked
@@ -459,7 +480,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
 
     # ──────────────────────────────────────────────────────────────────────
-    # Data fetching (web API enrichment)
+    # Data fetching
     # ──────────────────────────────────────────────────────────────────────
 
     async def _fetch_web_api_data(self, account_id: str) -> dict[str, Any]:
@@ -479,7 +500,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         try:
             screentime = await self.web_api.get_screentime_policy(account_id)
-            _LOGGER.debug("Raw screentime policy response for %s: %s", account_id, screentime)
+            _LOGGER.debug("Screen time policy response for %s: %s", account_id, screentime)
             result["screentime_policy"] = screentime
         except Exception as err:
             _LOGGER.debug("Could not fetch screen time policy: %s", err)
@@ -494,7 +515,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Transform an Account object to dictionary format."""
         account_id = account.user_id
 
-        # Determine blocked platforms
         blocked_platforms_list = []
         if account.blocked_platforms:
             blocked_platforms_list = [str(p) for p in account.blocked_platforms]
@@ -544,6 +564,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data from Family Safety API."""
         if self.api is None:
             await self._async_setup_api()
+
+        # Load/refresh web cookies from addon (every poll cycle)
+        await self._async_load_web_cookies()
 
         try:
             await self.api.update()
@@ -595,6 +618,30 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             _LOGGER.exception("Unexpected error fetching data: %s", err)
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+    async def _create_auth_notification(self) -> None:
+        """Create a persistent notification when web cookies expire."""
+        if self._auth_notification_sent:
+            return
+
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Microsoft Family Safety - Authentication Required",
+                "message": (
+                    "Your Microsoft Family Safety web session has expired.\n\n"
+                    "Please re-authenticate using the **Family Safety Auth** add-on:\n"
+                    "1. Open the add-on in Supervisor\n"
+                    "2. Click 'Open Web UI'\n"
+                    "3. Log in with your Microsoft account\n"
+                    "4. The integration will automatically resume once authenticated."
+                ),
+                "notification_id": "familysafety_auth_expired",
+            },
+        )
+        self._auth_notification_sent = True
+        _LOGGER.info("Created web authentication notification for user")
 
     async def async_cleanup(self) -> None:
         """Clean up resources."""

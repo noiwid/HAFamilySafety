@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety Authentication",
-        "description": "To authenticate with Microsoft Family Safety, you need to obtain an authorization code.\n\n**IMPORTANT: Copy this URL and open it in your browser:**\n\n{auth_url}\n\nAfter logging in, you will be redirected to a blank page. The URL of that page will contain a 'code' parameter.\n\nClick Next when ready to enter the redirect URL."
+        "description": "To authenticate with Microsoft Family Safety, you need to obtain an authorization code.\n\n**IMPORTANT: Copy this URL and open it in your browser:**\n\n{auth_url}\n\n**Addon status:** {addon_status}\n\nAfter logging in, you will be redirected to a blank page. The URL of that page will contain a 'code' parameter.\n\nClick Next when ready to enter the redirect URL."
       },
       "auth": {
         "title": "Enter Redirect URL",
@@ -11,7 +11,8 @@
         "data": {
           "redirect_url": "Redirect URL",
           "update_interval": "Update interval (seconds)",
-          "platforms": "Monitored platforms"
+          "platforms": "Monitored platforms",
+          "auth_url": "Auth addon URL (optional, for Docker standalone)"
         }
       },
       "reauth_confirm": {
@@ -39,9 +40,10 @@
         "title": "Microsoft Family Safety Options",
         "data": {
           "update_interval": "Update interval (seconds)",
-          "platforms": "Monitored platforms"
+          "platforms": "Monitored platforms",
+          "auth_url": "Auth addon URL (optional, for Docker standalone)"
         },
-        "description": "Configure the polling interval and monitored platforms."
+        "description": "Configure the polling interval, monitored platforms, and auth addon URL."
       }
     }
   },

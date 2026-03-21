@@ -12,6 +12,7 @@
   "iot_class": "cloud_polling",
   "integration_type": "hub",
   "requirements": [
-    "pyfamilysafety==1.1.2"
+    "pyfamilysafety==1.1.2",
+    "cryptography>=3.4.8"
   ]
 }
