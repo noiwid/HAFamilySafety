@@ -181,14 +181,39 @@ class FamilySafetyWebAPI:
     async def get_screentime_policy(
         self, child_id: str, platform: str = "Windows"
     ) -> dict | None:
-        """Get device limits schedules (daily allowances + time windows)."""
-        result = await self._request(
-            "GET",
-            f"/v4/devicelimits/schedules/{child_id}",
-            extra_headers={"Plat-Info": platform},
-        )
-        _LOGGER.debug("Schedules response for %s: %s", child_id, result)
-        return result
+        """Get device limits schedules (daily allowances + time windows).
+
+        Tries GET first (with appliesTo query param), then falls back
+        to a no-op PATCH which should return the current schedule.
+        """
+        plat_headers = {"Plat-Info": platform}
+
+        # Attempt 1: GET with appliesTo query parameter
+        try:
+            result = await self._request(
+                "GET",
+                f"/v4/devicelimits/schedules/{child_id}",
+                params={"appliesTo": platform},
+                extra_headers=plat_headers,
+            )
+            _LOGGER.debug("Schedules GET response for %s: %s", child_id, result)
+            return result
+        except FamilySafetyWebAPIError as err:
+            _LOGGER.debug("Schedules GET failed (%s), trying PATCH fallback", err)
+
+        # Attempt 2: PATCH with empty body — response should contain current schedule
+        try:
+            result = await self._request(
+                "PATCH",
+                f"/v4/devicelimits/schedules/{child_id}",
+                json_data={},
+                extra_headers=plat_headers,
+            )
+            _LOGGER.debug("Schedules PATCH fallback response for %s: %s", child_id, result)
+            return result
+        except FamilySafetyWebAPIError as err:
+            _LOGGER.debug("Schedules PATCH fallback also failed: %s", err)
+            raise
 
     async def get_device_overrides(self, child_id: str) -> dict | None:
         """Get device lock/unlock overrides."""
