@@ -404,16 +404,25 @@ class BrowserAuthManager:
         """
         if not self._storage:
             _LOGGER.warning("No storage configured for browser_fetch")
-            return None
+            return {
+                "__error": True, "status": 503, "code": "NO_STORAGE",
+                "text": "No storage configured for browser_fetch",
+            }
 
         try:
             cookies = await self._storage.load_cookies()
         except FileNotFoundError:
             _LOGGER.warning("No saved cookies for browser_fetch")
-            return None
+            return {
+                "__error": True, "status": 503, "code": "NO_COOKIES",
+                "text": "No saved cookies — please authenticate via the addon first",
+            }
 
         if not cookies:
-            return None
+            return {
+                "__error": True, "status": 503, "code": "EMPTY_COOKIES",
+                "text": "Cookie file is empty — please re-authenticate via the addon",
+            }
 
         _LOGGER.info(
             "browser_fetch: loaded %d cookies from storage", len(cookies)
@@ -536,7 +545,12 @@ class BrowserAuthManager:
 
         except Exception as exc:
             _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
-            return None
+            return {
+                "__error": True,
+                "status": 500,
+                "text": f"browser_fetch exception: {type(exc).__name__}: {exc}",
+                "code": "EXCEPTION",
+            }
         finally:
             if browser:
                 try:

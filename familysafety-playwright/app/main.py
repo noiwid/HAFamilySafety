@@ -343,7 +343,11 @@ async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
         if result is None:
             raise HTTPException(
                 status_code=502,
-                detail="Failed to fetch screen time from Microsoft (no response)",
+                detail={
+                    "error": "NO_RESPONSE",
+                    "microsoft_status": "unknown",
+                    "message": "browser_fetch returned None unexpectedly",
+                },
             )
         # browser_fetch now returns error dicts instead of None
         if isinstance(result, dict) and result.get("__error"):
