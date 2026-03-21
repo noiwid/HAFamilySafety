@@ -222,10 +222,12 @@ class FamilySafetyWebAPI:
 
         cookie_jar = self._build_cookie_jar()
         headers = {
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
+            "X-Requested-With": "3742,HttpRequest",
+            "X-Anc-Jsonmode": "CamelCase",
+            "Dnt": "1",
             "Origin": "https://account.microsoft.com",
             "Referer": "https://account.microsoft.com/family",
             "Sec-Fetch-Site": "same-origin",
@@ -238,7 +240,7 @@ class FamilySafetyWebAPI:
             ),
         }
 
-        # Microsoft web APIs may require a canary/CSRF token
+        # Microsoft web APIs require the canary cookie as __requestverificationtoken header
         canary = getattr(self, "_web_canary", None)
         if not canary:
             for cookie in self._web_cookies:
@@ -249,9 +251,7 @@ class FamilySafetyWebAPI:
                     _LOGGER.debug("Found CSRF/canary token in cookie: %s", name)
                     break
         if canary:
-            # Microsoft uses both header names depending on the endpoint
-            headers["canary"] = canary
-            headers["X-Canary"] = canary
+            headers["__requestverificationtoken"] = canary
 
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         async with aiohttp.ClientSession(
