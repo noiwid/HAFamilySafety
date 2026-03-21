@@ -167,12 +167,22 @@ class FamilySafetyWebAPI:
 
     async def get_web_browsing_settings(self, child_id: str) -> dict | None:
         """Get web browsing/filter restrictions."""
-        return await self._request(
+        result = await self._request(
             "GET", f"/v1/WebRestrictions/{child_id}"
         )
+        _LOGGER.debug("WebRestrictions response for %s: %s", child_id, result)
+        return result
 
     async def get_screentime_policy(self, child_id: str) -> dict | None:
-        """Get device limits / schedule overrides."""
+        """Get device limits schedules (daily allowances + time windows)."""
+        result = await self._request(
+            "GET", f"/v4/devicelimits/schedules/{child_id}"
+        )
+        _LOGGER.debug("Schedules response for %s: %s", child_id, result)
+        return result
+
+    async def get_device_overrides(self, child_id: str) -> dict | None:
+        """Get device lock/unlock overrides."""
         return await self._request(
             "GET", f"/v1/devicelimits/{child_id}/overrides"
         )
