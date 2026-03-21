@@ -448,6 +448,30 @@ class BrowserAuthManager:
         Returns the JSON response dict on success, or a dict with
         ``__error`` key on failure.
         """
+        # Wait for any active auth session to finish first
+        active = [
+            s for s in self._sessions.values()
+            if s.get("status") == "authenticating"
+        ]
+        if active:
+            _LOGGER.info(
+                "browser_fetch: auth session in progress, waiting for it to complete..."
+            )
+            for _ in range(60):  # Wait up to 120 seconds
+                await asyncio.sleep(2)
+                still_active = [
+                    s for s in self._sessions.values()
+                    if s.get("status") == "authenticating"
+                ]
+                if not still_active:
+                    _LOGGER.info("browser_fetch: auth session completed, proceeding")
+                    break
+            else:
+                return {
+                    "__error": True, "status": 503, "code": "AUTH_IN_PROGRESS",
+                    "text": "Authentication session still in progress after waiting",
+                }
+
         # Build the full URL with params
         query = ""
         if params:
@@ -470,6 +494,12 @@ class BrowserAuthManager:
         async with self._browser_lock:
             context = None
             try:
+                # Remove stale SingletonLock from previous crashes/restarts
+                lock_file = Path(_PROFILE_DIR) / "SingletonLock"
+                if lock_file.exists():
+                    _LOGGER.info("browser_fetch: removing stale SingletonLock")
+                    lock_file.unlink(missing_ok=True)
+
                 _LOGGER.info("browser_fetch: opening persistent context from %s", _PROFILE_DIR)
 
                 context = await self._playwright.chromium.launch_persistent_context(
