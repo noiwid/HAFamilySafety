@@ -164,6 +164,7 @@ async def index():
         <p class="subtitle">{t['subtitle']}</p>
         <div id="status" class="status"></div>
         <button id="authButton" onclick="startAuth()">{t['start_auth']}</button>
+        <button id="reAuthButton" onclick="startAuth()" style="display:none; margin-top:10px; background:#6c757d;">{t['reauth_button']}</button>
         <div class="instructions">
             <h3>{t['instructions_title']}</h3>
             <ol>
@@ -190,7 +191,8 @@ async def index():
             auth_success: "{t['auth_success']}", auth_completed: "{t['auth_completed']}",
             auth_timeout: "{t['auth_timeout']}", retry_auth: "{t['retry_auth']}",
             auth_error: "{t['auth_error']}", unknown_error: "{t['unknown_error']}",
-            cookies_exist: "{t['cookies_exist']}", start_error: "{t['start_error']}"
+            cookies_exist: "{t['cookies_exist']}", reauth_button: "{t['reauth_button']}",
+            start_error: "{t['start_error']}"
         }};
         const novncUrl = window.location.protocol + '//' + window.location.hostname + ':6081/vnc.html?autoconnect=true&password=familysafety';
         document.getElementById('novnc-link').href = novncUrl;
@@ -257,7 +259,13 @@ async def index():
             try {{
                 const response = await fetch('/api/cookies/check');
                 const data = await response.json();
-                if (data.exists) showStatus(T.cookies_exist, "success");
+                if (data.exists) {{
+                    showStatus(T.cookies_exist, "success");
+                    // Cookies already available — hide main auth button,
+                    // show a secondary "Re-authenticate" button instead
+                    document.getElementById('authButton').style.display = 'none';
+                    document.getElementById('reAuthButton').style.display = 'flex';
+                }}
             }} catch (error) {{}}
         }});
     </script>
@@ -360,8 +368,10 @@ async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
                 status,
                 text,
             )
+            # Forward the status code from browser_fetch (e.g. 503 for BROWSER_BUSY)
+            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
             raise HTTPException(
-                status_code=502,
+                status_code=http_status,
                 detail={
                     "error": error_code,
                     "microsoft_status": status,

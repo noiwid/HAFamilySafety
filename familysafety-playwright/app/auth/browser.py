@@ -246,6 +246,23 @@ class BrowserAuthManager:
                 else:
                     _LOGGER.debug("Polling - URL unchanged")
 
+                # Detect marketing page redirect (expired profile cookies)
+                # Microsoft redirects to www.microsoft.com/.../family-safety when session is stale
+                if "www.microsoft.com" in current_url and "family-safety" in current_url:
+                    _LOGGER.info(
+                        "Redirected to marketing page — profile session expired, "
+                        "navigating to login..."
+                    )
+                    try:
+                        await page.goto(
+                            "https://account.microsoft.com/family",
+                            wait_until="load",
+                            timeout=15000,
+                        )
+                    except Exception:
+                        pass
+                    continue
+
                 # Method 1: URL-based detection
                 if "login.live.com" not in current_url and "login.microsoftonline.com" not in current_url:
                     if any(
@@ -482,13 +499,21 @@ class BrowserAuthManager:
         as the authentication browser.  All session state (cookies, localStorage,
         MSAL tokens, etc.) is preserved across calls and restarts.
         """
+        # If auth is in progress (lock held), return immediately
+        # instead of blocking until the HA HTTP request times out
+        if self._browser_lock.locked():
+            _LOGGER.info("browser_fetch: browser lock held (auth in progress?), returning immediately")
+            return {
+                "__error": True, "status": 503, "code": "BROWSER_BUSY",
+                "text": "Browser is busy (authentication may be in progress). Try again later.",
+            }
+
         # Build the full URL with params
         from urllib.parse import urlencode
         query = "?" + urlencode(params) if params else ""
         full_url = url + query
 
         # Use persistent context — all session state is on disk
-        # The _browser_lock ensures we wait for any active auth session
         return await self._persistent_context_fetch(full_url)
 
     async def _persistent_context_fetch(self, full_url: str) -> dict:

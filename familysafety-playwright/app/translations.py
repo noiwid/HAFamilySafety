@@ -29,7 +29,8 @@ TRANSLATIONS = {
         "retry_auth": "R\u00e9essayer l'authentification",
         "auth_error": "Erreur: ",
         "unknown_error": "Erreur inconnue",
-        "cookies_exist": "Des cookies sont d\u00e9j\u00e0 enregistr\u00e9s. Vous pouvez configurer l'int\u00e9gration dans Home Assistant.",
+        "cookies_exist": "Des cookies sont d\u00e9j\u00e0 enregistr\u00e9s. Vous pouvez configurer l'int\u00e9gration dans Home Assistant sans vous re-connecter.",
+        "reauth_button": "Re-authentifier (optionnel)",
         "start_error": "\u00c9chec du d\u00e9marrage de l'authentification",
     },
     "en": {
@@ -60,7 +61,8 @@ TRANSLATIONS = {
         "retry_auth": "Retry authentication",
         "auth_error": "Error: ",
         "unknown_error": "Unknown error",
-        "cookies_exist": "Cookies are already saved. You can configure the integration in Home Assistant.",
+        "cookies_exist": "Cookies are already saved. You can configure the integration in Home Assistant without re-authenticating.",
+        "reauth_button": "Re-authenticate (optional)",
         "start_error": "Failed to start authentication",
     },
 }
