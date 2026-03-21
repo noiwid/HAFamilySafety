@@ -59,6 +59,7 @@ class FamilySafetyWebAPI:
         self._token_expires: datetime | None = None
         # Browser cookies for web API reads
         self._web_cookies: list[dict[str, Any]] | None = None
+        self._web_canary: str | None = None
 
     def set_web_cookies(self, cookies: list[dict[str, Any]]) -> None:
         """Set browser cookies for web API access (from Playwright addon)."""
@@ -224,12 +225,27 @@ class FamilySafetyWebAPI:
             "Accept": "application/json",
             "Content-Type": "application/json",
             "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://account.microsoft.com",
+            "Referer": "https://account.microsoft.com/family",
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
         }
+
+        # Microsoft web APIs may require a canary/CSRF token
+        canary = getattr(self, "_web_canary", None)
+        if not canary:
+            for cookie in self._web_cookies:
+                name = cookie.get("name", "")
+                value = cookie.get("value", "")
+                if name.lower() in ("canary", "fpt", "xsrf-token", "__requestverificationtoken"):
+                    canary = value
+                    _LOGGER.debug("Found CSRF/canary token in cookie: %s", name)
+                    break
+        if canary:
+            headers["canary"] = canary
 
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         async with aiohttp.ClientSession(
@@ -252,9 +268,11 @@ class FamilySafetyWebAPI:
                     return None
 
                 if resp.status in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("Location", "unknown")
                     _LOGGER.warning(
-                        "Web API redirected (status %s) — cookies may be expired",
+                        "Web API redirected (status %s) to %s — cookies may be expired",
                         resp.status,
+                        location,
                     )
                     return None
 
@@ -262,7 +280,65 @@ class FamilySafetyWebAPI:
                 _LOGGER.warning(
                     "Web API error %s: %s", resp.status, text[:200]
                 )
+
+                # On 401, log cookie domains for diagnostics
+                if resp.status == 401:
+                    domains = {c.get("domain", "?") for c in (self._web_cookies or [])}
+                    _LOGGER.debug(
+                        "Web API 401 — cookie domains present: %s",
+                        ", ".join(sorted(domains)),
+                    )
                 return None
+
+    async def _warm_web_session(self) -> str | None:
+        """Visit the family page to initialize the web session and extract canary token.
+
+        Microsoft requires an active session before API calls succeed.
+        Returns the canary token if found, or None.
+        """
+        if not self._web_cookies:
+            return None
+
+        cookie_jar = self._build_cookie_jar()
+        headers = {
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        }
+
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        try:
+            async with aiohttp.ClientSession(
+                cookie_jar=cookie_jar, timeout=timeout
+            ) as session:
+                async with session.get(
+                    f"{self.WEB_API_BASE}/family",
+                    headers=headers,
+                    allow_redirects=True,
+                ) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        # Extract canary token from page if present
+                        import re
+                        match = re.search(
+                            r'"canary"\s*:\s*"([^"]+)"', text
+                        ) or re.search(
+                            r'name="canary"\s+(?:content|value)="([^"]+)"', text
+                        ) or re.search(
+                            r'"apiCanary"\s*:\s*"([^"]+)"', text
+                        )
+                        if match:
+                            _LOGGER.debug("Extracted canary token from family page")
+                            return match.group(1)
+                        _LOGGER.debug("Family page loaded (no canary token found)")
+                    else:
+                        _LOGGER.debug("Family page warm-up returned %s", resp.status)
+        except Exception as exc:
+            _LOGGER.debug("Family page warm-up failed: %s", exc)
+        return None
 
     async def get_screentime_policy(
         self, child_id: str, platform: str = "Windows"
@@ -281,6 +357,15 @@ class FamilySafetyWebAPI:
 
         url = f"{self.WEB_API_BASE}/family/api/st"
         result = await self._web_request("GET", url, params={"childId": child_id})
+
+        # If first attempt fails, warm up the session and retry
+        if result is None and self._web_cookies:
+            _LOGGER.debug("Web API returned None, warming up session and retrying...")
+            canary = await self._warm_web_session()
+            if canary:
+                # Store canary for subsequent requests
+                self._web_canary = canary
+            result = await self._web_request("GET", url, params={"childId": child_id})
 
         if result:
             _LOGGER.info(
