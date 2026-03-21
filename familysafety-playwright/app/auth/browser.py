@@ -95,6 +95,105 @@ class BrowserAuthManager:
             _LOGGER.error(f"Failed to initialize Playwright: {e}")
             raise
 
+    async def _wait_for_family_dashboard(self, page, timeout_ms: int = 20000) -> str:
+        """Navigate to the family page and wait until we actually land on the dashboard.
+
+        After auth or with a fresh profile, Microsoft often redirects through
+        ``complete-client-signin-oauth-silent`` before landing on the real
+        family dashboard.  This helper keeps trying until the URL contains
+        ``account.microsoft.com/family`` **without** being an OAuth intermediate
+        page, or until the timeout expires.
+
+        Returns the final page URL.
+        """
+        import time
+
+        _OAUTH_FRAGMENTS = (
+            "complete-signin-oauth",
+            "complete-client-signin",
+            "oauth20_authorize",
+        )
+        _NOT_AUTH_PATTERNS = (
+            "www.microsoft.com",  # marketing page redirect
+        )
+
+        deadline = time.monotonic() + timeout_ms / 1000
+        attempts = 0
+
+        while time.monotonic() < deadline:
+            attempts += 1
+            try:
+                _LOGGER.info(
+                    "_wait_for_family_dashboard: navigating (attempt %d)...",
+                    attempts,
+                )
+                await page.goto(
+                    "https://account.microsoft.com/family",
+                    wait_until="load",
+                    timeout=15000,
+                )
+            except Exception as e:
+                _LOGGER.warning(
+                    "_wait_for_family_dashboard: navigation error: %s", e
+                )
+
+            # Give JS redirects time to settle
+            await asyncio.sleep(3)
+            current_url = page.url
+            _LOGGER.info(
+                "_wait_for_family_dashboard: current URL: %s", current_url
+            )
+
+            # Check if we're on an OAuth intermediate page
+            if any(frag in current_url for frag in _OAUTH_FRAGMENTS):
+                _LOGGER.info(
+                    "_wait_for_family_dashboard: on OAuth intermediate page, "
+                    "waiting for JS redirect..."
+                )
+                # Wait for the JS redirect to complete
+                try:
+                    await page.wait_for_url(
+                        "**/family*",
+                        timeout=10000,
+                        wait_until="load",
+                    )
+                except Exception:
+                    pass
+                current_url = page.url
+                _LOGGER.info(
+                    "_wait_for_family_dashboard: after wait, URL: %s",
+                    current_url,
+                )
+
+            # Success: we're on account.microsoft.com/family (the real dashboard)
+            if (
+                "account.microsoft.com/family" in current_url
+                and not any(frag in current_url for frag in _OAUTH_FRAGMENTS)
+                and not any(pat in current_url for pat in _NOT_AUTH_PATTERNS)
+            ):
+                _LOGGER.info(
+                    "_wait_for_family_dashboard: landed on family dashboard!"
+                )
+                return current_url
+
+            # Not there yet — wait before retrying
+            remaining = deadline - time.monotonic()
+            if remaining > 3:
+                _LOGGER.info(
+                    "_wait_for_family_dashboard: not on dashboard yet, "
+                    "retrying (%.0fs remaining)...",
+                    remaining,
+                )
+                await asyncio.sleep(2)
+            else:
+                break
+
+        final_url = page.url
+        _LOGGER.warning(
+            "_wait_for_family_dashboard: timed out, final URL: %s", final_url
+        )
+        return final_url
+
     def _remove_stale_singleton_lock(self):
         """Remove SingletonLock if no Chromium process is using the profile.
 
@@ -279,20 +378,10 @@ class BrowserAuthManager:
                         _LOGGER.info(
                             "Navigating to account.microsoft.com/family to finalize session..."
                         )
-                        try:
-                            await page.goto(
-                                "https://account.microsoft.com/family",
-                                wait_until="load",
-                                timeout=15000,
-                            )
-                            _LOGGER.info(
-                                "Successfully navigated to Family Safety dashboard"
-                            )
-                            await asyncio.sleep(5)
-                        except Exception as e:
-                            _LOGGER.warning(
-                                f"Failed to navigate to Family Safety: {e}"
-                            )
+                        final = await self._wait_for_family_dashboard(page)
+                        _LOGGER.info(
+                            "Session finalization done, URL: %s", final
+                        )
 
                         authenticated = True
                         break
@@ -316,17 +405,10 @@ class BrowserAuthManager:
                             f"{[c['name'] for c in ms_auth_cookies]})"
                         )
 
-                        try:
-                            await page.goto(
-                                "https://account.microsoft.com/family",
-                                wait_until="load",
-                                timeout=15000,
-                            )
-                            await asyncio.sleep(5)
-                        except Exception as e:
-                            _LOGGER.warning(
-                                f"Failed to navigate to Family Safety: {e}"
-                            )
+                        final = await self._wait_for_family_dashboard(page)
+                        _LOGGER.info(
+                            "Session finalization done, URL: %s", final
+                        )
 
                         authenticated = True
                         break
@@ -544,58 +626,9 @@ class BrowserAuthManager:
 
                 page = context.pages[0] if context.pages else await context.new_page()
 
-                # Navigate to family page — JS will establish the full session
-                _LOGGER.info("browser_fetch: navigating to family page...")
-                try:
-                    resp = await page.goto(
-                        "https://account.microsoft.com/family",
-                        wait_until="domcontentloaded",
-                        timeout=30000,
-                    )
-                except Exception as nav_err:
-                    _LOGGER.warning(
-                        "browser_fetch: navigation error (will still try fetch): %s",
-                        nav_err,
-                    )
-                    resp = None
-
-                final_url = page.url
-                resp_status = resp.status if resp else "no response"
-                _LOGGER.info(
-                    "browser_fetch: family page status=%s, final_url=%s",
-                    resp_status,
-                    final_url,
-                )
-
-                # If we landed on an intermediate OAuth page (e.g. after
-                # fresh auth), wait for the redirect chain to complete
-                _OAUTH_INTERMEDIATE = (
-                    "complete-signin-oauth",
-                    "complete-client-signin",
-                    "oauth20_authorize",
-                )
-                if any(frag in final_url for frag in _OAUTH_INTERMEDIATE):
-                    _LOGGER.info(
-                        "browser_fetch: on OAuth intermediate page, "
-                        "waiting for redirect to family dashboard..."
-                    )
-                    try:
-                        await page.wait_for_url(
-                            "**/family**",
-                            timeout=15000,
-                            wait_until="domcontentloaded",
-                        )
-                    except Exception:
-                        _LOGGER.warning(
-                            "browser_fetch: timed out waiting for family "
-                            "redirect, current URL: %s",
-                            page.url,
-                        )
-                    final_url = page.url
-                    _LOGGER.info(
-                        "browser_fetch: after OAuth wait, final_url=%s",
-                        final_url,
-                    )
+                # Navigate to family dashboard, handling OAuth intermediate
+                # redirects and waiting until we're on the real page
+                final_url = await self._wait_for_family_dashboard(page)
 
                 # Detect login redirect — session expired, need re-auth
                 _LOGIN_DOMAINS = (
@@ -603,28 +636,25 @@ class BrowserAuthManager:
                     "login.live.com",
                     "login.microsoft.com",
                 )
-                _NOT_AUTH_PATTERNS = (
-                    "microsoft.com/fr-fr/microsoft-365/family-safety",
-                    "microsoft.com/en-us/microsoft-365/family-safety",
-                    "microsoft.com/microsoft-365/family-safety",
-                )
-                if any(domain in final_url for domain in _LOGIN_DOMAINS) or any(
-                    pat in final_url for pat in _NOT_AUTH_PATTERNS
+                if (
+                    any(domain in final_url for domain in _LOGIN_DOMAINS)
+                    or "www.microsoft.com" in final_url
+                    or "account.microsoft.com/family" not in final_url
                 ):
                     _LOGGER.error(
-                        "browser_fetch: redirected to login/marketing (%s) "
-                        "— session expired",
+                        "browser_fetch: not on family dashboard (%s) "
+                        "— session expired, need re-auth",
                         final_url,
                     )
                     return {
                         "__error": True,
                         "status": 401,
-                        "text": f"Redirected to login: {final_url}",
+                        "text": f"Not on family dashboard: {final_url}",
                         "code": "LOGIN_REDIRECT",
                     }
 
-                # Wait for JS-based session tokens (MSAL) to initialize
-                await page.wait_for_timeout(5000)
+                # Extra wait for JS-based session tokens (MSAL) to initialize
+                await page.wait_for_timeout(2000)
 
                 # Extract canary token from cookies (httpOnly — not accessible via JS)
                 canary = ""
