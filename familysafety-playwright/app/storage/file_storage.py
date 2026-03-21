@@ -104,3 +104,32 @@ class SharedStorage:
     async def check_exists(self) -> bool:
         """Check if cookies exist."""
         return self.storage_path.exists()
+
+    async def get_cookie_info(self) -> Dict[str, Any]:
+        """Return cookie metadata: exists, count, timestamp, age_hours."""
+        if not self.storage_path.exists():
+            return {"exists": False}
+
+        try:
+            encrypted = self.storage_path.read_bytes()
+            fernet = Fernet(self._encryption_key)
+            decrypted = fernet.decrypt(encrypted)
+            data = json.loads(decrypted.decode())
+
+            cookies = data.get("cookies", [])
+            timestamp_str = data.get("timestamp")
+            age_hours = None
+            if timestamp_str:
+                saved_at = datetime.fromisoformat(timestamp_str)
+                age_hours = round(
+                    (datetime.utcnow() - saved_at).total_seconds() / 3600, 1
+                )
+
+            return {
+                "exists": True,
+                "count": len(cookies),
+                "timestamp": timestamp_str,
+                "age_hours": age_hours,
+            }
+        except Exception:
+            return {"exists": True, "count": 0, "age_hours": None}

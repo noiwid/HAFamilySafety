@@ -191,7 +191,8 @@ async def index():
             auth_success: "{t['auth_success']}", auth_completed: "{t['auth_completed']}",
             auth_timeout: "{t['auth_timeout']}", retry_auth: "{t['retry_auth']}",
             auth_error: "{t['auth_error']}", unknown_error: "{t['unknown_error']}",
-            cookies_exist: "{t['cookies_exist']}", reauth_button: "{t['reauth_button']}",
+            cookies_exist: "{t['cookies_exist']}", cookies_valid: "{t['cookies_valid']}",
+            cookies_expired: "{t['cookies_expired']}", reauth_button: "{t['reauth_button']}",
             start_error: "{t['start_error']}"
         }};
         const novncUrl = window.location.protocol + '//' + window.location.hostname + ':6081/vnc.html?autoconnect=true&password=familysafety';
@@ -259,12 +260,17 @@ async def index():
             try {{
                 const response = await fetch('/api/cookies/check');
                 const data = await response.json();
-                if (data.exists) {{
-                    showStatus(T.cookies_exist, "success");
-                    // Cookies already available — hide main auth button,
-                    // show a secondary "Re-authenticate" button instead
+                if (data.exists && !data.expired) {{
+                    // Valid cookies — hide main auth, show optional re-auth
+                    const msg = T.cookies_valid
+                        .replace('{{count}}', data.count || '?')
+                        .replace('{{age}}', Math.round(data.age_hours || 0));
+                    showStatus(msg, "success");
                     document.getElementById('authButton').style.display = 'none';
                     document.getElementById('reAuthButton').style.display = 'flex';
+                }} else if (data.exists && data.expired) {{
+                    // Expired cookies — prompt re-auth
+                    showStatus(T.cookies_expired, "error");
                 }}
             }} catch (error) {{}}
         }});
@@ -304,9 +310,12 @@ async def check_auth_status(session_id: str, _: None = Depends(_verify_api_key))
 
 @app.get("/api/cookies/check")
 async def check_cookies():
-    """Check if cookies exist."""
-    exists = await storage.check_exists()
-    return {"exists": exists}
+    """Check if cookies exist and return their validity info."""
+    info = await storage.get_cookie_info()
+    if info.get("exists") and info.get("age_hours") is not None:
+        max_hours = config.session_duration / 3600
+        info["expired"] = info["age_hours"] >= max_hours
+    return info
 
 
 @app.get("/api/cookies")
