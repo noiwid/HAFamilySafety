@@ -116,6 +116,7 @@ class FamilySafetyWebAPI:
         path: str,
         json_data: dict | None = None,
         params: dict | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict | list | None:
         """Make an authenticated request to the mobile API."""
         await self._ensure_session()
@@ -123,6 +124,8 @@ class FamilySafetyWebAPI:
 
         url = f"{_BASE_URL}{path}"
         headers = self._build_headers()
+        if extra_headers:
+            headers.update(extra_headers)
 
         _LOGGER.debug("Mobile API %s %s", method, path)
 
@@ -138,6 +141,8 @@ class FamilySafetyWebAPI:
                     self._token_expires = None
                     await self._ensure_auth()
                     headers = self._build_headers()
+                    if extra_headers:
+                        headers.update(extra_headers)
                     async with self._session.request(
                         method, url, headers=headers,
                         json=json_data, params=params,
@@ -173,10 +178,14 @@ class FamilySafetyWebAPI:
         _LOGGER.debug("WebRestrictions response for %s: %s", child_id, result)
         return result
 
-    async def get_screentime_policy(self, child_id: str) -> dict | None:
+    async def get_screentime_policy(
+        self, child_id: str, platform: str = "Windows"
+    ) -> dict | None:
         """Get device limits schedules (daily allowances + time windows)."""
         result = await self._request(
-            "GET", f"/v4/devicelimits/schedules/{child_id}"
+            "GET",
+            f"/v4/devicelimits/schedules/{child_id}",
+            extra_headers={"Plat-Info": platform},
         )
         _LOGGER.debug("Schedules response for %s: %s", child_id, result)
         return result
@@ -209,6 +218,7 @@ class FamilySafetyWebAPI:
         day_of_week: int,
         hours: int,
         minutes: int,
+        platform: str = "Windows",
     ) -> dict | None:
         """Set daily screen time allowance via device limits schedule.
 
@@ -227,6 +237,7 @@ class FamilySafetyWebAPI:
             "PATCH",
             f"/v4/devicelimits/schedules/{child_id}",
             json_data=schedule,
+            extra_headers={"Plat-Info": platform},
         )
 
     async def set_screentime_intervals(
@@ -234,6 +245,7 @@ class FamilySafetyWebAPI:
         child_id: str,
         day_of_week: int,
         allowed_intervals: list[bool],
+        platform: str = "Windows",
     ) -> dict | None:
         """Set allowed time intervals for a specific day.
 
@@ -275,6 +287,7 @@ class FamilySafetyWebAPI:
             "PATCH",
             f"/v4/devicelimits/schedules/{child_id}",
             json_data=schedule,
+            extra_headers={"Plat-Info": platform},
         )
 
     async def set_screentime_intervals_from_range(
