@@ -191,10 +191,27 @@ class AddonCookieClient:
                         )
                         return result
                     text = await response.text()
+                    # Try to parse detailed error info from addon
+                    detail = text
+                    try:
+                        import json
+                        err_data = json.loads(text)
+                        if isinstance(err_data, dict):
+                            err_detail = err_data.get("detail", {})
+                            if isinstance(err_detail, dict):
+                                ms_status = err_detail.get("microsoft_status", "?")
+                                error_code = err_detail.get("error", "?")
+                                message = err_detail.get("message", "")[:300]
+                                detail = (
+                                    f"code={error_code} microsoft_status={ms_status} "
+                                    f"message={message}"
+                                )
+                    except Exception:
+                        pass
                     _LOGGER.warning(
                         "Addon screentime API returned %s: %s",
                         response.status,
-                        text[:200],
+                        detail[:500],
                     )
                     return None
         except aiohttp.ClientError as err:

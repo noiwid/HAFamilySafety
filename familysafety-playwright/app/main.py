@@ -343,7 +343,26 @@ async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
         if result is None:
             raise HTTPException(
                 status_code=502,
-                detail="Failed to fetch screen time from Microsoft",
+                detail="Failed to fetch screen time from Microsoft (no response)",
+            )
+        # browser_fetch now returns error dicts instead of None
+        if isinstance(result, dict) and result.get("__error"):
+            error_code = result.get("code", "FETCH_ERROR")
+            status = result.get("status", 502)
+            text = str(result.get("text", "unknown error"))[:500]
+            _LOGGER.warning(
+                "Screen time fetch returned error: code=%s status=%s text=%s",
+                error_code,
+                status,
+                text,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": error_code,
+                    "microsoft_status": status,
+                    "message": text,
+                },
             )
         return {"status": "success", "data": result}
     except HTTPException:
