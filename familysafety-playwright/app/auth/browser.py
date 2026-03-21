@@ -3,6 +3,7 @@ import asyncio
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, Optional
 
 from playwright.async_api import (
@@ -14,6 +15,49 @@ from playwright.async_api import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Shared Chrome profile directory — persists across restarts
+_PROFILE_DIR = "/share/familysafety/browser_profile"
+
+# Common Chromium launch arguments
+_CHROME_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-gpu-compositing",
+    "--disable-gpu-sandbox",
+    "--disable-software-rasterizer",
+    "--disable-accelerated-2d-canvas",
+    "--disable-accelerated-video-decode",
+    "--disable-accelerated-video-encode",
+    "--disable-skia-runtime-opts",
+    "--disable-partial-raster",
+    "--disable-zero-copy",
+    "--disable-lcd-text",
+    "--disable-font-subpixel-positioning",
+    "--disable-features=VizDisplayCompositor,dbus,IsolateOrigins,"
+    "site-per-process,UseSkiaRenderer,TranslateUI",
+    "--disable-breakpad",
+    "--disable-component-update",
+    "--disable-blink-features=AutomationControlled",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-sync",
+    "--no-first-run",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
+    "--memory-pressure-off",
+    "--disable-low-res-tiling",
+]
+
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 class BrowserAuthManager:
@@ -36,6 +80,10 @@ class BrowserAuthManager:
         self._language = language
         self._timezone = timezone
         self._storage = storage
+        self._browser_lock = asyncio.Lock()
+
+        # Ensure profile directory exists
+        Path(_PROFILE_DIR).mkdir(parents=True, exist_ok=True)
 
     async def initialize(self):
         """Initialize Playwright."""
@@ -62,63 +110,27 @@ class BrowserAuthManager:
         session_id = str(uuid.uuid4())
         _LOGGER.info(f"Starting authentication session: {session_id}")
 
-        browser = None
         context = None
         page = None
         try:
-            # Launch browser (non-headless so user can interact via noVNC)
-            browser = await self._playwright.chromium.launch(
+            # Launch persistent browser context (non-headless for VNC interaction)
+            # All state (cookies, localStorage, sessionStorage, cache) is saved
+            # to _PROFILE_DIR and persists across restarts.
+            context = await self._playwright.chromium.launch_persistent_context(
+                _PROFILE_DIR,
                 headless=False,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-gpu-compositing",
-                    "--disable-gpu-sandbox",
-                    "--disable-software-rasterizer",
-                    "--disable-accelerated-2d-canvas",
-                    "--disable-accelerated-video-decode",
-                    "--disable-accelerated-video-encode",
-                    "--disable-skia-runtime-opts",
-                    "--disable-partial-raster",
-                    "--disable-zero-copy",
-                    "--disable-lcd-text",
-                    "--disable-font-subpixel-positioning",
-                    "--disable-features=VizDisplayCompositor,dbus,IsolateOrigins,"
-                    "site-per-process,UseSkiaRenderer,TranslateUI",
-                    "--disable-breakpad",
-                    "--disable-component-update",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-background-networking",
-                    "--disable-default-apps",
-                    "--disable-extensions",
-                    "--disable-sync",
-                    "--no-first-run",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--disable-background-timer-throttling",
-                    "--memory-pressure-off",
-                    "--disable-low-res-tiling",
-                    "--ozone-platform=x11",
-                ],
-            )
-
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
+                args=_CHROME_ARGS + ["--ozone-platform=x11"],
+                user_agent=_USER_AGENT,
                 viewport={"width": 1280, "height": 800},
                 locale=self._language,
                 timezone_id=self._timezone,
             )
 
-            page = await context.new_page()
+            # launch_persistent_context provides a default page
+            page = context.pages[0] if context.pages else await context.new_page()
 
             self._sessions[session_id] = {
-                "browser": browser,
+                "browser": None,  # No separate browser with persistent context
                 "context": context,
                 "page": page,
                 "status": "authenticating",
@@ -152,12 +164,8 @@ class BrowserAuthManager:
         except Exception as e:
             _LOGGER.error(f"Failed to start auth session: {e}")
             try:
-                if page:
-                    await page.close()
                 if context:
                     await context.close()
-                if browser:
-                    await browser.close()
             except Exception as cleanup_err:
                 _LOGGER.warning(f"Cleanup after failed session start: {cleanup_err}")
             raise
@@ -199,7 +207,6 @@ class BrowserAuthManager:
                     _LOGGER.debug("Polling - URL unchanged")
 
                 # Method 1: URL-based detection
-                # Check if we've arrived at the Family Safety dashboard
                 if "login.live.com" not in current_url and "login.microsoftonline.com" not in current_url:
                     if any(
                         domain in current_url
@@ -212,9 +219,9 @@ class BrowserAuthManager:
                             f"Authentication detected via URL: {current_url}"
                         )
 
-                        # Navigate to family page to finalize cookies
+                        # Navigate to family page to finalize session
                         _LOGGER.info(
-                            "Navigating to account.microsoft.com/family to finalize cookies..."
+                            "Navigating to account.microsoft.com/family to finalize session..."
                         )
                         try:
                             await page.goto(
@@ -225,7 +232,8 @@ class BrowserAuthManager:
                             _LOGGER.info(
                                 "Successfully navigated to Family Safety dashboard"
                             )
-                            await asyncio.sleep(3)
+                            # Wait for all JS-managed tokens to be set
+                            await asyncio.sleep(5)
                         except Exception as e:
                             _LOGGER.warning(
                                 f"Failed to navigate to Family Safety: {e}"
@@ -253,14 +261,15 @@ class BrowserAuthManager:
                             f"{[c['name'] for c in ms_auth_cookies]})"
                         )
 
-                        # Navigate to family page to finalize cookies
+                        # Navigate to family page to finalize session
                         try:
                             await page.goto(
                                 "https://account.microsoft.com/family",
                                 wait_until="load",
                                 timeout=15000,
                             )
-                            await asyncio.sleep(3)
+                            # Wait for all JS-managed tokens to be set
+                            await asyncio.sleep(5)
                         except Exception as e:
                             _LOGGER.warning(
                                 f"Failed to navigate to Family Safety: {e}"
@@ -276,7 +285,7 @@ class BrowserAuthManager:
             if not authenticated:
                 raise asyncio.TimeoutError("Authentication timeout")
 
-            # Extract cookies
+            # Extract cookies (still needed for HA integration direct API calls)
             _LOGGER.info("Authentication detected, extracting cookies...")
             cookies = await context.cookies()
 
@@ -299,7 +308,7 @@ class BrowserAuthManager:
 
             _LOGGER.info(f"Extracted {len(ms_cookies)} Microsoft cookies")
 
-            # Save to shared storage
+            # Save cookies to shared storage (for HA integration)
             if self._storage:
                 await self._storage.save_cookies(ms_cookies)
             else:
@@ -312,7 +321,8 @@ class BrowserAuthManager:
             session["cookies"] = ms_cookies
 
             _LOGGER.info(
-                f"Authentication completed successfully for session {session_id}"
+                f"Authentication completed successfully for session {session_id}. "
+                f"Browser profile saved to {_PROFILE_DIR}"
             )
 
             await asyncio.sleep(2)
@@ -375,12 +385,9 @@ class BrowserAuthManager:
         session = self._sessions.get(session_id)
         if session:
             try:
-                if session.get("page"):
-                    await session["page"].close()
+                # With persistent context, closing context saves state and closes browser
                 if session.get("context"):
                     await session["context"].close()
-                if session.get("browser"):
-                    await session["browser"].close()
                 _LOGGER.info(f"Cleaned up session {session_id}")
             except Exception as e:
                 _LOGGER.warning(f"Cleanup error for session {session_id}: {e}")
@@ -429,65 +436,18 @@ class BrowserAuthManager:
         }
     }"""
 
-    def _build_cookie_header(self, cookies: list[dict], url: str) -> str:
-        """Build a Cookie header string from Playwright-format cookies.
-
-        Filters cookies by domain matching for the given URL.
-        """
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        host = parsed.hostname or ""
-        pairs = []
-        for c in cookies:
-            domain = c.get("domain", "")
-            # .example.com matches example.com and sub.example.com
-            if domain.startswith("."):
-                if not (host == domain[1:] or host.endswith(domain)):
-                    continue
-            else:
-                if host != domain:
-                    continue
-            pairs.append(f"{c['name']}={c['value']}")
-        return "; ".join(pairs)
-
     async def browser_fetch(
         self, url: str, params: dict | None = None
     ) -> dict | None:
         """Make an API call through an authenticated browser session.
 
-        Strategy (avoids slow page.goto which times out in Docker):
-        1. Try Playwright APIRequestContext with injected cookies (no browser needed).
-        2. If that returns 401, fall back to full page navigation with JS execution.
+        Uses a persistent browser context that shares the same Chrome profile
+        as the authentication browser.  All session state (cookies, localStorage,
+        MSAL tokens, etc.) is preserved across calls and restarts.
 
         Returns the JSON response dict on success, or a dict with
         ``__error`` key on failure.
         """
-        if not self._storage:
-            _LOGGER.warning("No storage configured for browser_fetch")
-            return {
-                "__error": True, "status": 503, "code": "NO_STORAGE",
-                "text": "No storage configured for browser_fetch",
-            }
-
-        try:
-            cookies = await self._storage.load_cookies()
-        except FileNotFoundError:
-            _LOGGER.warning("No saved cookies for browser_fetch")
-            return {
-                "__error": True, "status": 503, "code": "NO_COOKIES",
-                "text": "No saved cookies — please authenticate via the addon first",
-            }
-
-        if not cookies:
-            return {
-                "__error": True, "status": 503, "code": "EMPTY_COOKIES",
-                "text": "Cookie file is empty — please re-authenticate via the addon",
-            }
-
-        _LOGGER.info(
-            "browser_fetch: loaded %d cookies from storage", len(cookies)
-        )
-
         # Build the full URL with params
         query = ""
         if params:
@@ -495,221 +455,110 @@ class BrowserAuthManager:
             query = "?" + urlencode(params)
         full_url = url + query
 
-        # ----------------------------------------------------------
-        # Attempt 1: Playwright APIRequestContext (no page navigation)
-        # ----------------------------------------------------------
-        try:
-            result = await self._api_request_fetch(cookies, full_url)
-            if result is not None:
-                return result
-            _LOGGER.info(
-                "browser_fetch: API request returned 401, "
-                "falling back to full page navigation..."
-            )
-        except Exception as exc:
-            _LOGGER.warning(
-                "browser_fetch: API request attempt failed: %s", exc
-            )
+        # Use persistent context — all session state is on disk
+        return await self._persistent_context_fetch(full_url)
 
-        # ----------------------------------------------------------
-        # Attempt 2: Full browser with page navigation (slow path)
-        # ----------------------------------------------------------
-        return await self._page_navigation_fetch(cookies, full_url)
+    async def _persistent_context_fetch(self, full_url: str) -> dict:
+        """Fetch API data using a persistent browser context.
 
-    async def _api_request_fetch(
-        self, cookies: list[dict], full_url: str
-    ) -> dict | None:
-        """Fast path: use Playwright's APIRequestContext with cookies.
-
-        Returns the parsed JSON on success, an error dict on non-401 errors,
-        or None if 401 (caller should fall back to page navigation).
+        Opens the same Chrome profile used during authentication so that
+        cookies, localStorage (MSAL tokens), and all other browser state
+        are available.  Navigates to the family page to let JS establish
+        the session, then executes a fetch() from within the page.
         """
-        # Extract canary token from cookies
-        canary = ""
-        for c in cookies:
-            if c.get("name") == "canary":
-                canary = c["value"]
-                break
-
-        cookie_header = self._build_cookie_header(cookies, full_url)
-
-        headers = {
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Content-Type": "application/json",
-            "X-Requested-With": "3742,HttpRequest",
-            "X-Anc-Jsonmode": "CamelCase",
-            "Dnt": "1",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Referer": "https://account.microsoft.com/family",
-            "Origin": "https://account.microsoft.com",
-            "Sec-Fetch-Site": "same-origin",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Dest": "empty",
-            "Cookie": cookie_header,
-        }
-        if canary:
-            headers["__requestverificationtoken"] = canary
-
-        _LOGGER.info("browser_fetch: attempt 1 — API request %s", full_url)
-
-        api_context = await self._playwright.request.new_context(
-            extra_http_headers=headers,
-            ignore_https_errors=True,
-        )
-        try:
-            resp = await api_context.get(full_url, timeout=15000)
-            status = resp.status
-            text = await resp.text()
-
-            _LOGGER.info(
-                "browser_fetch: API request status=%d, body=%s",
-                status,
-                text[:200] if text else "(empty)",
-            )
-
-            if status == 401:
-                return None  # Signal caller to try page navigation
-
-            if status >= 400:
-                return {
-                    "__error": True,
-                    "status": status,
-                    "text": text[:500],
-                }
-
-            import json
+        # Prevent concurrent access to the shared profile directory
+        async with self._browser_lock:
+            context = None
             try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return {
-                    "__error": True,
-                    "status": status,
-                    "text": text[:500],
-                    "message": "Invalid JSON response",
-                }
-        finally:
-            await api_context.dispose()
+                _LOGGER.info("browser_fetch: opening persistent context from %s", _PROFILE_DIR)
 
-    async def _page_navigation_fetch(
-        self, cookies: list[dict], full_url: str
-    ) -> dict | None:
-        """Slow path: launch browser, navigate to family page, run JS fetch.
-
-        This is needed when the API requires JS-managed session tokens
-        beyond what cookies alone provide.
-        """
-        browser = None
-        try:
-            browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                ],
-            )
-
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1280, "height": 800},
-                locale=self._language,
-                timezone_id=self._timezone,
-            )
-
-            # Inject saved cookies
-            await context.add_cookies(cookies)
-
-            page = await context.new_page()
-
-            # Navigate to family page to establish full session
-            _LOGGER.info("browser_fetch: attempt 2 — loading family page...")
-            try:
-                resp = await page.goto(
-                    "https://account.microsoft.com/family",
-                    wait_until="domcontentloaded",
-                    timeout=60000,
+                context = await self._playwright.chromium.launch_persistent_context(
+                    _PROFILE_DIR,
+                    headless=False,
+                    args=_CHROME_ARGS + ["--ozone-platform=x11"],
+                    user_agent=_USER_AGENT,
+                    viewport={"width": 1280, "height": 800},
+                    locale=self._language,
+                    timezone_id=self._timezone,
                 )
-            except Exception as nav_err:
-                _LOGGER.warning(
-                    "browser_fetch: navigation error (will still try fetch): %s",
-                    nav_err,
-                )
-                # Even if navigation times out, the page might be partially loaded
-                # on the correct origin — try fetch anyway.
-                resp = None
 
-            final_url = page.url
-            resp_status = resp.status if resp else "no response"
-            _LOGGER.info(
-                "browser_fetch: family page status=%s, final_url=%s",
-                resp_status,
-                final_url,
-            )
+                page = context.pages[0] if context.pages else await context.new_page()
 
-            # Detect login redirect — cookies are likely expired
-            if any(
-                domain in final_url
-                for domain in (
-                    "login.microsoftonline.com",
-                    "login.live.com",
-                    "login.microsoft.com",
-                )
-            ):
-                _LOGGER.error(
-                    "browser_fetch: redirected to login (%s) — cookies expired",
+                # Navigate to family page — JS will establish the full session
+                # using cookies + localStorage (MSAL tokens) from the profile
+                _LOGGER.info("browser_fetch: navigating to family page...")
+                try:
+                    resp = await page.goto(
+                        "https://account.microsoft.com/family",
+                        wait_until="domcontentloaded",
+                        timeout=30000,
+                    )
+                except Exception as nav_err:
+                    _LOGGER.warning(
+                        "browser_fetch: navigation error (will still try fetch): %s",
+                        nav_err,
+                    )
+                    resp = None
+
+                final_url = page.url
+                resp_status = resp.status if resp else "no response"
+                _LOGGER.info(
+                    "browser_fetch: family page status=%s, final_url=%s",
+                    resp_status,
                     final_url,
                 )
-                return {
-                    "__error": True,
-                    "status": 401,
-                    "text": f"Redirected to login: {final_url}",
-                    "code": "LOGIN_REDIRECT",
-                }
 
-            # Wait for JS-based session tokens to be set
-            await page.wait_for_timeout(3000)
+                # Detect login redirect — session expired, need re-auth
+                if any(
+                    domain in final_url
+                    for domain in (
+                        "login.microsoftonline.com",
+                        "login.live.com",
+                        "login.microsoft.com",
+                    )
+                ):
+                    _LOGGER.error(
+                        "browser_fetch: redirected to login (%s) — session expired",
+                        final_url,
+                    )
+                    return {
+                        "__error": True,
+                        "status": 401,
+                        "text": f"Redirected to login: {final_url}",
+                        "code": "LOGIN_REDIRECT",
+                    }
 
-            _LOGGER.info("browser_fetch: calling %s via page fetch", full_url)
-            result = await page.evaluate(self._FETCH_JS, full_url)
+                # Wait for JS-based session tokens (MSAL) to initialize
+                await page.wait_for_timeout(5000)
 
-            await page.close()
-            await context.close()
+                _LOGGER.info("browser_fetch: calling %s via page fetch", full_url)
+                result = await page.evaluate(self._FETCH_JS, full_url)
 
-            if isinstance(result, dict) and result.get("__error"):
-                _LOGGER.warning(
-                    "browser_fetch error: status=%s text=%s",
-                    result.get("status", "?"),
-                    str(result.get("text", result.get("message", "")))[:500],
-                )
+                if isinstance(result, dict) and result.get("__error"):
+                    _LOGGER.warning(
+                        "browser_fetch error: status=%s text=%s",
+                        result.get("status", "?"),
+                        str(result.get("text", result.get("message", "")))[:500],
+                    )
+                    return result
+
+                _LOGGER.info("browser_fetch: success for %s", full_url)
                 return result
 
-            _LOGGER.info("browser_fetch: success for %s", full_url)
-            return result
-
-        except Exception as exc:
-            _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
-            return {
-                "__error": True,
-                "status": 500,
-                "text": f"browser_fetch exception: {type(exc).__name__}: {exc}",
-                "code": "EXCEPTION",
-            }
-        finally:
-            if browser:
-                try:
-                    await browser.close()
-                except Exception:
-                    pass
+            except Exception as exc:
+                _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
+                return {
+                    "__error": True,
+                    "status": 500,
+                    "text": f"browser_fetch exception: {type(exc).__name__}: {exc}",
+                    "code": "EXCEPTION",
+                }
+            finally:
+                if context:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
 
     async def cleanup(self):
         """Cleanup all resources."""
