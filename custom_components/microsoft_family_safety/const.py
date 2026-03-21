@@ -10,10 +10,16 @@ CONF_TOKEN: Final = "token"
 CONF_REDIRECT_URL: Final = "redirect_url"
 CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
+CONF_AUTH_URL: Final = "auth_url"
 
 # Defaults
 DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes in seconds
 DEFAULT_TIMEOUT: Final = 30
+
+# Platform selection
+CONF_PLATFORMS: Final = "platforms"
+AVAILABLE_PLATFORMS: Final = ["Windows", "Xbox", "Mobile"]
+DEFAULT_PLATFORMS: Final = ["Windows"]
 
 # Authentication URLs
 MS_LOGIN_URL: Final = "https://login.live.com/oauth20_authorize.srf"
@@ -55,5 +61,55 @@ ATTR_AVERAGE_SCREENTIME: Final = "average_screentime"
 ATTR_ACCOUNT_BALANCE: Final = "account_balance"
 ATTR_ACCOUNT_CURRENCY: Final = "account_currency"
 
+# Control attributes
+ATTR_APP_ID: Final = "app_id"
+ATTR_APP_NAME: Final = "app_name"
+ATTR_PLATFORM: Final = "platform"
+ATTR_OVERRIDE_TYPE: Final = "override_type"
+ATTR_VALID_UNTIL: Final = "valid_until"
+ATTR_REQUEST_ID: Final = "request_id"
+ATTR_EXTENSION_TIME: Final = "extension_time"
+
+# Service names
+SERVICE_BLOCK_APP: Final = "block_app"
+SERVICE_UNBLOCK_APP: Final = "unblock_app"
+SERVICE_LOCK_PLATFORM: Final = "lock_platform"
+SERVICE_UNLOCK_PLATFORM: Final = "unlock_platform"
+SERVICE_APPROVE_REQUEST: Final = "approve_request"
+SERVICE_DENY_REQUEST: Final = "deny_request"
+
+# New service names (web API)
+SERVICE_SET_SCREENTIME_LIMIT: Final = "set_screentime_limit"
+SERVICE_SET_SCREENTIME_INTERVALS: Final = "set_screentime_intervals"
+SERVICE_SET_APP_TIME_LIMIT: Final = "set_app_time_limit"
+SERVICE_REMOVE_APP_TIME_LIMIT: Final = "remove_app_time_limit"
+SERVICE_BLOCK_WEBSITE: Final = "block_website"
+SERVICE_REMOVE_WEBSITE: Final = "remove_website"
+SERVICE_TOGGLE_WEB_FILTER: Final = "toggle_web_filter"
+SERVICE_SET_AGE_RATING: Final = "set_age_rating"
+SERVICE_SET_ACQUISITION_POLICY: Final = "set_acquisition_policy"
+SERVICE_LOCK_ACCOUNT: Final = "lock_account"
+SERVICE_UNLOCK_ACCOUNT: Final = "unlock_account"
+
+ALL_SERVICES: Final = [
+    SERVICE_BLOCK_APP,
+    SERVICE_UNBLOCK_APP,
+    SERVICE_LOCK_PLATFORM,
+    SERVICE_UNLOCK_PLATFORM,
+    SERVICE_APPROVE_REQUEST,
+    SERVICE_DENY_REQUEST,
+    SERVICE_SET_SCREENTIME_LIMIT,
+    SERVICE_SET_SCREENTIME_INTERVALS,
+    SERVICE_SET_APP_TIME_LIMIT,
+    SERVICE_REMOVE_APP_TIME_LIMIT,
+    SERVICE_BLOCK_WEBSITE,
+    SERVICE_REMOVE_WEBSITE,
+    SERVICE_TOGGLE_WEB_FILTER,
+    SERVICE_SET_AGE_RATING,
+    SERVICE_SET_ACQUISITION_POLICY,
+    SERVICE_LOCK_ACCOUNT,
+    SERVICE_UNLOCK_ACCOUNT,
+]
+
 # Platforms
-PLATFORMS: Final = ["sensor"]
+PLATFORMS: Final = ["sensor", "switch", "button", "number", "time"]

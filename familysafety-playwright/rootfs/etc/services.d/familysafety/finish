@@ -1,0 +1,6 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# S6 service finish script
+# ==============================================================================
+
+bashio::log.info "Family Safety Auth Service stopped"

@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -68,6 +69,9 @@ def _create_account_sensors(
         FamilySafetyScreenTimeSensor(coordinator, entry, account_id),
         FamilySafetyAccountInfoSensor(coordinator, entry, account_id),
         FamilySafetyApplicationCountSensor(coordinator, entry, account_id),
+        FamilySafetyPendingRequestsSensor(coordinator, entry, account_id),
+        FamilySafetyWebFilterSensor(coordinator, entry, account_id),
+        FamilySafetyScreenTimePolicySensor(coordinator, entry, account_id),
     ]
 
     if account_data.get("account_balance") is not None:
@@ -85,7 +89,6 @@ def _create_device_sensors(
     return [
         FamilySafetyDeviceScreenTimeSensor(coordinator, entry, device_id),
         FamilySafetyDeviceInfoSensor(coordinator, entry, device_id),
-        FamilySafetyDeviceBlockedSensor(coordinator, entry, device_id),
     ]
 
 
@@ -134,6 +137,21 @@ class FamilySafetyAccountSensor(CoordinatorEntity, SensorEntity):
         account_data = self._get_account_data()
         return account_data.get(ATTR_FIRST_NAME, "Unknown") if account_data else "Unknown"
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        account_data = self._get_account_data()
+        first_name = account_data.get(ATTR_FIRST_NAME, "Unknown") if account_data else "Unknown"
+        surname = account_data.get(ATTR_SURNAME, "") if account_data else ""
+        full_name = f"{first_name} {surname}".strip()
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{full_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+            entry_type=None,
+        )
+
 
 class FamilySafetyDeviceSensor(CoordinatorEntity, SensorEntity):
     """Base class for device-related sensors."""
@@ -159,6 +177,25 @@ class FamilySafetyDeviceSensor(CoordinatorEntity, SensorEntity):
         """Get the device name for entity naming."""
         device_data = self._get_device_data()
         return device_data.get(ATTR_DEVICE_NAME, "Unknown Device") if device_data else "Unknown Device"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a physical device."""
+        device_data = self._get_device_data()
+        if not device_data:
+            return DeviceInfo(
+                identifiers={(DOMAIN, self._device_id)},
+                name="Unknown Device",
+                manufacturer="Microsoft",
+            )
+        account_id = device_data.get("account_id")
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            name=device_data.get(ATTR_DEVICE_NAME, "Unknown Device"),
+            manufacturer=device_data.get("device_make", "Unknown"),
+            model=device_data.get("device_model"),
+            via_device=(DOMAIN, account_id) if account_id else None,
+        )
 
 
 class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
@@ -411,47 +448,186 @@ class FamilySafetyDeviceInfoSensor(FamilySafetyDeviceSensor):
         }
 
 
-class FamilySafetyDeviceBlockedSensor(FamilySafetyDeviceSensor):
-    """Sensor for device blocked status."""
+class FamilySafetyPendingRequestsSensor(FamilySafetyAccountSensor):
+    """Sensor for pending screen time requests."""
 
-    _attr_icon = "mdi:lock"
+    _attr_icon = "mdi:message-alert"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
         coordinator: FamilySafetyDataUpdateCoordinator,
         entry: ConfigEntry,
-        device_id: str,
+        account_id: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator, entry, device_id)
-        self._attr_unique_id = f"{entry.entry_id}_{device_id}_blocked"
-        self._attr_name = f"{self._get_device_name()} Blocked"
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_pending_requests"
+        self._attr_name = f"{self._get_account_name()} Pending Requests"
 
     @property
-    def native_value(self) -> str | None:
-        """Return the blocked status."""
-        device_data = self._get_device_data()
-        if not device_data:
-            return None
-        return "blocked" if device_data.get(ATTR_BLOCKED) else "active"
-
-    @property
-    def icon(self) -> str:
-        """Return the icon based on blocked status."""
-        device_data = self._get_device_data()
-        if device_data and device_data.get(ATTR_BLOCKED):
-            return "mdi:lock"
-        return "mdi:lock-open"
+    def native_value(self) -> int:
+        """Return the number of pending requests for this account."""
+        if not self.coordinator.data:
+            return 0
+        all_requests = self.coordinator.data.get("pending_requests", [])
+        account_requests = [
+            r for r in all_requests if r.get("puid") == self._account_id
+        ]
+        return len(account_requests)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        device_data = self._get_device_data()
-        if not device_data:
+        """Return pending requests details."""
+        if not self.coordinator.data:
             return {}
-
+        all_requests = self.coordinator.data.get("pending_requests", [])
+        account_requests = [
+            r for r in all_requests if r.get("puid") == self._account_id
+        ]
         return {
-            ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
-            ATTR_DEVICE_NAME: device_data.get(ATTR_DEVICE_NAME),
-            ATTR_BLOCKED: device_data.get(ATTR_BLOCKED),
+            ATTR_USER_ID: self._account_id,
+            "requests": account_requests,
         }
+
+
+class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
+    """Sensor for web filtering status."""
+
+    _attr_icon = "mdi:web"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_web_filter"
+        self._attr_name = f"{self._get_account_name()} Web Filter"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the web filter status."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return None
+        web_data = account_data.get("web_browsing")
+        if web_data is None:
+            return "unknown"
+        if isinstance(web_data, dict):
+            # API returns "enabled" (not "isEnabled")
+            is_enabled = web_data.get("enabled", web_data.get("isEnabled", web_data.get("IsEnabled")))
+            if is_enabled is True:
+                return "enabled"
+            if is_enabled is False:
+                return "disabled"
+        return "unknown"
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on filter state."""
+        if self.native_value == "enabled":
+            return "mdi:web-check"
+        if self.native_value == "disabled":
+            return "mdi:web-off"
+        return "mdi:web"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return web filtering details."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return {}
+        web_data = account_data.get("web_browsing")
+        if web_data is None:
+            return {ATTR_USER_ID: self._account_id}
+        attrs = {ATTR_USER_ID: self._account_id}
+        if isinstance(web_data, dict):
+            # Include all useful fields from the API response
+            for key in (
+                "enabled", "isEnabled", "IsEnabled",
+                "filterLevel", "FilterLevel",
+                "categories", "Categories",
+                "useAllowedListOnly", "UseAllowedListOnly",
+                "blockedBrowsersEnabled", "BlockedBrowsersEnabled",
+                "restrictUnknown", "RestrictUnknown",
+                "warnWhenRestricted", "WarnWhenRestricted",
+                "exceptions", "Exceptions",
+                "blockedSites", "allowedSites", "BlockedSites", "AllowedSites",
+                "contentRatingAge", "ContentRatingAge",
+            ):
+                if key in web_data:
+                    attrs[key] = web_data[key]
+        return attrs
+
+
+class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
+    """Sensor for screen time policy details."""
+
+    _attr_icon = "mdi:clock-check"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_screentime_policy"
+        self._attr_name = f"{self._get_account_name()} Screen Time Policy"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return whether screen time limits are enabled."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return None
+        policy = account_data.get("screentime_policy")
+        if policy is None:
+            return "unknown"
+        if isinstance(policy, dict):
+            is_enabled = policy.get("isEnabled", policy.get("IsEnabled"))
+            if is_enabled is True:
+                return "enabled"
+            if is_enabled is False:
+                return "disabled"
+        return "unknown"
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on policy state."""
+        if self.native_value == "enabled":
+            return "mdi:clock-check"
+        if self.native_value == "disabled":
+            return "mdi:clock-remove"
+        return "mdi:clock-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return screen time policy details."""
+        account_data = self._get_account_data()
+        if not account_data:
+            return {}
+        policy = account_data.get("screentime_policy")
+        attrs = {ATTR_USER_ID: self._account_id}
+        if policy and isinstance(policy, dict):
+            # Include raw top-level keys for debugging
+            attrs["raw_keys"] = list(policy.keys())
+            # Try multiple possible structures
+            daily = policy.get("dailyRestrictions", policy.get("DailyRestrictions"))
+            if daily and isinstance(daily, dict):
+                for day_name, day_data in daily.items():
+                    if isinstance(day_data, dict):
+                        allowance = day_data.get("allowance", day_data.get("Allowance", ""))
+                        attrs[f"{day_name.lower()}_allowance"] = allowance
+            # Expose raw policy for debugging (truncated if too large)
+            import json
+            try:
+                raw = json.dumps(policy, default=str)
+                attrs["raw_policy"] = raw[:2000] if len(raw) > 2000 else raw
+            except Exception:
+                attrs["raw_policy"] = str(policy)[:2000]
+        return attrs
