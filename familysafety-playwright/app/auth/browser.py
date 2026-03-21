@@ -389,6 +389,117 @@ class BrowserAuthManager:
                     "created_at": session.get("created_at"),
                 }
 
+    async def browser_fetch(self, url: str, params: dict | None = None) -> dict | None:
+        """Make an API call through an authenticated browser session.
+
+        Launches a temporary Chromium instance with saved cookies,
+        navigates to the family page to establish the session,
+        then uses fetch() from within the page to call the API.
+        This ensures all JS-managed tokens (canary, CSRF, etc.) are present.
+        """
+        if not self._storage:
+            _LOGGER.warning("No storage configured for browser_fetch")
+            return None
+
+        try:
+            cookies = await self._storage.load_cookies()
+        except FileNotFoundError:
+            _LOGGER.warning("No saved cookies for browser_fetch")
+            return None
+
+        if not cookies:
+            return None
+
+        browser = None
+        try:
+            browser = await self._playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 800},
+                locale=self._language,
+                timezone_id=self._timezone,
+            )
+
+            # Inject saved cookies
+            await context.add_cookies(cookies)
+
+            page = await context.new_page()
+
+            # Navigate to family page to establish full session
+            _LOGGER.debug("browser_fetch: loading family page...")
+            resp = await page.goto(
+                "https://account.microsoft.com/family",
+                wait_until="networkidle",
+                timeout=30000,
+            )
+
+            if resp and resp.status != 200:
+                _LOGGER.warning("browser_fetch: family page returned %s", resp.status)
+
+            # Build the full URL with params
+            query = ""
+            if params:
+                from urllib.parse import urlencode
+                query = "?" + urlencode(params)
+            full_url = url + query
+
+            # Use browser's fetch() — this includes all session tokens automatically
+            _LOGGER.debug("browser_fetch: calling %s", full_url)
+            result = await page.evaluate(
+                """async (url) => {
+                    try {
+                        const resp = await fetch(url, {
+                            credentials: 'include',
+                            headers: { 'Accept': 'application/json' }
+                        });
+                        if (!resp.ok) {
+                            return { __error: true, status: resp.status, text: await resp.text() };
+                        }
+                        return await resp.json();
+                    } catch (e) {
+                        return { __error: true, message: e.message };
+                    }
+                }""",
+                full_url,
+            )
+
+            await page.close()
+            await context.close()
+
+            if isinstance(result, dict) and result.get("__error"):
+                _LOGGER.warning(
+                    "browser_fetch error: status=%s text=%s",
+                    result.get("status", "?"),
+                    str(result.get("text", result.get("message", "")))[:200],
+                )
+                return None
+
+            _LOGGER.info("browser_fetch: success for %s", full_url)
+            return result
+
+        except Exception as exc:
+            _LOGGER.error("browser_fetch failed: %s", exc)
+            return None
+        finally:
+            if browser:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+
     async def cleanup(self):
         """Cleanup all resources."""
         _LOGGER.info("Cleaning up all sessions...")
