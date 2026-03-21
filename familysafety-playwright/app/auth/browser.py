@@ -362,11 +362,12 @@ class BrowserAuthManager:
         if not session:
             return {"status": "not_found"}
 
+        cookies = session.get("cookies")
         return {
-            "status": session["status"],
-            "has_cookies": session["cookies"] is not None,
+            "status": session.get("status", "unknown"),
+            "has_cookies": cookies is not None,
             "error": session.get("error"),
-            "cookie_count": len(session["cookies"]) if session["cookies"] else 0,
+            "cookie_count": len(cookies) if cookies else 0,
         }
 
     async def _cleanup_session(self, session_id: str):
@@ -389,35 +390,79 @@ class BrowserAuthManager:
                     "created_at": session.get("created_at"),
                 }
 
+    _FETCH_JS = """async (url) => {
+        try {
+            const resp = await fetch(url, {
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            const text = await resp.text();
+            if (!resp.ok) {
+                return {
+                    __error: true,
+                    status: resp.status,
+                    text: text,
+                    headers: Object.fromEntries(resp.headers.entries())
+                };
+            }
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                return { __error: true, status: resp.status, text: text.substring(0, 500), message: 'Invalid JSON response' };
+            }
+        } catch (e) {
+            return { __error: true, message: e.message };
+        }
+    }"""
+
     async def browser_fetch(
         self, url: str, params: dict | None = None
     ) -> dict | None:
         """Make an API call through an authenticated browser session.
 
-        Launches a temporary Chromium instance with saved cookies,
-        navigates to the family page to establish the session,
-        then uses fetch() from within the page to call the API.
-        This ensures all JS-managed tokens (canary, CSRF, etc.) are present.
+        Strategy:
+        1. Open a blank page with injected cookies, try fetch() directly.
+        2. If that returns 401, navigate to the family page (domcontentloaded)
+           to let JS establish session tokens, then retry fetch().
 
         Returns the JSON response dict on success, or a dict with
-        ``__error`` key on failure (None only for setup issues).
+        ``__error`` key on failure.
         """
         if not self._storage:
             _LOGGER.warning("No storage configured for browser_fetch")
-            return None
+            return {
+                "__error": True, "status": 503, "code": "NO_STORAGE",
+                "text": "No storage configured for browser_fetch",
+            }
 
         try:
             cookies = await self._storage.load_cookies()
         except FileNotFoundError:
             _LOGGER.warning("No saved cookies for browser_fetch")
-            return None
+            return {
+                "__error": True, "status": 503, "code": "NO_COOKIES",
+                "text": "No saved cookies — please authenticate via the addon first",
+            }
 
         if not cookies:
-            return None
+            return {
+                "__error": True, "status": 503, "code": "EMPTY_COOKIES",
+                "text": "Cookie file is empty — please re-authenticate via the addon",
+            }
 
         _LOGGER.info(
             "browser_fetch: loaded %d cookies from storage", len(cookies)
         )
+
+        # Build the full URL with params
+        query = ""
+        if params:
+            from urllib.parse import urlencode
+            query = "?" + urlencode(params)
+        full_url = url + query
 
         browser = None
         try:
@@ -445,80 +490,68 @@ class BrowserAuthManager:
             # Inject saved cookies
             await context.add_cookies(cookies)
 
+            # --- Attempt 1: direct fetch without page navigation ---
             page = await context.new_page()
-
-            # Navigate to family page to establish full session
-            _LOGGER.info("browser_fetch: loading family page...")
-            resp = await page.goto(
+            # Navigate to the origin so fetch() has the right context
+            _LOGGER.info("browser_fetch: navigating to origin...")
+            await page.goto(
                 "https://account.microsoft.com/family",
-                wait_until="load",
-                timeout=30000,
+                wait_until="commit",
+                timeout=15000,
             )
+            # Don't wait for full load — just need the origin set
+            await page.wait_for_timeout(1000)
 
-            final_url = page.url
-            resp_status = resp.status if resp else "no response"
-            _LOGGER.info(
-                "browser_fetch: family page status=%s, final_url=%s",
-                resp_status,
-                final_url,
-            )
+            _LOGGER.info("browser_fetch: attempt 1 — direct fetch %s", full_url)
+            result = await page.evaluate(self._FETCH_JS, full_url)
 
-            # Detect login redirect — cookies are likely expired
-            if "login.microsoftonline.com" in final_url or "login.live.com" in final_url or "login.microsoft.com" in final_url:
-                _LOGGER.error(
-                    "browser_fetch: redirected to login page (%s) — cookies are expired or invalid. "
-                    "Please re-authenticate via the addon.",
-                    final_url,
+            if isinstance(result, dict) and result.get("__error"):
+                status = result.get("status", "?")
+                _LOGGER.info(
+                    "browser_fetch: attempt 1 failed (status=%s), "
+                    "waiting for full page load before retry...",
+                    status,
                 )
-                return {
-                    "__error": True,
-                    "status": 401,
-                    "text": f"Redirected to login: {final_url}",
-                    "code": "LOGIN_REDIRECT",
-                }
 
-            # Wait a bit for any JS-based session tokens to be set
-            await page.wait_for_timeout(2000)
+                # --- Attempt 2: wait for page to fully load (JS session setup) ---
+                try:
+                    _LOGGER.info("browser_fetch: waiting for domcontentloaded...")
+                    await page.wait_for_load_state(
+                        "domcontentloaded", timeout=30000
+                    )
+                except Exception as load_err:
+                    _LOGGER.warning(
+                        "browser_fetch: domcontentloaded timeout: %s", load_err
+                    )
 
-            # Build the full URL with params
-            query = ""
-            if params:
-                from urllib.parse import urlencode
-                query = "?" + urlencode(params)
-            full_url = url + query
+                final_url = page.url
+                _LOGGER.info("browser_fetch: page URL after load: %s", final_url)
 
-            # Use browser's fetch() — this includes all session tokens automatically
-            _LOGGER.info("browser_fetch: calling %s", full_url)
-            result = await page.evaluate(
-                """async (url) => {
-                    try {
-                        const resp = await fetch(url, {
-                            credentials: 'include',
-                            headers: {
-                                'Accept': 'application/json',
-                                'X-Requested-With': 'XMLHttpRequest'
-                            }
-                        });
-                        const text = await resp.text();
-                        if (!resp.ok) {
-                            return {
-                                __error: true,
-                                status: resp.status,
-                                text: text,
-                                headers: Object.fromEntries(resp.headers.entries())
-                            };
-                        }
-                        try {
-                            return JSON.parse(text);
-                        } catch (e) {
-                            return { __error: true, status: resp.status, text: text.substring(0, 500), message: 'Invalid JSON response' };
-                        }
-                    } catch (e) {
-                        return { __error: true, message: e.message };
+                # Detect login redirect
+                if any(
+                    domain in final_url
+                    for domain in (
+                        "login.microsoftonline.com",
+                        "login.live.com",
+                        "login.microsoft.com",
+                    )
+                ):
+                    _LOGGER.error(
+                        "browser_fetch: redirected to login (%s) — cookies expired",
+                        final_url,
+                    )
+                    return {
+                        "__error": True,
+                        "status": 401,
+                        "text": f"Redirected to login: {final_url}",
+                        "code": "LOGIN_REDIRECT",
                     }
-                }""",
-                full_url,
-            )
+
+                # Wait for JS to set up session tokens
+                await page.wait_for_timeout(3000)
+
+                _LOGGER.info("browser_fetch: attempt 2 — retry fetch %s", full_url)
+                result = await page.evaluate(self._FETCH_JS, full_url)
 
             await page.close()
             await context.close()
@@ -536,7 +569,12 @@ class BrowserAuthManager:
 
         except Exception as exc:
             _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
-            return None
+            return {
+                "__error": True,
+                "status": 500,
+                "text": f"browser_fetch exception: {type(exc).__name__}: {exc}",
+                "code": "EXCEPTION",
+            }
         finally:
             if browser:
                 try:
