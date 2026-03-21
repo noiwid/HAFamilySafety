@@ -181,34 +181,179 @@ class FamilySafetyWebAPI:
     async def get_screentime_policy(
         self, child_id: str, platform: str = "Windows"
     ) -> dict | None:
-        """Get device limits schedules (daily allowances + time windows).
+        """Get screen time policy via the account.microsoft.com web API.
 
-        Probes multiple endpoint variations to find the schedule data.
+        The mobile API does not support GET for schedules. The web API at
+        account.microsoft.com/family/api/st does. This method tries multiple
+        authentication approaches against the web API.
         """
-        plat_headers = {"Plat-Info": platform}
+        await self._ensure_session()
+        await self._ensure_auth()
 
-        # List of endpoints to try
-        attempts = [
-            ("GET", f"/v1/devicelimits/{child_id}", None, plat_headers),
-            ("GET", f"/v4/devicelimits/{child_id}", None, plat_headers),
-            ("GET", f"/v3/devicelimits/schedules/{child_id}", None, plat_headers),
-            ("GET", f"/v1/devicelimits/schedules/{child_id}", None, plat_headers),
-        ]
+        web_base = "https://account.microsoft.com"
+        web_url = f"{web_base}/family/api/st"
+        params = {"childId": child_id}
 
-        for method, path, params, headers in attempts:
-            try:
-                result = await self._request(
-                    method, path, params=params, extra_headers=headers,
-                )
+        # ---------- Approach 1: MSAuth1.0 token (same as mobile API) ----------
+        headers_a1 = {
+            "Authorization": f'MSAuth1.0 usertoken="{self._access_token}", type="MSACT"',
+            "Accept": "application/json",
+            "X-AMC-JsonMode": "CamelCase",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with self._session.get(
+                web_url, params=params, headers=headers_a1, allow_redirects=False,
+            ) as resp:
                 _LOGGER.info(
-                    "Schedule probe SUCCESS: %s %s => %s",
-                    method, path, str(result)[:500],
+                    "WebAPI probe [MSAuth1.0]: status=%s, headers=%s",
+                    resp.status, dict(resp.headers),
                 )
-                return result
-            except FamilySafetyWebAPIError as err:
-                _LOGGER.debug("Schedule probe failed: %s %s => %s", method, path, err)
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    _LOGGER.info("WebAPI probe [MSAuth1.0] SUCCESS: %s", str(data)[:500])
+                    return data
+                text = await resp.text()
+                _LOGGER.debug(
+                    "WebAPI probe [MSAuth1.0] body: %s", text[:300]
+                )
+        except Exception as err:
+            _LOGGER.debug("WebAPI probe [MSAuth1.0] error: %s", err)
 
-        _LOGGER.warning("All schedule endpoint probes failed for %s", child_id)
+        # ---------- Approach 2: Bearer token ----------
+        headers_a2 = {
+            "Authorization": f"Bearer {self._access_token}",
+            "Accept": "application/json",
+            "X-AMC-JsonMode": "CamelCase",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with self._session.get(
+                web_url, params=params, headers=headers_a2, allow_redirects=False,
+            ) as resp:
+                _LOGGER.info(
+                    "WebAPI probe [Bearer]: status=%s", resp.status
+                )
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    _LOGGER.info("WebAPI probe [Bearer] SUCCESS: %s", str(data)[:500])
+                    return data
+                text = await resp.text()
+                _LOGGER.debug("WebAPI probe [Bearer] body: %s", text[:300])
+        except Exception as err:
+            _LOGGER.debug("WebAPI probe [Bearer] error: %s", err)
+
+        # ---------- Approach 3: Token for account.microsoft.com scope ----------
+        web_scope = "service::account.microsoft.com::MBI_SSL"
+        refresh_token = self._authenticator.refresh_token
+        try:
+            form_data = {
+                "client_id": _CLIENT_ID,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "scope": web_scope,
+            }
+            async with self._session.post(
+                _TOKEN_ENDPOINT, data=aiohttp.FormData(form_data)
+            ) as token_resp:
+                _LOGGER.info(
+                    "WebAPI scope token request: status=%s", token_resp.status
+                )
+                if token_resp.status == 200:
+                    token_data = await token_resp.json(content_type=None)
+                    web_token = token_data.get("access_token", "")
+                    _LOGGER.info(
+                        "WebAPI scope token acquired (expires_in=%s)",
+                        token_data.get("expires_in"),
+                    )
+                    # Try MSAuth1.0 with web token
+                    headers_a3 = {
+                        "Authorization": f'MSAuth1.0 usertoken="{web_token}", type="MSACT"',
+                        "Accept": "application/json",
+                        "X-AMC-JsonMode": "CamelCase",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Content-Type": "application/json",
+                    }
+                    async with self._session.get(
+                        web_url, params=params, headers=headers_a3,
+                        allow_redirects=False,
+                    ) as resp:
+                        _LOGGER.info(
+                            "WebAPI probe [WebScope+MSAuth]: status=%s", resp.status
+                        )
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            _LOGGER.info(
+                                "WebAPI probe [WebScope+MSAuth] SUCCESS: %s",
+                                str(data)[:500],
+                            )
+                            return data
+                        text = await resp.text()
+                        _LOGGER.debug(
+                            "WebAPI probe [WebScope+MSAuth] body: %s", text[:300]
+                        )
+
+                    # Try Bearer with web token
+                    headers_a4 = {
+                        "Authorization": f"Bearer {web_token}",
+                        "Accept": "application/json",
+                        "X-AMC-JsonMode": "CamelCase",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Content-Type": "application/json",
+                    }
+                    async with self._session.get(
+                        web_url, params=params, headers=headers_a4,
+                        allow_redirects=False,
+                    ) as resp:
+                        _LOGGER.info(
+                            "WebAPI probe [WebScope+Bearer]: status=%s", resp.status
+                        )
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            _LOGGER.info(
+                                "WebAPI probe [WebScope+Bearer] SUCCESS: %s",
+                                str(data)[:500],
+                            )
+                            return data
+                        text = await resp.text()
+                        _LOGGER.debug(
+                            "WebAPI probe [WebScope+Bearer] body: %s", text[:300]
+                        )
+                else:
+                    text = await token_resp.text()
+                    _LOGGER.info(
+                        "WebAPI scope token FAILED: %s", text[:300]
+                    )
+        except Exception as err:
+            _LOGGER.debug("WebAPI probe [WebScope] error: %s", err)
+
+        # ---------- Approach 4: SSO cookie flow ----------
+        # Try to establish web session via login.live.com redirect chain
+        try:
+            sso_url = (
+                "https://login.live.com/oauth20_authorize.srf"
+                "?client_id=000000000004893A"
+                "&response_type=code"
+                "&redirect_uri=https://login.live.com/oauth20_desktop.srf"
+                "&scope=service::account.microsoft.com::MBI_SSL"
+                "&lw=1&fl=easi2"
+            )
+            async with self._session.get(
+                sso_url, allow_redirects=True
+            ) as resp:
+                _LOGGER.info(
+                    "WebAPI probe [SSO redirect]: final_url=%s, status=%s, cookies=%s",
+                    resp.url, resp.status,
+                    [c.key for c in self._session.cookie_jar],
+                )
+        except Exception as err:
+            _LOGGER.debug("WebAPI probe [SSO] error: %s", err)
+
+        _LOGGER.warning(
+            "All web API probes failed for schedule data (child=%s)", child_id
+        )
         return None
 
     async def get_device_overrides(self, child_id: str) -> dict | None:
