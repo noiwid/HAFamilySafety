@@ -183,37 +183,33 @@ class FamilySafetyWebAPI:
     ) -> dict | None:
         """Get device limits schedules (daily allowances + time windows).
 
-        Tries GET first (with appliesTo query param), then falls back
-        to a no-op PATCH which should return the current schedule.
+        Probes multiple endpoint variations to find the schedule data.
         """
         plat_headers = {"Plat-Info": platform}
 
-        # Attempt 1: GET with appliesTo query parameter
-        try:
-            result = await self._request(
-                "GET",
-                f"/v4/devicelimits/schedules/{child_id}",
-                params={"appliesTo": platform},
-                extra_headers=plat_headers,
-            )
-            _LOGGER.debug("Schedules GET response for %s: %s", child_id, result)
-            return result
-        except FamilySafetyWebAPIError as err:
-            _LOGGER.debug("Schedules GET failed (%s), trying PATCH fallback", err)
+        # List of endpoints to try
+        attempts = [
+            ("GET", f"/v1/devicelimits/{child_id}", None, plat_headers),
+            ("GET", f"/v4/devicelimits/{child_id}", None, plat_headers),
+            ("GET", f"/v3/devicelimits/schedules/{child_id}", None, plat_headers),
+            ("GET", f"/v1/devicelimits/schedules/{child_id}", None, plat_headers),
+        ]
 
-        # Attempt 2: PATCH with empty body — response should contain current schedule
-        try:
-            result = await self._request(
-                "PATCH",
-                f"/v4/devicelimits/schedules/{child_id}",
-                json_data={},
-                extra_headers=plat_headers,
-            )
-            _LOGGER.debug("Schedules PATCH fallback response for %s: %s", child_id, result)
-            return result
-        except FamilySafetyWebAPIError as err:
-            _LOGGER.debug("Schedules PATCH fallback also failed: %s", err)
-            raise
+        for method, path, params, headers in attempts:
+            try:
+                result = await self._request(
+                    method, path, params=params, extra_headers=headers,
+                )
+                _LOGGER.info(
+                    "Schedule probe SUCCESS: %s %s => %s",
+                    method, path, str(result)[:500],
+                )
+                return result
+            except FamilySafetyWebAPIError as err:
+                _LOGGER.debug("Schedule probe failed: %s %s => %s", method, path, err)
+
+        _LOGGER.warning("All schedule endpoint probes failed for %s", child_id)
+        return None
 
     async def get_device_overrides(self, child_id: str) -> dict | None:
         """Get device lock/unlock overrides."""
