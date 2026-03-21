@@ -1,14 +1,14 @@
 """Browser-based authentication manager using Playwright for Microsoft Family Safety."""
 import asyncio
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from playwright.async_api import (
     async_playwright,
-    Browser,
     BrowserContext,
     Page,
     TimeoutError as PlaywrightTimeoutError,
@@ -80,6 +80,7 @@ class BrowserAuthManager:
         self._language = language
         self._timezone = timezone
         self._storage = storage
+        # Lock guards the Chrome profile directory — both auth and fetch must acquire it
         self._browser_lock = asyncio.Lock()
 
         # Ensure profile directory exists
@@ -93,6 +94,40 @@ class BrowserAuthManager:
         except Exception as e:
             _LOGGER.error(f"Failed to initialize Playwright: {e}")
             raise
+
+    def _remove_stale_singleton_lock(self):
+        """Remove SingletonLock if no Chromium process is using the profile.
+
+        Checks the PID stored in the lock file symlink target. If the process
+        is not running, removes the lock. This handles crashes and restarts
+        safely without killing a live browser.
+        """
+        lock_file = Path(_PROFILE_DIR) / "SingletonLock"
+        if not lock_file.exists() and not lock_file.is_symlink():
+            return
+
+        try:
+            # Chromium stores the lock as a symlink whose target contains the hostname and PID
+            # Format: "hostname-PID"
+            if lock_file.is_symlink():
+                target = os.readlink(str(lock_file))
+                parts = target.rsplit("-", 1)
+                if len(parts) == 2:
+                    try:
+                        pid = int(parts[1])
+                        # Check if process is still running
+                        os.kill(pid, 0)
+                        _LOGGER.warning(
+                            "SingletonLock held by live process PID %d — not removing", pid
+                        )
+                        return
+                    except (ValueError, ProcessLookupError, PermissionError):
+                        pass  # PID not valid or process dead — safe to remove
+
+            lock_file.unlink(missing_ok=True)
+            _LOGGER.info("Removed stale SingletonLock from %s", _PROFILE_DIR)
+        except Exception as e:
+            _LOGGER.warning("Failed to check/remove SingletonLock: %s", e)
 
     async def start_auth_session(self) -> str:
         """Start a new authentication session."""
@@ -110,12 +145,15 @@ class BrowserAuthManager:
         session_id = str(uuid.uuid4())
         _LOGGER.info(f"Starting authentication session: {session_id}")
 
+        # Acquire the browser lock to prevent conflict with browser_fetch
+        await self._browser_lock.acquire()
+
         context = None
         page = None
         try:
+            self._remove_stale_singleton_lock()
+
             # Launch persistent browser context (non-headless for VNC interaction)
-            # All state (cookies, localStorage, sessionStorage, cache) is saved
-            # to _PROFILE_DIR and persists across restarts.
             context = await self._playwright.chromium.launch_persistent_context(
                 _PROFILE_DIR,
                 headless=False,
@@ -126,11 +164,9 @@ class BrowserAuthManager:
                 timezone_id=self._timezone,
             )
 
-            # launch_persistent_context provides a default page
             page = context.pages[0] if context.pages else await context.new_page()
 
             self._sessions[session_id] = {
-                "browser": None,  # No separate browser with persistent context
                 "context": context,
                 "page": page,
                 "status": "authenticating",
@@ -154,7 +190,7 @@ class BrowserAuthManager:
                 timeout=30000,
             )
 
-            # Start monitoring in background
+            # Start monitoring in background (will release _browser_lock when done)
             task = asyncio.create_task(self._monitor_authentication(session_id))
             task.add_done_callback(lambda t: self._on_monitor_done(session_id, t))
             self._monitor_tasks[session_id] = task
@@ -168,12 +204,17 @@ class BrowserAuthManager:
                     await context.close()
             except Exception as cleanup_err:
                 _LOGGER.warning(f"Cleanup after failed session start: {cleanup_err}")
+            # Release lock on failure
+            if self._browser_lock.locked():
+                self._browser_lock.release()
             raise
 
     async def _monitor_authentication(self, session_id: str):
         """Monitor authentication progress for Microsoft login."""
         session = self._sessions.get(session_id)
         if not session:
+            if self._browser_lock.locked():
+                self._browser_lock.release()
             return
 
         context: BrowserContext = session["context"]
@@ -183,11 +224,10 @@ class BrowserAuthManager:
 
             await asyncio.sleep(5)  # Give initial page time to load
 
-            start_time = asyncio.get_event_loop().time()
+            start_time = asyncio.get_running_loop().time()
             authenticated = False
             last_url = None
 
-            # Microsoft auth cookie names to detect successful login
             MS_AUTH_COOKIE_NAMES = {
                 "MSPAuth",
                 "MSPProf",
@@ -196,7 +236,7 @@ class BrowserAuthManager:
                 "RPSSecAuth",
             }
 
-            while (asyncio.get_event_loop().time() - start_time) < self._auth_timeout:
+            while (asyncio.get_running_loop().time() - start_time) < self._auth_timeout:
                 page: Page = session["page"]
                 current_url = page.url
 
@@ -219,7 +259,6 @@ class BrowserAuthManager:
                             f"Authentication detected via URL: {current_url}"
                         )
 
-                        # Navigate to family page to finalize session
                         _LOGGER.info(
                             "Navigating to account.microsoft.com/family to finalize session..."
                         )
@@ -232,7 +271,6 @@ class BrowserAuthManager:
                             _LOGGER.info(
                                 "Successfully navigated to Family Safety dashboard"
                             )
-                            # Wait for all JS-managed tokens to be set
                             await asyncio.sleep(5)
                         except Exception as e:
                             _LOGGER.warning(
@@ -261,14 +299,12 @@ class BrowserAuthManager:
                             f"{[c['name'] for c in ms_auth_cookies]})"
                         )
 
-                        # Navigate to family page to finalize session
                         try:
                             await page.goto(
                                 "https://account.microsoft.com/family",
                                 wait_until="load",
                                 timeout=15000,
                             )
-                            # Wait for all JS-managed tokens to be set
                             await asyncio.sleep(5)
                         except Exception as e:
                             _LOGGER.warning(
@@ -289,7 +325,6 @@ class BrowserAuthManager:
             _LOGGER.info("Authentication detected, extracting cookies...")
             cookies = await context.cookies()
 
-            # Filter relevant Microsoft cookies
             ms_cookies = [
                 c
                 for c in cookies
@@ -308,7 +343,6 @@ class BrowserAuthManager:
 
             _LOGGER.info(f"Extracted {len(ms_cookies)} Microsoft cookies")
 
-            # Save cookies to shared storage (for HA integration)
             if self._storage:
                 await self._storage.save_cookies(ms_cookies)
             else:
@@ -342,12 +376,18 @@ class BrowserAuthManager:
             _LOGGER.error(f"Authentication error for session {session_id}: {e}")
             await self._cleanup_session(session_id)
 
+        finally:
+            # Always release the browser lock when auth is done
+            if self._browser_lock.locked():
+                self._browser_lock.release()
+
     def _on_monitor_done(self, session_id: str, task: asyncio.Task):
         """Handle monitor task completion."""
         self._monitor_tasks.pop(session_id, None)
-        if task.cancelled():
+        try:
+            exc = task.exception()
+        except (asyncio.CancelledError, asyncio.InvalidStateError):
             return
-        exc = task.exception()
         if exc:
             _LOGGER.error(f"Monitor task for session {session_id} failed: {exc}")
 
@@ -385,7 +425,6 @@ class BrowserAuthManager:
         session = self._sessions.get(session_id)
         if session:
             try:
-                # With persistent context, closing context saves state and closes browser
                 if session.get("context"):
                     await session["context"].close()
                 _LOGGER.info(f"Cleaned up session {session_id}")
@@ -394,16 +433,14 @@ class BrowserAuthManager:
             finally:
                 self._sessions[session_id] = {
                     "status": session.get("status", "cleaned_up"),
+                    "cookies": session.get("cookies"),
                     "created_at": session.get("created_at"),
                 }
 
-    _FETCH_JS = """async (url) => {
+    # _FETCH_JS accepts [url, canary] — canary is extracted from context.cookies()
+    # on the Python side because httpOnly cookies are not accessible via document.cookie
+    _FETCH_JS = """async ([url, canary]) => {
         try {
-            // Read canary cookie for the __requestverificationtoken header
-            const cookies = document.cookie.split(';').map(c => c.trim());
-            const canaryCookie = cookies.find(c => c.startsWith('canary='));
-            const canary = canaryCookie ? canaryCookie.split('=').slice(1).join('=') : '';
-
             const hdrs = {
                 'Accept': 'application/json, text/plain, */*',
                 'X-Requested-With': '3742,HttpRequest',
@@ -444,42 +481,14 @@ class BrowserAuthManager:
         Uses a persistent browser context that shares the same Chrome profile
         as the authentication browser.  All session state (cookies, localStorage,
         MSAL tokens, etc.) is preserved across calls and restarts.
-
-        Returns the JSON response dict on success, or a dict with
-        ``__error`` key on failure.
         """
-        # Wait for any active auth session to finish first
-        active = [
-            s for s in self._sessions.values()
-            if s.get("status") == "authenticating"
-        ]
-        if active:
-            _LOGGER.info(
-                "browser_fetch: auth session in progress, waiting for it to complete..."
-            )
-            for _ in range(60):  # Wait up to 120 seconds
-                await asyncio.sleep(2)
-                still_active = [
-                    s for s in self._sessions.values()
-                    if s.get("status") == "authenticating"
-                ]
-                if not still_active:
-                    _LOGGER.info("browser_fetch: auth session completed, proceeding")
-                    break
-            else:
-                return {
-                    "__error": True, "status": 503, "code": "AUTH_IN_PROGRESS",
-                    "text": "Authentication session still in progress after waiting",
-                }
-
         # Build the full URL with params
-        query = ""
-        if params:
-            from urllib.parse import urlencode
-            query = "?" + urlencode(params)
+        from urllib.parse import urlencode
+        query = "?" + urlencode(params) if params else ""
         full_url = url + query
 
         # Use persistent context — all session state is on disk
+        # The _browser_lock ensures we wait for any active auth session
         return await self._persistent_context_fetch(full_url)
 
     async def _persistent_context_fetch(self, full_url: str) -> dict:
@@ -490,15 +499,11 @@ class BrowserAuthManager:
         are available.  Navigates to the family page to let JS establish
         the session, then executes a fetch() from within the page.
         """
-        # Prevent concurrent access to the shared profile directory
+        # _browser_lock ensures mutual exclusion with auth AND other fetches
         async with self._browser_lock:
             context = None
             try:
-                # Remove stale SingletonLock from previous crashes/restarts
-                lock_file = Path(_PROFILE_DIR) / "SingletonLock"
-                if lock_file.exists():
-                    _LOGGER.info("browser_fetch: removing stale SingletonLock")
-                    lock_file.unlink(missing_ok=True)
+                self._remove_stale_singleton_lock()
 
                 _LOGGER.info("browser_fetch: opening persistent context from %s", _PROFILE_DIR)
 
@@ -515,7 +520,6 @@ class BrowserAuthManager:
                 page = context.pages[0] if context.pages else await context.new_page()
 
                 # Navigate to family page — JS will establish the full session
-                # using cookies + localStorage (MSAL tokens) from the profile
                 _LOGGER.info("browser_fetch: navigating to family page...")
                 try:
                     resp = await page.goto(
@@ -561,8 +565,15 @@ class BrowserAuthManager:
                 # Wait for JS-based session tokens (MSAL) to initialize
                 await page.wait_for_timeout(5000)
 
-                _LOGGER.info("browser_fetch: calling %s via page fetch", full_url)
-                result = await page.evaluate(self._FETCH_JS, full_url)
+                # Extract canary token from cookies (httpOnly — not accessible via JS)
+                canary = ""
+                for c in await context.cookies():
+                    if c.get("name") == "canary":
+                        canary = c["value"]
+                        break
+
+                _LOGGER.info("browser_fetch: calling %s via page fetch (canary=%s)", full_url, "yes" if canary else "no")
+                result = await page.evaluate(self._FETCH_JS, [full_url, canary])
 
                 if isinstance(result, dict) and result.get("__error"):
                     _LOGGER.warning(
