@@ -360,8 +360,10 @@ async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
                 status,
                 text,
             )
+            # Forward the status code from browser_fetch (e.g. 503 for BROWSER_BUSY)
+            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
             raise HTTPException(
-                status_code=502,
+                status_code=http_status,
                 detail={
                     "error": error_code,
                     "microsoft_status": status,

@@ -193,6 +193,7 @@ class AddonCookieClient:
                     text = await response.text()
                     # Try to parse detailed error info from addon
                     detail = text
+                    error_code = None
                     try:
                         import json
                         err_data = json.loads(text)
@@ -208,11 +209,17 @@ class AddonCookieClient:
                                 )
                     except Exception:
                         pass
-                    _LOGGER.warning(
-                        "Addon screentime API returned %s: %s",
-                        response.status,
-                        detail[:500],
-                    )
+                    if response.status == 503 and error_code == "BROWSER_BUSY":
+                        _LOGGER.info(
+                            "Addon browser busy (auth in progress), "
+                            "screen time will be fetched on next cycle"
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "Addon screentime API returned %s: %s",
+                            response.status,
+                            detail[:500],
+                        )
                     return None
         except aiohttp.ClientError as err:
             _LOGGER.warning("Failed to fetch screentime from addon: %s", err)
