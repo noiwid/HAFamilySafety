@@ -418,15 +418,35 @@ class BrowserAuthManager:
         }
     }"""
 
+    def _build_cookie_header(self, cookies: list[dict], url: str) -> str:
+        """Build a Cookie header string from Playwright-format cookies.
+
+        Filters cookies by domain matching for the given URL.
+        """
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        pairs = []
+        for c in cookies:
+            domain = c.get("domain", "")
+            # .example.com matches example.com and sub.example.com
+            if domain.startswith("."):
+                if not (host == domain[1:] or host.endswith(domain)):
+                    continue
+            else:
+                if host != domain:
+                    continue
+            pairs.append(f"{c['name']}={c['value']}")
+        return "; ".join(pairs)
+
     async def browser_fetch(
         self, url: str, params: dict | None = None
     ) -> dict | None:
         """Make an API call through an authenticated browser session.
 
-        Strategy:
-        1. Open a blank page with injected cookies, try fetch() directly.
-        2. If that returns 401, navigate to the family page (domcontentloaded)
-           to let JS establish session tokens, then retry fetch().
+        Strategy (avoids slow page.goto which times out in Docker):
+        1. Try Playwright APIRequestContext with injected cookies (no browser needed).
+        2. If that returns 401, fall back to full page navigation with JS execution.
 
         Returns the JSON response dict on success, or a dict with
         ``__error`` key on failure.
@@ -464,6 +484,113 @@ class BrowserAuthManager:
             query = "?" + urlencode(params)
         full_url = url + query
 
+        # ----------------------------------------------------------
+        # Attempt 1: Playwright APIRequestContext (no page navigation)
+        # ----------------------------------------------------------
+        try:
+            result = await self._api_request_fetch(cookies, full_url)
+            if result is not None:
+                return result
+            _LOGGER.info(
+                "browser_fetch: API request returned 401, "
+                "falling back to full page navigation..."
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "browser_fetch: API request attempt failed: %s", exc
+            )
+
+        # ----------------------------------------------------------
+        # Attempt 2: Full browser with page navigation (slow path)
+        # ----------------------------------------------------------
+        return await self._page_navigation_fetch(cookies, full_url)
+
+    async def _api_request_fetch(
+        self, cookies: list[dict], full_url: str
+    ) -> dict | None:
+        """Fast path: use Playwright's APIRequestContext with cookies.
+
+        Returns the parsed JSON on success, an error dict on non-401 errors,
+        or None if 401 (caller should fall back to page navigation).
+        """
+        # Extract canary token from cookies
+        canary = ""
+        for c in cookies:
+            if c.get("name") == "canary":
+                canary = c["value"]
+                break
+
+        cookie_header = self._build_cookie_header(cookies, full_url)
+
+        headers = {
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://account.microsoft.com/family",
+            "Origin": "https://account.microsoft.com",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
+            "Cookie": cookie_header,
+        }
+        if canary:
+            headers["canary"] = canary
+            headers["X-Canary"] = canary
+
+        _LOGGER.info("browser_fetch: attempt 1 — API request %s", full_url)
+
+        api_context = await self._playwright.request.new_context(
+            extra_http_headers=headers,
+            ignore_https_errors=True,
+        )
+        try:
+            resp = await api_context.get(full_url, timeout=15000)
+            status = resp.status
+            text = await resp.text()
+
+            _LOGGER.info(
+                "browser_fetch: API request status=%d, body=%s",
+                status,
+                text[:200] if text else "(empty)",
+            )
+
+            if status == 401:
+                return None  # Signal caller to try page navigation
+
+            if status >= 400:
+                return {
+                    "__error": True,
+                    "status": status,
+                    "text": text[:500],
+                }
+
+            import json
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return {
+                    "__error": True,
+                    "status": status,
+                    "text": text[:500],
+                    "message": "Invalid JSON response",
+                }
+        finally:
+            await api_context.dispose()
+
+    async def _page_navigation_fetch(
+        self, cookies: list[dict], full_url: str
+    ) -> dict | None:
+        """Slow path: launch browser, navigate to family page, run JS fetch.
+
+        This is needed when the API requires JS-managed session tokens
+        beyond what cookies alone provide.
+        """
         browser = None
         try:
             browser = await self._playwright.chromium.launch(
@@ -490,68 +617,58 @@ class BrowserAuthManager:
             # Inject saved cookies
             await context.add_cookies(cookies)
 
-            # --- Attempt 1: direct fetch without page navigation ---
             page = await context.new_page()
-            # Navigate to the origin so fetch() has the right context
-            _LOGGER.info("browser_fetch: navigating to origin...")
-            await page.goto(
-                "https://account.microsoft.com/family",
-                wait_until="commit",
-                timeout=15000,
-            )
-            # Don't wait for full load — just need the origin set
-            await page.wait_for_timeout(1000)
 
-            _LOGGER.info("browser_fetch: attempt 1 — direct fetch %s", full_url)
-            result = await page.evaluate(self._FETCH_JS, full_url)
-
-            if isinstance(result, dict) and result.get("__error"):
-                status = result.get("status", "?")
-                _LOGGER.info(
-                    "browser_fetch: attempt 1 failed (status=%s), "
-                    "waiting for full page load before retry...",
-                    status,
+            # Navigate to family page to establish full session
+            _LOGGER.info("browser_fetch: attempt 2 — loading family page...")
+            try:
+                resp = await page.goto(
+                    "https://account.microsoft.com/family",
+                    wait_until="domcontentloaded",
+                    timeout=60000,
                 )
+            except Exception as nav_err:
+                _LOGGER.warning(
+                    "browser_fetch: navigation error (will still try fetch): %s",
+                    nav_err,
+                )
+                # Even if navigation times out, the page might be partially loaded
+                # on the correct origin — try fetch anyway.
+                resp = None
 
-                # --- Attempt 2: wait for page to fully load (JS session setup) ---
-                try:
-                    _LOGGER.info("browser_fetch: waiting for domcontentloaded...")
-                    await page.wait_for_load_state(
-                        "domcontentloaded", timeout=30000
-                    )
-                except Exception as load_err:
-                    _LOGGER.warning(
-                        "browser_fetch: domcontentloaded timeout: %s", load_err
-                    )
+            final_url = page.url
+            resp_status = resp.status if resp else "no response"
+            _LOGGER.info(
+                "browser_fetch: family page status=%s, final_url=%s",
+                resp_status,
+                final_url,
+            )
 
-                final_url = page.url
-                _LOGGER.info("browser_fetch: page URL after load: %s", final_url)
+            # Detect login redirect — cookies are likely expired
+            if any(
+                domain in final_url
+                for domain in (
+                    "login.microsoftonline.com",
+                    "login.live.com",
+                    "login.microsoft.com",
+                )
+            ):
+                _LOGGER.error(
+                    "browser_fetch: redirected to login (%s) — cookies expired",
+                    final_url,
+                )
+                return {
+                    "__error": True,
+                    "status": 401,
+                    "text": f"Redirected to login: {final_url}",
+                    "code": "LOGIN_REDIRECT",
+                }
 
-                # Detect login redirect
-                if any(
-                    domain in final_url
-                    for domain in (
-                        "login.microsoftonline.com",
-                        "login.live.com",
-                        "login.microsoft.com",
-                    )
-                ):
-                    _LOGGER.error(
-                        "browser_fetch: redirected to login (%s) — cookies expired",
-                        final_url,
-                    )
-                    return {
-                        "__error": True,
-                        "status": 401,
-                        "text": f"Redirected to login: {final_url}",
-                        "code": "LOGIN_REDIRECT",
-                    }
+            # Wait for JS-based session tokens to be set
+            await page.wait_for_timeout(3000)
 
-                # Wait for JS to set up session tokens
-                await page.wait_for_timeout(3000)
-
-                _LOGGER.info("browser_fetch: attempt 2 — retry fetch %s", full_url)
-                result = await page.evaluate(self._FETCH_JS, full_url)
+            _LOGGER.info("browser_fetch: calling %s via page fetch", full_url)
+            result = await page.evaluate(self._FETCH_JS, full_url)
 
             await page.close()
             await context.close()
