@@ -325,6 +325,34 @@ async def delete_cookies(_: None = Depends(_verify_api_key)):
         raise HTTPException(status_code=500, detail="Failed to delete cookies")
 
 
+@app.get("/api/screentime")
+async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
+    """Fetch screen time policy through an authenticated browser session.
+
+    This launches a headless Chromium with saved cookies, navigates to the
+    family page (so JS session tokens are established), then calls the
+    Microsoft API via fetch() from within the browser context.
+    """
+    if browser_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    try:
+        result = await browser_manager.browser_fetch(
+            "https://account.microsoft.com/family/api/st",
+            params={"childId": childId},
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to fetch screen time from Microsoft",
+            )
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _LOGGER.error(f"Screen time fetch failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run(
         app, host=config.host, port=config.port, log_level=config.log_level.lower()

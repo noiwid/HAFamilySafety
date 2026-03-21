@@ -348,7 +348,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise RuntimeError("Web API not initialized")
 
         # Save current screentime policy before zeroing
-        current_policy = await self.web_api.get_screentime_policy(account_id)
+        current_policy = await self._addon_client.fetch_screentime(account_id)
+        if current_policy is None:
+            current_policy = await self.web_api.get_screentime_policy(account_id)
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
             has_nonzero = False
@@ -499,7 +501,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Could not fetch web browsing settings: %s", err)
 
         try:
-            screentime = await self.web_api.get_screentime_policy(account_id)
+            # Use addon's browser-based fetch (avoids 401 from direct cookie replay)
+            screentime = await self._addon_client.fetch_screentime(account_id)
+            if screentime is None:
+                # Fallback to direct web API call
+                screentime = await self.web_api.get_screentime_policy(account_id)
             _LOGGER.debug("Screen time policy response for %s: %s", account_id, screentime)
             result["screentime_policy"] = screentime
         except Exception as err:
