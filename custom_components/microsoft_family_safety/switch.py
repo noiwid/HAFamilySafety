@@ -264,6 +264,7 @@ class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_account_lock"
         self._attr_name = f"{account_name} Lock"
+        self._optimistic_state: bool | None = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -278,6 +279,8 @@ class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         """Return True if the account is locked (all screen time = 0)."""
+        if self._optimistic_state is not None:
+            return self._optimistic_state
         return self.coordinator.is_account_locked(self._account_id)
 
     @property
@@ -297,11 +300,27 @@ class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Lock the account."""
+        """Lock the account (optimistic update)."""
         _LOGGER.info("Locking account %s", self._account_name)
-        await self.coordinator.async_lock_account(self._account_id)
+        self._optimistic_state = True
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_lock_account(self._account_id)
+            self._optimistic_state = None
+        except Exception:
+            self._optimistic_state = None
+            self.async_write_ha_state()
+            raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Unlock the account."""
+        """Unlock the account (optimistic update)."""
         _LOGGER.info("Unlocking account %s", self._account_name)
-        await self.coordinator.async_unlock_account(self._account_id)
+        self._optimistic_state = False
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_unlock_account(self._account_id)
+            self._optimistic_state = None
+        except Exception:
+            self._optimistic_state = None
+            self.async_write_ha_state()
+            raise
