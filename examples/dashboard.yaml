@@ -1,0 +1,547 @@
+# Microsoft Family Safety — Dashboard Card Example
+#
+# Requirements:
+#   - custom:button-card (HACS)
+#   - custom:stack-in-card (HACS)
+#   - custom:vertical-stack-in-card (HACS)
+#   - custom:mod-card (HACS)
+#   - custom:mushroom-title-card (HACS)
+#
+# Replace entity names to match your child's name and device ID.
+# Entity naming pattern: sensor.{firstname}_{...}, number.{firstname}_{day}_limit, etc.
+
+type: vertical-stack
+cards:
+  # ── Header + Stats ──────────────────────────────────────────
+  - type: custom:vertical-stack-in-card
+    cards:
+      - type: custom:button-card
+        name: "Temps d'écran"
+        tap_action:
+          action: none
+        styles:
+          card:
+            - height: 40px
+            - box-shadow: none
+            - border: none
+            - padding: 0 0 0 16px
+            - margin: 0
+          name:
+            - font-size: 15px
+            - font-weight: bold
+            - justify-self: start
+
+      - type: custom:mod-card
+        card_mod:
+          style: |
+            ha-card {
+              height: 1px;
+              background: rgba(152, 152, 157, 0.3);
+              box-shadow: none;
+              border: none;
+            }
+        card:
+          type: custom:mushroom-title-card
+          title: ""
+
+      # ── Top row: Screen time stats ──
+      - type: custom:stack-in-card
+        mode: horizontal
+        card_mod:
+          style: |
+            :host { --stack-card-gap: 0 !important; }
+            ha-card { padding: 0 !important; background: inherit !important; }
+        cards:
+          - type: custom:button-card
+            entity: sensor.maceo_screen_time
+            name: Temps total
+            icon: mdi:clock-outline
+            show_state: true
+            state_display: |
+              [[[
+                const e = states['sensor.maceo_screen_time'];
+                if (e && e.attributes && e.attributes.formatted_time) {
+                  let parts = e.attributes.formatted_time.split(':');
+                  return parts[0] + 'h' + parts[1];
+                }
+                return entity.state + ' min';
+              ]]]
+            tap_action:
+              action: more-info
+            styles:
+              card:
+                - height: 90px
+                - border: none
+                - border-right: 1px solid rgba(152,152,157,0.3)
+                - border-radius: 0
+                - padding: 10px 0
+                - background: transparent
+              icon:
+                - width: 32px
+                - color: var(--primary-color)
+                - z-index: 1
+              name:
+                - font-size: 13px
+                - font-weight: 500
+                - opacity: 0.7
+                - z-index: 1
+              state:
+                - font-size: 16px
+                - font-weight: bold
+                - z-index: 1
+          - type: custom:button-card
+            entity: sensor.desktop_9n6pnll_screen_time
+            name: PC
+            icon: mdi:desktop-tower-monitor
+            show_state: true
+            state_display: |
+              [[[
+                const e = states['sensor.desktop_9n6pnll_screen_time'];
+                if (e && e.attributes && e.attributes.formatted_time) {
+                  let parts = e.attributes.formatted_time.split(':');
+                  return parts[0] + 'h' + parts[1];
+                }
+                return entity.state + ' min';
+              ]]]
+            tap_action:
+              action: more-info
+            styles:
+              card:
+                - height: 90px
+                - border: none
+                - border-right: 1px solid rgba(152,152,157,0.3)
+                - border-radius: 0
+                - padding: 10px 0
+                - background: transparent
+              icon:
+                - width: 32px
+                - color: var(--primary-color)
+                - z-index: 1
+              name:
+                - font-size: 13px
+                - font-weight: 500
+                - opacity: 0.7
+                - z-index: 1
+              state:
+                - font-size: 16px
+                - font-weight: bold
+                - z-index: 1
+          - type: custom:button-card
+            entity: sensor.maceo_pending_requests
+            name: Demandes
+            icon: mdi:bell-ring-outline
+            show_state: true
+            tap_action:
+              action: more-info
+            styles:
+              card:
+                - height: 90px
+                - border: none
+                - border-radius: 0
+                - padding: 10px 0
+                - background: transparent
+              icon:
+                - width: 32px
+                - color: |
+                    [[[
+                      return parseInt(entity.state) > 0 ? '#FF9800' : 'var(--primary-color)';
+                    ]]]
+                - z-index: 1
+              name:
+                - font-size: 13px
+                - font-weight: 500
+                - opacity: 0.7
+                - z-index: 1
+              state:
+                - font-size: 16px
+                - font-weight: bold
+                - z-index: 1
+
+      - type: custom:mod-card
+        card_mod:
+          style: |
+            ha-card {
+              height: 1px;
+              background: rgba(152, 152, 157, 0.3);
+              box-shadow: none;
+              border: none;
+            }
+        card:
+          type: custom:mushroom-title-card
+          title: ""
+
+      # ── Lock buttons ──
+      - type: custom:stack-in-card
+        mode: horizontal
+        card_mod:
+          style: |
+            :host { --stack-card-gap: 0 !important; }
+            ha-card { padding: 0 !important; background: inherit !important; }
+        cards:
+          - type: custom:button-card
+            entity: switch.maceo_lock
+            name: Verrouiller
+            icon: mdi:lock
+            tap_action:
+              action: toggle
+            hold_action:
+              action: more-info
+            custom_fields:
+              bg: ""
+            state:
+              - value: "on"
+                icon: mdi:lock
+              - value: "off"
+                icon: mdi:lock-open-variant
+            styles:
+              card:
+                - position: relative
+                - overflow: hidden
+                - height: 70px
+                - border: none
+                - border-right: 1px solid rgba(152,152,157,0.3)
+                - border-radius: 0
+                - padding: 10px 0
+                - background: transparent
+              custom_fields:
+                bg:
+                  - position: absolute
+                  - inset: 0
+                  - z-index: 0
+                  - pointer-events: none
+                  - background: |
+                      [[[
+                        return entity.state === 'on' ? 'rgb(80,40,40)' : 'transparent';
+                      ]]]
+              icon:
+                - width: 28px
+                - z-index: 1
+                - color: |
+                    [[[
+                      return entity.state === 'on' ? '#F44336' : 'var(--primary-text-color)';
+                    ]]]
+                - opacity: |
+                    [[[
+                      return entity.state === 'on' ? '1' : '0.5';
+                    ]]]
+              name:
+                - font-size: 13px
+                - font-weight: 500
+                - z-index: 1
+          - type: custom:button-card
+            entity: switch.maceo_windows_lock
+            name: Windows
+            icon: mdi:microsoft-windows
+            tap_action:
+              action: toggle
+            hold_action:
+              action: more-info
+            custom_fields:
+              bg: ""
+            styles:
+              card:
+                - position: relative
+                - overflow: hidden
+                - height: 70px
+                - border: none
+                - border-radius: 0
+                - padding: 10px 0
+                - background: transparent
+              custom_fields:
+                bg:
+                  - position: absolute
+                  - inset: 0
+                  - z-index: 0
+                  - pointer-events: none
+                  - background: |
+                      [[[
+                        return entity.state === 'on' ? 'rgb(80,40,40)' : 'transparent';
+                      ]]]
+              icon:
+                - width: 28px
+                - z-index: 1
+                - color: |
+                    [[[
+                      return entity.state === 'on' ? '#F44336' : 'var(--primary-text-color)';
+                    ]]]
+                - opacity: |
+                    [[[
+                      return entity.state === 'on' ? '1' : '0.5';
+                    ]]]
+              name:
+                - font-size: 13px
+                - font-weight: 500
+                - z-index: 1
+
+      - type: custom:mod-card
+        card_mod:
+          style: |
+            ha-card {
+              height: 1px;
+              background: rgba(152, 152, 157, 0.3);
+              box-shadow: none;
+              border: none;
+            }
+        card:
+          type: custom:mushroom-title-card
+          title: ""
+
+  # ── Device card with progress bar ──────────────────────────
+  - type: custom:vertical-stack-in-card
+    cards:
+      - type: custom:button-card
+        entity: switch.maceo_lock
+        name: PC — DESKTOP-9N6PNLL
+        icon: mdi:desktop-tower-monitor
+        show_state: false
+        show_name: true
+        show_icon: true
+        tap_action:
+          action: toggle
+        hold_action:
+          action: more-info
+        state:
+          - value: "on"
+            styles:
+              icon:
+                - color: "#F44336"
+          - value: "off"
+            styles:
+              icon:
+                - color: "#4CAF50"
+        triggers_update:
+          - sensor.desktop_9n6pnll_screen_time
+          - sensor.maceo_screen_time
+          - switch.maceo_lock
+          - number.maceo_monday_limit
+          - number.maceo_tuesday_limit
+          - number.maceo_wednesday_limit
+          - number.maceo_thursday_limit
+          - number.maceo_friday_limit
+          - number.maceo_saturday_limit
+          - number.maceo_sunday_limit
+        variables:
+          screen_data: |
+            [[[
+              let days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+              let today = days[new Date().getDay()];
+              let limitEntity = states['number.maceo_' + today + '_limit'];
+              let limit = limitEntity ? parseFloat(limitEntity.state) : 0;
+              if (isNaN(limit)) limit = 0;
+              let used = parseFloat(states['sensor.maceo_screen_time']?.state) || 0;
+              let percent = (limit > 0) ? Math.min(Math.round((used / limit) * 100), 100) : 0;
+              let startEntity = states['time.maceo_' + today + '_start'];
+              let endEntity = states['time.maceo_' + today + '_end'];
+              let start = startEntity && startEntity.state !== 'unknown' && startEntity.state !== 'unavailable'
+                ? startEntity.state.substring(0,5) : '--:--';
+              let end = endEntity && endEntity.state !== 'unknown' && endEntity.state !== 'unavailable'
+                ? endEntity.state.substring(0,5) : '--:--';
+              return {
+                limit: Math.round(limit),
+                used: Math.round(used),
+                percent: percent,
+                start: start,
+                end: end
+              };
+            ]]]
+        styles:
+          grid:
+            - grid-template-areas: "\"i n stat\" \"bar bar bar\" \"sched sched sched\""
+            - grid-template-columns: 40px 1fr auto
+            - grid-template-rows: auto auto auto
+            - grid-gap: 8px
+          card:
+            - padding: 12px
+          icon:
+            - grid-area: i
+            - width: 30px
+            - justify-self: start
+          name:
+            - grid-area: "n"
+            - justify-self: start
+            - align-self: center
+            - font-weight: bold
+            - font-size: 14px
+          custom_fields:
+            stat:
+              - grid-area: stat
+              - align-self: center
+              - justify-self: end
+              - font-size: 14px
+              - font-weight: 500
+              - opacity: 0.8
+            bar:
+              - grid-area: bar
+            sched:
+              - grid-area: sched
+              - font-size: 13px
+              - opacity: 0.7
+              - text-align: center
+        custom_fields:
+          stat: |
+            [[[
+              let used = variables.screen_data.used;
+              let limit = variables.screen_data.limit;
+              if (limit > 0) {
+                return used + 'm / ' + limit + 'm';
+              }
+              return used + ' min';
+            ]]]
+          bar: |
+            [[[
+              let pct = variables.screen_data.percent;
+              let color = "var(--primary-color)";
+              if (pct >= 90) color = "#db4437";
+              else if (pct >= 75) color = "#f4b400";
+              return `
+                <div style="background-color: rgba(127,127,127, 0.2); border-radius: 6px; width: 100%; height: 12px; overflow: hidden;">
+                  <div style="background-color: ${color}; width: ${pct}%; height: 100%;"></div>
+                </div>
+              `;
+            ]]]
+          sched: |
+            [[[
+              let s = variables.screen_data;
+              return `Plage autorisée : ${s.start} — ${s.end}`;
+            ]]]
+
+      - type: custom:mod-card
+        card_mod:
+          style: |
+            ha-card {
+              height: 1px;
+              background: rgba(152, 152, 157, 0.3);
+              box-shadow: none;
+              border: none;
+            }
+        card:
+          type: custom:mushroom-title-card
+          title: ""
+
+      # ── Weekly limits ──
+      - type: custom:button-card
+        name: Limites de la semaine
+        tap_action:
+          action: none
+        styles:
+          card:
+            - height: 35px
+            - box-shadow: none
+            - border: none
+            - padding: 0 0 0 12px
+            - margin: 0
+          name:
+            - font-size: 13px
+            - font-weight: 600
+            - opacity: 0.7
+            - justify-self: start
+
+      - type: custom:stack-in-card
+        mode: horizontal
+        card_mod:
+          style: >
+            :host { --stack-card-gap: 0 !important; }
+            ha-card { padding: 0 4px !important; background: inherit !important; }
+        cards:
+          - type: custom:button-card
+            entity: number.maceo_monday_limit
+            name: Lun
+            show_state: true
+            show_icon: false
+            state_display: &limit_display |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_monday_start
+            styles: &day_styles
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
+          - type: custom:button-card
+            entity: number.maceo_tuesday_limit
+            name: Mar
+            show_state: true
+            show_icon: false
+            state_display: *limit_display
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_tuesday_start
+            styles: *day_styles
+          - type: custom:button-card
+            entity: number.maceo_wednesday_limit
+            name: Mer
+            show_state: true
+            show_icon: false
+            state_display: *limit_display
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_wednesday_start
+            styles: *day_styles
+          - type: custom:button-card
+            entity: number.maceo_thursday_limit
+            name: Jeu
+            show_state: true
+            show_icon: false
+            state_display: *limit_display
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_thursday_start
+            styles: *day_styles
+          - type: custom:button-card
+            entity: number.maceo_friday_limit
+            name: Ven
+            show_state: true
+            show_icon: false
+            state_display: *limit_display
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_friday_start
+            styles: *day_styles
+          - type: custom:button-card
+            entity: number.maceo_saturday_limit
+            name: Sam
+            show_state: true
+            show_icon: false
+            state_display: *limit_display
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_saturday_start
+            styles: *day_styles
+          - type: custom:button-card
+            entity: number.maceo_sunday_limit
+            name: Dim
+            show_state: true
+            show_icon: false
+            state_display: *limit_display
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.maceo_sunday_start
+            styles: *day_styles

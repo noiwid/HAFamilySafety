@@ -7,7 +7,11 @@
 
 A full-featured Home Assistant custom integration for **Microsoft Family Safety**. Monitor screen time, manage app restrictions, lock accounts, control web filtering, and adjust daily limits — all from your Home Assistant dashboard.
 
+**Supported platforms:** Windows, Xbox, Mobile
+
 > **Domain:** `microsoft_family_safety` | **IoT Class:** Cloud Polling | **Languages:** English, French
+
+![Dashboard Example](images/dashboard.png)
 
 ---
 
@@ -433,6 +437,18 @@ automation:
         target:
           entity_id: switch.maceo_lock
 ```
+
+### Dashboard card
+
+A ready-to-use dashboard card is available in [`examples/dashboard.yaml`](examples/dashboard.yaml). It includes:
+
+- Screen time overview (total + per device)
+- Pending requests counter
+- Lock/unlock buttons (account + Windows)
+- Device card with progress bar and allowed time window
+- Weekly limits grid (tap to edit limit, hold to edit time window)
+
+**Required HACS frontend cards:** `button-card`, `stack-in-card`, `vertical-stack-in-card`, `mod-card`, `mushroom`
 
 ---
 
