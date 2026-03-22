@@ -493,7 +493,119 @@ logger:
 
 ## API Reference
 
-For developers and contributors, see the full API discovery report in `.claude/sessions/2026-03-20/01_API_DISCOVERY_FAMILY_SAFETY.md`. It documents all 27 discovered endpoints across both the web API and mobile API.
+Microsoft Family Safety exposes **two distinct APIs**. This integration uses both, each for specific capabilities.
+
+### Mobile API — `mobileaggregator.family.microsoft.com`
+
+**Authentication:** OAuth Bearer token (acquired via `pyfamilysafety`)
+
+Used for read operations and app management. Token-based, no browser session required.
+
+| Method | Endpoint | Description | Used by |
+|--------|----------|-------------|---------|
+| GET | `/v1/WebRestrictions/{childId}` | Web filter settings & blocked sites | `sensor.web_filter` |
+| GET | `/v1/DeviceLimits/{childId}/overrides` | Active device overrides | `switch.lock` |
+| PATCH | `/v4/devicelimits/schedules/{childId}` | ~~Set screen time schedule~~ | **Broken** (400 error) |
+| POST | `/v1/devicelimits/{childId}/overrides` | ~~Lock device~~ | **Broken** (Microsoft removed) |
+
+> The mobile API's schedule and device override endpoints no longer work reliably. All screen time writes now go through the web API.
+
+### Web API — `account.microsoft.com/family/api/`
+
+**Authentication:** Browser cookies + CSRF token (`__RequestVerificationToken` from DOM hidden input + `canary` cookie). All requests require the headers `X-AMC-JsonMode: CamelCase`, `X-Requested-With: XMLHttpRequest`, and `Content-Type: application/json`.
+
+Routed through the addon's browser session. Used for screen time reads/writes and all settings.
+
+#### Read Endpoints (GET)
+
+| Endpoint | Query Params | Description | Used by |
+|----------|-------------|-------------|---------|
+| `/family/api/roster` | — | Family members list | Coordinator |
+| `/family/api/st` | `childId` | Screen time policy (per-device, Windows) | `sensor.screen_time_policy`, `number.*_limit`, `time.*_start/end` |
+| `/family/api/screen-time-global` | `childId` | Global screen time toggle | — |
+| `/family/api/screen-time-xbox` | `childId` | Xbox screen time policy | — |
+| `/family/api/device-limits/get-devices` | `childId` | Connected devices list | — |
+| `/family/api/app-limits/get-all-app-policies-v3` | `childId` | All app policies | `switch.app_*` |
+| `/family/api/app-limits/get-app-time-extension-requests` | `memberIdList` | Pending extension requests | `sensor.pending_requests`, `button.approve/deny` |
+| `/family/api/recent-activity/report-v3` | `childId`, `isPreviousWeek`, `timeZone` | Activity report | `sensor.screen_time` |
+| `/family/api/settings/web-browsing` | `childId` | Web filter settings | `sensor.web_filter` |
+
+#### Write Endpoints (POST/PUT/DELETE)
+
+| Method | Endpoint | Body | Description |
+|--------|----------|------|-------------|
+| POST | `/family/api//st/day-allow` | `{childId, dayOfWeek, timeSpanDays, timeSpanHours, timeSpanMinutes}` | Set daily screen time allowance |
+| POST | `/family/api//st/day-allow-int` | `{childId, dayOfWeek, allowedIntervals: [48 booleans]}` | Set allowed time intervals (30-min slots) |
+| POST | `/family/api/app-limits/set-custom-app-policy-v3` | `{childId, appPolicy: {...}, platform}` | Block/unblock/limit an app |
+| POST | `/family/api/settings/block-website` | `{childId, website}` | Block a website |
+| DELETE | `/family/api/settings/remove-website` | `?childId=&website=` | Remove a blocked/allowed website |
+| POST | `/family/api/settings/web-browsing-toggle` | `{childId, isEnabled}` | Toggle web content filtering |
+| PUT | `/family/api/settings/update-content-settings` | `{childId, contentRatingAge}` | Set age rating (3-20, 21=unrestricted) |
+| POST | `/family/api/ps/set-acquisition-policy` | `{childId, policy}` | Set ask-to-buy (`freeOnly` / `unrestricted`) |
+
+#### Screen Time Response Structure
+
+`GET /family/api/st?childId={childId}` returns:
+
+```json
+{
+  "userId": "1055519684390826",
+  "isEnabled": true,
+  "dailyRestrictions": {
+    "monday": {
+      "dayOfWeek": "monday",
+      "allowance": "01:00:00",
+      "allowedIntervals": [
+        {
+          "begin": "PT7H",
+          "beginTimeSpan": "07:00:00",
+          "end": "PT23H",
+          "endTimeSpan": "23:00:00"
+        }
+      ],
+      "timeline": [false, false, ..., true, true, ..., false, false]
+    }
+  }
+}
+```
+
+- `allowance`: daily limit as `HH:MM:SS`
+- `allowedIntervals[].beginTimeSpan/endTimeSpan`: window boundaries as `HH:MM:SS`
+- `timeline`: 48 booleans representing 30-min slots (index 0 = 00:00, index 14 = 07:00)
+
+### Addon API — `http://{addon-hostname}:8098`
+
+The addon exposes a local HTTP API that proxies requests through the authenticated browser session.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/health` | Health check |
+| POST | `/api/auth/start` | Start authentication session |
+| GET | `/api/auth/status/{session_id}` | Check auth session status |
+| GET | `/api/cookies/check` | Check cookie freshness |
+| GET | `/api/cookies` | Get stored cookies |
+| DELETE | `/api/cookies` | Delete stored cookies |
+| GET | `/api/screentime?childId=` | Fetch screen time via browser |
+| POST | `/api/screentime/set-allowance` | Set daily allowance via browser |
+| POST | `/api/screentime/set-intervals` | Set time intervals via browser |
+
+### Capabilities Matrix
+
+| Action | Web API | Mobile API | Status |
+|--------|:---:|:---:|--------|
+| View family roster | GET | — | Working |
+| View screen time usage | — | GET | Working |
+| Read screen time schedule | GET | — | Working (via addon) |
+| Set daily screen time allowance | POST | ~~PATCH~~ | Working (web only) |
+| Set allowed time intervals | POST | ~~PATCH~~ | Working (web only) |
+| Block/unblock an app | POST | POST | Working |
+| Set per-app time limits | POST | — | Working |
+| Block/allow a website | POST/DELETE | — | Working |
+| Toggle web filtering | POST | — | Working |
+| Set content age rating | PUT | — | Working |
+| Set ask-to-buy policy | POST | — | Working |
+| **Lock device (instant)** | **N/A** | ~~POST~~ | **Broken** (Microsoft removed) |
+| Lock account (workaround) | POST x14 | — | Working (sets all quotas to 0) |
 
 ---
 
