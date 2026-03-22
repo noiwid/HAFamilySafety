@@ -536,17 +536,27 @@ class BrowserAuthManager:
                     "created_at": session.get("created_at"),
                 }
 
-    # _FETCH_JS accepts [url, canary] — canary is extracted from context.cookies()
-    # on the Python side because httpOnly cookies are not accessible via document.cookie
+    # _FETCH_JS accepts [url, canary] — canary is the cookie value (extracted
+    # on the Python side because httpOnly cookies are not accessible via JS).
+    # The __RequestVerificationToken header needs the value from the hidden
+    # input in the DOM — that is the CSRF token the server validates against
+    # the canary cookie.
     _FETCH_JS = """async ([url, canary]) => {
         try {
+            // Extract CSRF token from hidden input in the page DOM
+            const csrfInput = document.querySelector(
+                'input[name="__RequestVerificationToken"]'
+            );
+            const csrfToken = csrfInput ? csrfInput.value : canary;
+
             const hdrs = {
                 'Accept': 'application/json, text/plain, */*',
-                'X-Requested-With': '3742,HttpRequest',
-                'X-Anc-Jsonmode': 'CamelCase'
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-AMC-JsonMode': 'CamelCase'
             };
-            if (canary) {
-                hdrs['__requestverificationtoken'] = canary;
+            if (csrfToken) {
+                hdrs['__RequestVerificationToken'] = csrfToken;
             }
 
             const resp = await fetch(url, {
@@ -558,7 +568,7 @@ class BrowserAuthManager:
                 return {
                     __error: true,
                     status: resp.status,
-                    text: text,
+                    text: text.substring(0, 500),
                     headers: Object.fromEntries(resp.headers.entries())
                 };
             }
@@ -663,7 +673,16 @@ class BrowserAuthManager:
                         canary = c["value"]
                         break
 
-                _LOGGER.info("browser_fetch: calling %s via page fetch (canary=%s)", full_url, "yes" if canary else "no")
+                # Check if page has the CSRF hidden input (for logging)
+                has_csrf_input = await page.evaluate(
+                    "!!document.querySelector('input[name=\"__RequestVerificationToken\"]')"
+                )
+                _LOGGER.info(
+                    "browser_fetch: calling %s (canary=%s, csrf_input=%s)",
+                    full_url,
+                    "yes" if canary else "no",
+                    "yes" if has_csrf_input else "no",
+                )
                 result = await page.evaluate(self._FETCH_JS, [full_url, canary])
 
                 if isinstance(result, dict) and result.get("__error"):
