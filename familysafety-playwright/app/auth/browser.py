@@ -628,11 +628,6 @@ class BrowserAuthManager:
         self, url: str, body: dict
     ) -> dict | None:
         """Make a POST API call through an authenticated browser session."""
-        if self._browser_lock.locked():
-            return {
-                "__error": True, "status": 503, "code": "BROWSER_BUSY",
-                "text": "Browser is busy. Try again later.",
-            }
         return await self._persistent_context_post(url, body)
 
     async def _persistent_context_post(self, full_url: str, body: dict) -> dict:
