@@ -11,31 +11,39 @@ A full-featured Home Assistant custom integration for **Microsoft Family Safety*
 
 ---
 
-## What's New in v1.0.0
+## Disclaimer
 
-### Account Lock — the headline feature
+This integration uses **unofficial, undocumented APIs** for Microsoft Family Safety. It is not approved, endorsed, or supported by Microsoft. Microsoft may modify or disable the underlying APIs at any time. Use at your own risk and in compliance with Microsoft's terms of service.
 
-The original per-platform lock (Windows/Xbox/Mobile) relied on a Microsoft API (`override_device`) that **no longer works**. v1.0.0 introduces a new **Account Lock switch** that actually works:
+---
 
-- **`switch.{name}_lock`** — a single toggle per child account
-- **ON** = locks the account by setting all 7-day screen time quotas to 0 and blocking all time intervals
-- **OFF** = unlocks by restoring the previously saved quotas
-- **Persists across HA restarts** — saved policies are stored via HA's native `.storage/` mechanism
-- Works with automations (watchdog pattern, schedules, etc.)
+## Architecture
 
-### Full feature list
+The integration consists of **two components** working together:
 
-- **17 services** covering app management, account locking, screen time configuration, web filtering, content restrictions, and purchase controls
-- **Web API client** for capabilities beyond the pyfamilysafety library (daily limits, time windows, web filters, age ratings, purchase controls)
-- **Number entities** for adjusting daily screen time limits per day of the week directly from the UI
-- **Time entities** for setting allowed screen time intervals (start/end) per day of the week
-- **Switch entities** for blocking apps and locking accounts
-- **Button entities** for approving or denying pending screen time extension requests
-- **Sensors**: Screen Time, Account Info, Applications, Balance, Web Filter, Screen Time Policy, Pending Requests
-- **Per-device entities**: dedicated screen time and info sensors for each physical device
-- **Hub architecture** — creates HA devices for each child account and each physical device
-- **Configurable polling interval** (30s to 3600s) via the options flow
-- **Full French translations** for config flow, options, and all services
+| Component | Directory | Role |
+|-----------|-----------|------|
+| **Family Safety Auth Add-on** | `familysafety-playwright/` | Playwright-based browser automation with headless Chromium. Handles Microsoft web authentication and proxies API calls through an authenticated browser session. |
+| **Home Assistant Integration** | `custom_components/microsoft_family_safety/` | Config flow integration. Fetches data, exposes entities, handles services, and communicates with the addon for web API operations. |
+
+### Why two components?
+
+Microsoft Family Safety has **two distinct APIs**, each with its own authentication:
+
+| API | Base URL | Auth Method | Capabilities |
+|-----|----------|-------------|-------------|
+| **Mobile API** | `mobileaggregator.family.microsoft.com` | OAuth token (via `pyfamilysafety`) | Read family roster, app list, screen time usage, web restrictions. Block/unblock apps. |
+| **Web API** | `account.microsoft.com/family/api/` | Browser cookies + CSRF token | Read/write screen time schedules, daily limits, time intervals. Web filtering. Content ratings. Purchase controls. |
+
+The mobile API handles basic reads and app management. But **screen time schedule modifications** (daily limits, allowed time intervals) only work through the web API, which requires a full browser session with cookies and a CSRF token extracted from the page DOM.
+
+The addon runs a headless Chromium browser that maintains an authenticated session with Microsoft. The integration calls the addon's HTTP API, which executes `fetch()` calls from within the authenticated browser context — exactly as a real user's browser would.
+
+**Key constraints:**
+- The addon must remain running at all times for screen time reads and writes to work
+- Microsoft's OAuth silent flow requires the browser to navigate to the family dashboard before each API call (~15-20s per request)
+- Screen time modifications are routed through `POST /family/api//st/day-allow` (web API), not the mobile API which returns 400 errors for schedule changes
+- The addon hostname is resolved dynamically via the Supervisor API, making the integration portable across installations
 
 ---
 
@@ -45,17 +53,38 @@ The original per-platform lock (Windows/Xbox/Mobile) relied on a Microsoft API (
 |----------|----------------|
 | **Account Lock** | Lock/unlock a child's entire account with a single switch |
 | **Screen time monitoring** | Track daily usage per child and per device |
-| **Screen time policies** | Adjust daily allowances and allowed time intervals per day |
+| **Screen time policies** | Adjust daily allowances and allowed time intervals per day — directly from the UI |
 | **App management** | Block/unblock apps, set per-app time limits and windows |
 | **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
 | **Purchase controls** | Enable/disable ask-to-buy via service call |
 | **Request handling** | Approve or deny pending screen time requests from HA |
+| **Optimistic updates** | UI values update instantly when changing limits or intervals (reverts on failure) |
 
 ---
 
 ## Installation
 
-### Via HACS (Recommended)
+### Prerequisites
+
+- **Home Assistant OS** or **Home Assistant Supervised** (the addon requires the Supervisor)
+- A **Microsoft parent account** with at least one child in the Family Safety group
+
+### Step 1 — Install the Add-on
+
+The addon provides the browser-based authentication required for screen time features.
+
+1. In Home Assistant, go to **Settings > Add-ons > Add-on Store**
+2. Click the **three-dot menu** (top right) > **Repositories**
+3. Add: `https://github.com/noiwid/HAFamilySafety`
+4. Find **Microsoft Family Safety Auth** in the store and click **Install**
+5. Start the addon
+6. Open the addon **Web UI** (port 8098) — you'll see the authentication page
+7. Click **Start Authentication** and sign in with your Microsoft parent account via the noVNC interface (port 6081)
+8. Once authenticated, the addon will extract and store cookies automatically
+
+### Step 2 — Install the Integration
+
+#### Via HACS (Recommended)
 
 1. Open **HACS** in Home Assistant
 2. Go to **Integrations** and click the three-dot menu in the top right
@@ -64,17 +93,13 @@ The original per-platform lock (Windows/Xbox/Mobile) relied on a Microsoft API (
 5. Search for **Microsoft Family Safety** in HACS and click **Download**
 6. Restart Home Assistant
 
-### Manual Installation
+#### Manual Installation
 
 1. Download the latest release from [GitHub Releases](https://github.com/noiwid/HAFamilySafety/releases)
 2. Copy the `custom_components/microsoft_family_safety` folder into your `config/custom_components/` directory
 3. Restart Home Assistant
 
----
-
-## Configuration
-
-### Initial Setup
+### Step 3 — Configure the Integration
 
 1. Go to **Settings > Devices & Services > Add Integration**
 2. Search for **Microsoft Family Safety**
@@ -84,13 +109,26 @@ The original per-platform lock (Windows/Xbox/Mobile) relied on a Microsoft API (
    ```
    https://login.live.com/oauth20_desktop.srf?code=M.C123_ABC...&lc=1033
    ```
-6. Paste the redirect URL back into the Home Assistant form and submit
+6. Paste the redirect URL back into the Home Assistant form
+7. Select your monitored platforms (Windows, Xbox, Mobile) and polling interval
+8. Submit — the integration will discover all child accounts and devices automatically
 
-The integration will discover all child accounts and their associated devices automatically.
+> **Note:** The addon status is shown during setup. If detected, screen time schedule reading and writing will be enabled automatically.
 
-### Options
+### Add-on Configuration
 
-After setup, go to **Settings > Devices & Services > Microsoft Family Safety > Configure** to adjust:
+| Option | Default | Description |
+|--------|---------|-------------|
+| `log_level` | `info` | Logging verbosity (`trace`, `debug`, `info`, `warning`, `error`) |
+| `auth_timeout` | `300` | Seconds to wait for user to complete authentication (60-600) |
+| `session_duration` | `86400` | Session validity in seconds (1h-7d) |
+| `language` | *(auto)* | Browser locale (e.g., `fr-FR`, `en-US`) |
+| `timezone` | *(auto)* | Browser timezone (e.g., `Europe/Paris`) |
+| `vnc_password` | `familysafety` | Password for the noVNC interface |
+
+### Integration Options
+
+After setup, go to **Settings > Devices & Services > Microsoft Family Safety > Configure**:
 
 | Option | Range | Default |
 |--------|-------|---------|
@@ -113,20 +151,20 @@ Physical devices are linked to their parent child account via `via_device`.
 
 | Entity | Entity ID | State | Key Attributes |
 |--------|-----------|-------|----------------|
-| Screen Time | `sensor.{name}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `seconds`, `average_screentime`, `date` |
-| Account Info | `sensor.{name}_account_info` | Full name | `user_id`, `first_name`, `surname`, `profile_picture`, `device_count`, `application_count` |
+| Screen Time | `sensor.{name}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `average_screentime`, `date` |
+| Account Info | `sensor.{name}_account_info` | Full name | `user_id`, `first_name`, `surname`, `profile_picture`, `device_count` |
 | Applications | `sensor.{name}_applications` | App count | `blocked_count`, `applications` |
 | Balance | `sensor.{name}_balance` | Account balance | *(monetary sensor, only if available)* |
 | Pending Requests | `sensor.{name}_pending_requests` | Request count | `requests` |
 | Web Filter | `sensor.{name}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge` |
-| Screen Time Policy | `sensor.{name}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` ... `sunday_allowance` |
+| Screen Time Policy | `sensor.{name}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` ... `sunday_allowance`, `daily_restrictions` |
 
 ### Sensors — Per Physical Device
 
 | Entity | Entity ID | State | Key Attributes |
 |--------|-----------|-------|----------------|
 | Device Screen Time | `sensor.{device}_screen_time` | Minutes used today | — |
-| Device Info | `sensor.{device}_info` | Device name | `model`, `OS`, `last_seen`, `manufacturer`, `device_class` |
+| Device Info | `sensor.{device}_info` | Device name | `model`, `OS`, `last_seen` |
 
 ### Switches — Per Child Account
 
@@ -134,7 +172,7 @@ Physical devices are linked to their parent child account via `via_device`.
 |--------|-----------|----------|
 | **Account Lock** | `switch.{name}_lock` | **ON = account locked** (all screen time set to 0). Saves quotas before locking, restores on unlock. Persists across restarts. |
 | App Block | `switch.{name}_app_{appname}` | ON = app blocked. One switch per application. |
-| Platform Lock *(deprecated)* | `switch.{name}_{platform}_lock` | ON = platform locked. Kept for backwards compatibility — **use Account Lock instead**. |
+| Platform Lock *(deprecated)* | `switch.{name}_{platform}_lock` | ON = platform locked. **Use Account Lock instead** — per-platform lock relies on a broken Microsoft API. |
 
 ### Buttons — Per Child Account
 
@@ -143,22 +181,22 @@ Physical devices are linked to their parent child account via `via_device`.
 | Approve Request | `button.{name}_approve_request` | Approves the oldest pending screen time request (+1 hour) |
 | Deny Request | `button.{name}_deny_request` | Denies the oldest pending request |
 
-### Number Entities — Per Child Account
+### Number Entities — Per Child Account (7 per child)
 
 | Entity | Entity ID | Range | Step |
 |--------|-----------|-------|------|
-| Daily Limit (x7) | `number.{name}_{day}_limit` | 0 – 1440 minutes | 15 min |
+| Daily Limit | `number.{name}_{day}_limit` | 0 – 1440 minutes | 15 min |
 
-One entity per day of the week (Sunday through Saturday). Adjustable directly from the UI.
+One entity per day of the week (Sunday through Saturday). Adjustable directly from the UI with **optimistic updates** — values reflect immediately.
 
-### Time Entities — Per Child Account
+### Time Entities — Per Child Account (14 per child)
 
 | Entity | Entity ID | Description |
 |--------|-----------|-------------|
-| Interval Start (x7) | `time.{name}_{day}_start` | Start of the allowed screen time window |
-| Interval End (x7) | `time.{name}_{day}_end` | End of the allowed screen time window |
+| Interval Start | `time.{name}_{day}_start` | Start of the allowed screen time window |
+| Interval End | `time.{name}_{day}_end` | End of the allowed screen time window |
 
-One start/end pair per day of the week.
+One start/end pair per day of the week. Editable from the UI with optimistic updates.
 
 ---
 
@@ -172,14 +210,14 @@ The integration exposes **17 services**, split between the pyfamilysafety librar
 # Lock a child account (sets all screen time to 0, saves current policy)
 service: microsoft_family_safety.lock_account
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
 ```
 
 ```yaml
 # Unlock a child account (restores saved policy)
 service: microsoft_family_safety.unlock_account
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
 ```
 
 ### App Management
@@ -188,7 +226,7 @@ data:
 # Block an application
 service: microsoft_family_safety.block_app
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   app_id: "app-uuid"
 ```
 
@@ -196,7 +234,7 @@ data:
 # Unblock an application
 service: microsoft_family_safety.unblock_app
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   app_id: "app-uuid"
 ```
 
@@ -204,7 +242,7 @@ data:
 # Set a per-app daily time limit with allowed window
 service: microsoft_family_safety.set_app_time_limit
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   app_id: "app-uuid"
   app_name: "Minecraft"
   platform: "windows"
@@ -218,31 +256,10 @@ data:
 # Remove a per-app time limit
 service: microsoft_family_safety.remove_app_time_limit
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   app_id: "app-uuid"
   app_name: "Minecraft"
   platform: "windows"
-```
-
-### Platform Control *(deprecated)*
-
-> These services rely on `override_device` which Microsoft has broken. Use **Account Lock** instead.
-
-```yaml
-# Lock a platform for N hours
-service: microsoft_family_safety.lock_platform
-data:
-  account_id: "child-account-uuid"
-  platform: "Xbox"
-  duration_hours: 2
-```
-
-```yaml
-# Unlock a platform
-service: microsoft_family_safety.unlock_platform
-data:
-  account_id: "child-account-uuid"
-  platform: "Xbox"
 ```
 
 ### Screen Time
@@ -251,7 +268,7 @@ data:
 # Set daily screen time allowance
 service: microsoft_family_safety.set_screentime_limit
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   day_of_week: 1  # 0=Sunday, 6=Saturday
   hours: 2
   minutes: 0
@@ -261,7 +278,7 @@ data:
 # Set allowed time window (30-min precision)
 service: microsoft_family_safety.set_screentime_intervals
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   day_of_week: 1
   start_hour: 8
   start_minute: 0
@@ -292,7 +309,7 @@ data:
 # Block a website
 service: microsoft_family_safety.block_website
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   website: "example.com"
 ```
 
@@ -300,7 +317,7 @@ data:
 # Remove a blocked website
 service: microsoft_family_safety.remove_website
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   website: "example.com"
 ```
 
@@ -308,7 +325,7 @@ data:
 # Toggle web content filtering
 service: microsoft_family_safety.toggle_web_filter
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   enabled: true
 ```
 
@@ -318,7 +335,7 @@ data:
 # Set age rating (PEGI 3-20, or 21 for unrestricted)
 service: microsoft_family_safety.set_age_rating
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   age: 12
 ```
 
@@ -326,7 +343,7 @@ data:
 # Enable or disable ask-to-buy
 service: microsoft_family_safety.set_acquisition_policy
 data:
-  account_id: "child-account-uuid"
+  account_id: "1055519684390826"
   require_approval: true
 ```
 
@@ -334,9 +351,7 @@ data:
 
 ## Automation Examples
 
-### Lock account on schedule
-
-Lock the PC every evening at 21:00 and unlock at 08:00:
+### Lock account on school nights
 
 ```yaml
 automation:
@@ -344,65 +359,43 @@ automation:
     trigger:
       - platform: time
         at: "21:00:00"
+    condition:
+      - condition: time
+        weekday: [sun, mon, tue, wed, thu]
     action:
       - action: switch.turn_on
         target:
-          entity_id: switch.maceo_collin_lock
+          entity_id: switch.maceo_lock
 
-  - alias: "Unlock account at 08:00"
+  - alias: "Unlock account at 07:00"
     trigger:
       - platform: time
-        at: "08:00:00"
+        at: "07:00:00"
     action:
       - action: switch.turn_off
         target:
-          entity_id: switch.maceo_collin_lock
+          entity_id: switch.maceo_lock
 ```
 
-### Watchdog — prevent manual unlock
-
-Re-lock automatically if the child somehow bypasses the lock:
-
-```yaml
-automation:
-  - alias: "Anti-bypass watchdog"
-    trigger:
-      - trigger: state
-        entity_id: switch.maceo_collin_lock
-        to: "off"
-    condition:
-      - condition: time
-        after: "21:00:00"
-        before: "08:00:00"
-    action:
-      - action: switch.turn_on
-        target:
-          entity_id: switch.maceo_collin_lock
-```
-
-### Screen Time Alert
-
-Send a notification when a child exceeds 2 hours of screen time:
+### Screen time alert
 
 ```yaml
 automation:
   - alias: "Screen time limit alert"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.maceo_collin_screen_time
+        entity_id: sensor.maceo_screen_time
         above: 120
     action:
       - action: notify.mobile_app_your_phone
         data:
           title: "Screen Time Alert"
           message: >
-            {{ state_attr('sensor.maceo_collin_screen_time', 'formatted_time') }}
+            {{ state_attr('sensor.maceo_screen_time', 'formatted_time') }}
             of screen time used today.
 ```
 
-### Weekday Screen Time Limit
-
-Automatically set a 1.5-hour limit on school days:
+### Set weekday limits automatically
 
 ```yaml
 automation:
@@ -416,62 +409,66 @@ automation:
     action:
       - action: microsoft_family_safety.set_screentime_limit
         data:
-          account_id: "child-account-uuid"
+          account_id: "1055519684390826"
           day_of_week: "{{ now().weekday() }}"
           hours: 1
           minutes: 30
 ```
 
-### Dashboard Card
-
-A simple entities card for daily monitoring:
+### Watchdog — prevent manual unlock
 
 ```yaml
-type: entities
-title: Family Safety
-entities:
-  - entity: switch.maceo_collin_lock
-    name: Account Lock
-  - type: divider
-  - entity: sensor.maceo_collin_screen_time
-    name: Screen Time
-  - entity: sensor.maceo_collin_pending_requests
-    name: Pending Requests
-  - entity: sensor.maceo_collin_web_filter
-    name: Web Filter
-  - type: divider
-  - entity: number.maceo_collin_monday_limit
-    name: Monday Limit
-  - entity: number.maceo_collin_tuesday_limit
-    name: Tuesday Limit
+automation:
+  - alias: "Anti-bypass watchdog"
+    trigger:
+      - trigger: state
+        entity_id: switch.maceo_lock
+        to: "off"
+    condition:
+      - condition: time
+        after: "21:00:00"
+        before: "07:00:00"
+    action:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.maceo_lock
 ```
 
 ---
 
 ## Troubleshooting
 
-### Authentication Errors
+### Addon not detected during setup
 
-The OAuth token expires after a few weeks. Home Assistant will prompt you to reauthenticate using the same redirect URL flow described above.
+- Make sure the addon is **started** (green icon in the Add-ons page)
+- The integration resolves the addon hostname dynamically via the Supervisor API — no manual URL configuration needed
+- If running HA Core/Container (no Supervisor), the addon must be deployed as a standalone Docker container and the URL configured manually in the integration options
 
-### Web API Services Return 401/403
+### Authentication expired / cookies stale
 
-The web API endpoints reuse the Bearer token from pyfamilysafety. If Microsoft rejects it for certain endpoints, the affected services will fail with a 401 or 403 error. Try reauthenticating.
+- Open the addon Web UI and click **Re-authenticate**
+- The addon stores the browser profile in `/share/familysafety/` — cookies persist across addon restarts
+- If the session is completely dead (redirect to marketing page), re-authenticate via the noVNC interface
 
-### Data Not Updating
+### Screen time reads return `unknown`
 
-- The default polling interval is 5 minutes. You can lower it to 30 seconds in the integration options.
-- Force refresh: **Settings > Devices & Services > Microsoft Family Safety > Reload**.
+- Ensure the addon is running — screen time schedules are fetched through the addon's browser session
+- Check addon logs: look for `browser_fetch: success` messages
+- If you see `LOGIN_REDIRECT` errors, the session has expired — re-authenticate
 
-### Account Lock Issues
+### Screen time writes fail
 
-- **Lock takes a few seconds** — the integration needs to set quotas for all 7 days (14 API calls). This is normal.
-- **Unlock restores defaults if HA storage was cleared** — if `.storage/microsoft_family_safety.saved_screentime` is deleted, unlock will restore 2h/day, 07:00-22:00 as a safe default.
-- **Lock is account-wide** — it affects all platforms (Windows, Xbox, Mobile) simultaneously. There is no per-platform lock available via the web API.
+- Writes go through the addon's browser POST endpoint (`/api/screentime/set-allowance`)
+- Each write takes ~20-30 seconds (browser must navigate to the family dashboard first)
+- If you get timeout errors, increase the polling interval to reduce concurrent browser usage
 
-### Debug Logging
+### Account Lock issues
 
-Add the following to `configuration.yaml` and restart:
+- **Lock takes a few seconds** — the integration sets quotas for all 7 days via sequential API calls
+- **Unlock restores defaults if HA storage was cleared** — if `.storage/microsoft_family_safety.saved_screentime` is deleted, unlock will restore 2h/day, 07:00-22:00 as a safe default
+- **Lock is account-wide** — it affects all platforms simultaneously
+
+### Debug logging
 
 ```yaml
 logger:
@@ -481,22 +478,28 @@ logger:
     pyfamilysafety: debug
 ```
 
-Check logs at **Settings > System > Logs**.
-
 ---
 
 ## Known Limitations
 
 - **Unofficial API** — Microsoft provides no public API for Family Safety. This integration relies on reverse-engineered endpoints that may change or break at any time.
 - **Per-platform lock is broken** — Microsoft removed the `override_device` endpoint. The Account Lock switch is the recommended replacement but locks all platforms at once.
-- **Web API authentication** shares the pyfamilysafety token. Some endpoints may reject it depending on Microsoft's server-side validation.
-- **Lock/unlock speed** — locking requires 14 sequential API calls (7 days x 2 endpoints). This takes a few seconds.
+- **Addon required for screen time** — Reading and writing screen time schedules requires the companion addon with its browser session. Without it, only basic data from the mobile API is available.
+- **One API call at a time** — The addon uses a single browser instance with a lock. Concurrent requests are queued, which can cause delays during heavy usage.
+- **Session maintenance** — Microsoft sessions can expire after extended periods. The addon handles OAuth silent flows automatically, but occasional re-authentication via the noVNC interface may be needed.
+- **HA Core/Container** — The addon is designed for HA OS/Supervised. For HA Core or Container installations, you need to run the Playwright service as a standalone Docker container.
+
+---
+
+## API Reference
+
+For developers and contributors, see the full API discovery report in `.claude/sessions/2026-03-20/01_API_DISCOVERY_FAMILY_SAFETY.md`. It documents all 27 discovered endpoints across both the web API and mobile API.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome!
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
@@ -521,10 +524,6 @@ Areas where help is especially appreciated:
 
 This project is licensed under the [MIT License](LICENSE).
 
-## Disclaimer
-
-This integration uses an **unofficial, undocumented API** for Microsoft Family Safety. It is not approved, endorsed, or supported by Microsoft. Microsoft may modify or disable the underlying API at any time. Use at your own risk and in compliance with Microsoft's terms of service.
-
 ---
 
 ## Support
@@ -532,4 +531,4 @@ This integration uses an **unofficial, undocumented API** for Microsoft Family S
 - [GitHub Issues](https://github.com/noiwid/HAFamilySafety/issues)
 - [GitHub Discussions](https://github.com/noiwid/HAFamilySafety/discussions)
 
-When reporting an issue, please include: HA version, integration version, debug logs, and steps to reproduce.
+When reporting an issue, please include: HA version, integration version, addon version, debug logs (both HA and addon), and steps to reproduce.
