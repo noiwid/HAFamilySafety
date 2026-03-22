@@ -83,6 +83,7 @@ class AddonCookieClient:
                     if response.status == 404:
                         _LOGGER.debug("No cookies found at %s", api_url)
                         return None
+                    await response.text()  # drain body to close connection properly
                     _LOGGER.debug("API returned status %s from %s", response.status, api_url)
                     return None
         except aiohttp.ClientError as err:
@@ -317,30 +318,26 @@ class AddonCookieClient:
         """Set allowed time intervals via addon browser POST."""
         url = await self._get_addon_url()
         api_url = f"{url.rstrip('/')}/api/screentime/set-intervals"
-        import json as json_mod
-        body = json_mod.dumps({
-            "childId": child_id,
-            "dayOfWeek": day_of_week,
-            "allowedIntervals": allowed_intervals,
-        })
-        _LOGGER.info("Calling set-intervals at %s (day %d)", api_url, day_of_week)
-        import asyncio, subprocess
-        proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-X", "POST", api_url,
-            "-H", "Content-Type: application/json",
-            "-d", body,
-            "--max-time", "120",
-            "-w", "\n%{http_code}",
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        output = stdout.decode()
-        lines = output.strip().rsplit("\n", 1)
-        resp_body = lines[0] if len(lines) > 1 else ""
-        status_code = lines[-1].strip()
-        _LOGGER.info("set-intervals response: status=%s body=%s", status_code, resp_body[:200])
-        if status_code == "200":
-            return True
-        raise RuntimeError(
-            f"Addon set-intervals returned {status_code}: {resp_body[:300]}"
-        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json={
+                        "childId": child_id,
+                        "dayOfWeek": day_of_week,
+                        "allowedIntervals": allowed_intervals,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=120),
+                ) as response:
+                    if response.status == 200:
+                        _LOGGER.info(
+                            "Screen time intervals set via addon for child %s day %d",
+                            child_id, day_of_week,
+                        )
+                        return True
+                    text = await response.text()
+                    raise RuntimeError(
+                        f"Addon set-intervals returned {response.status}: {text[:300]}"
+                    )
+        except aiohttp.ClientError as err:
+            raise RuntimeError(f"Failed to call addon set-intervals: {err}") from err
