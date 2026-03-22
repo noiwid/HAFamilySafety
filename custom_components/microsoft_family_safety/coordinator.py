@@ -346,13 +346,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_lock_account(self, account_id: str) -> None:
         """Lock an account by setting all 7-day screen time quotas to 0."""
-        if self.web_api is None:
-            raise RuntimeError("Web API not initialized")
-
         # Save current screentime policy before zeroing
         current_policy = await self._addon_client.fetch_screentime(account_id)
-        if current_policy is None:
-            current_policy = await self.web_api.get_screentime_policy(account_id)
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
             has_nonzero = False
@@ -370,35 +365,22 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     account_id,
                 )
 
-        # Set all 7 days to 0 minutes
+        # Set all 7 days to 0 minutes via addon
         days_locked = 0
-        try:
-            for day_index in range(7):
-                await self.web_api.set_screentime_daily_allowance(
+        for day_index in range(7):
+            try:
+                await self._addon_client.set_screentime_allowance(
                     account_id, day_index, hours=0, minutes=0
                 )
-                await self.web_api.set_screentime_intervals(
+                await self._addon_client.set_screentime_intervals(
                     account_id, day_index, [False] * 48
                 )
                 days_locked += 1
-        except Exception as err:
-            _LOGGER.error(
-                "Lock failed on day %d/7 for account %s: %s",
-                days_locked, account_id, err,
-            )
-            for remaining in range(days_locked, 7):
-                try:
-                    await self.web_api.set_screentime_daily_allowance(
-                        account_id, remaining, hours=0, minutes=0
-                    )
-                    await self.web_api.set_screentime_intervals(
-                        account_id, remaining, [False] * 48
-                    )
-                    days_locked += 1
-                except Exception:
-                    _LOGGER.warning(
-                        "Could not lock day %d for account %s", remaining, account_id
-                    )
+            except Exception as err:
+                _LOGGER.warning(
+                    "Could not lock day %d for account %s: %s",
+                    day_index, account_id, err,
+                )
 
         _LOGGER.info(
             "Account %s locked (%d/7 days set to 0)", account_id, days_locked
@@ -417,16 +399,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, account_id: str, day_index: int, hours: int, minutes: int,
         intervals: list[bool] | None,
     ) -> bool:
-        """Restore a single day's screentime. Returns True on success."""
+        """Restore a single day's screentime via addon. Returns True on success."""
         try:
-            await self.web_api.set_screentime_daily_allowance(
+            await self._addon_client.set_screentime_allowance(
                 account_id, day_index, hours, minutes
             )
             effective_intervals = (
                 intervals if intervals and len(intervals) == 48
                 else self._default_intervals()
             )
-            await self.web_api.set_screentime_intervals(
+            await self._addon_client.set_screentime_intervals(
                 account_id, day_index, effective_intervals
             )
             return True
@@ -439,8 +421,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_unlock_account(self, account_id: str) -> None:
         """Unlock an account by restoring saved screen time quotas."""
-        if self.web_api is None:
-            raise RuntimeError("Web API not initialized")
 
         saved = self._saved_screentime.get(account_id)
         days_restored = 0
@@ -457,7 +437,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except (ValueError, IndexError):
                     hours, minutes = 2, 0
 
-                intervals = day_data.get("allowedIntervals") or day_data.get("AllowedIntervals")
+                # Use timeline (48 booleans) if available, else convert allowedIntervals
+                timeline = day_data.get("timeline")
+                if isinstance(timeline, list) and len(timeline) == 48:
+                    intervals = timeline
+                else:
+                    intervals = None
                 if await self._restore_day(account_id, day_index, hours, minutes, intervals):
                     days_restored += 1
 
