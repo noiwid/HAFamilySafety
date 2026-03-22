@@ -180,7 +180,7 @@ class AddonCookieClient:
                 async with session.get(
                     api_url,
                     params={"childId": child_id},
-                    timeout=aiohttp.ClientTimeout(total=60),
+                    timeout=aiohttp.ClientTimeout(total=120),
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -244,7 +244,7 @@ class AddonCookieClient:
                         "hours": hours,
                         "minutes": minutes,
                     },
-                    timeout=aiohttp.ClientTimeout(total=60),
+                    timeout=aiohttp.ClientTimeout(total=120),
                 ) as response:
                     if response.status == 200:
                         _LOGGER.info(
@@ -274,7 +274,7 @@ class AddonCookieClient:
                         "dayOfWeek": day_of_week,
                         "allowedIntervals": allowed_intervals,
                     },
-                    timeout=aiohttp.ClientTimeout(total=60),
+                    timeout=aiohttp.ClientTimeout(total=120),
                 ) as response:
                     if response.status == 200:
                         _LOGGER.info(
