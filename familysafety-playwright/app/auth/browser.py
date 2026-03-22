@@ -582,6 +582,138 @@ class BrowserAuthManager:
         }
     }"""
 
+    _POST_JS = """async ([url, canary, body]) => {
+        try {
+            const csrfInput = document.querySelector(
+                'input[name="__RequestVerificationToken"]'
+            );
+            const csrfToken = csrfInput ? csrfInput.value : canary;
+
+            const hdrs = {
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-AMC-JsonMode': 'CamelCase'
+            };
+            if (csrfToken) {
+                hdrs['__RequestVerificationToken'] = csrfToken;
+            }
+
+            const resp = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: hdrs,
+                body: JSON.stringify(body)
+            });
+            const text = await resp.text();
+            if (!resp.ok) {
+                return {
+                    __error: true,
+                    status: resp.status,
+                    text: text.substring(0, 500)
+                };
+            }
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                // Some POST endpoints return empty body on success
+                return { success: true, status: resp.status };
+            }
+        } catch (e) {
+            return { __error: true, message: e.message };
+        }
+    }"""
+
+    async def browser_post(
+        self, url: str, body: dict
+    ) -> dict | None:
+        """Make a POST API call through an authenticated browser session."""
+        if self._browser_lock.locked():
+            return {
+                "__error": True, "status": 503, "code": "BROWSER_BUSY",
+                "text": "Browser is busy. Try again later.",
+            }
+        return await self._persistent_context_post(url, body)
+
+    async def _persistent_context_post(self, full_url: str, body: dict) -> dict:
+        """POST API data using a persistent browser context."""
+        async with self._browser_lock:
+            context = None
+            try:
+                self._remove_stale_singleton_lock()
+                _LOGGER.info("browser_post: opening persistent context")
+
+                context = await self._playwright.chromium.launch_persistent_context(
+                    _PROFILE_DIR,
+                    headless=False,
+                    args=_CHROME_ARGS + ["--ozone-platform=x11"],
+                    user_agent=_USER_AGENT,
+                    viewport={"width": 1280, "height": 800},
+                    locale=self._language,
+                    timezone_id=self._timezone,
+                )
+
+                page = context.pages[0] if context.pages else await context.new_page()
+
+                # Inject saved cookies
+                if self._storage:
+                    try:
+                        saved = await self._storage.load_cookies()
+                        if saved:
+                            for c in saved:
+                                ss = c.get("sameSite", "Lax")
+                                if isinstance(ss, str):
+                                    c["sameSite"] = ss.capitalize() if ss.lower() in ("lax", "strict", "none") else "Lax"
+                            await context.add_cookies(saved)
+                    except Exception as e:
+                        _LOGGER.warning("browser_post: failed to inject cookies: %s", e)
+
+                final_url = await self._wait_for_family_dashboard(page)
+
+                if "account.microsoft.com/family" not in final_url:
+                    _LOGGER.error("browser_post: not on dashboard (%s)", final_url)
+                    return {
+                        "__error": True, "status": 401,
+                        "text": f"Not on family dashboard: {final_url}",
+                        "code": "LOGIN_REDIRECT",
+                    }
+
+                await page.wait_for_timeout(2000)
+
+                canary = ""
+                for c in await context.cookies():
+                    if c.get("name") == "canary":
+                        canary = c["value"]
+                        break
+
+                _LOGGER.info("browser_post: calling %s", full_url)
+                result = await page.evaluate(self._POST_JS, [full_url, canary, body])
+
+                if isinstance(result, dict) and result.get("__error"):
+                    _LOGGER.warning(
+                        "browser_post error: status=%s text=%s",
+                        result.get("status", "?"),
+                        str(result.get("text", result.get("message", "")))[:500],
+                    )
+                    return result
+
+                _LOGGER.info("browser_post: success for %s", full_url)
+                return result
+
+            except Exception as exc:
+                _LOGGER.error("browser_post failed: %s", exc, exc_info=True)
+                return {
+                    "__error": True, "status": 500,
+                    "text": f"browser_post exception: {type(exc).__name__}: {exc}",
+                    "code": "EXCEPTION",
+                }
+            finally:
+                if context:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+
     async def browser_fetch(
         self, url: str, params: dict | None = None
     ) -> dict | None:

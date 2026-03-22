@@ -227,3 +227,64 @@ class AddonCookieClient:
         except Exception as err:
             _LOGGER.error("Unexpected error fetching screentime: %s", err)
             return None
+
+    async def set_screentime_allowance(
+        self, child_id: str, day_of_week: int, hours: int, minutes: int
+    ) -> bool:
+        """Set daily screen time allowance via addon browser POST."""
+        url = self._detected_url or self.auth_url or DEFAULT_AUTH_URL
+        api_url = f"{url.rstrip('/')}/api/screentime/set-allowance"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json={
+                        "childId": child_id,
+                        "dayOfWeek": day_of_week,
+                        "hours": hours,
+                        "minutes": minutes,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 200:
+                        _LOGGER.info(
+                            "Screen time allowance set via addon for child %s day %d",
+                            child_id, day_of_week,
+                        )
+                        return True
+                    text = await response.text()
+                    raise RuntimeError(
+                        f"Addon set-allowance returned {response.status}: {text[:300]}"
+                    )
+        except aiohttp.ClientError as err:
+            raise RuntimeError(f"Failed to call addon set-allowance: {err}") from err
+
+    async def set_screentime_intervals(
+        self, child_id: str, day_of_week: int, allowed_intervals: list[bool]
+    ) -> bool:
+        """Set allowed time intervals via addon browser POST."""
+        url = self._detected_url or self.auth_url or DEFAULT_AUTH_URL
+        api_url = f"{url.rstrip('/')}/api/screentime/set-intervals"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json={
+                        "childId": child_id,
+                        "dayOfWeek": day_of_week,
+                        "allowedIntervals": allowed_intervals,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status == 200:
+                        _LOGGER.info(
+                            "Screen time intervals set via addon for child %s day %d",
+                            child_id, day_of_week,
+                        )
+                        return True
+                    text = await response.text()
+                    raise RuntimeError(
+                        f"Addon set-intervals returned {response.status}: {text[:300]}"
+                    )
+        except aiohttp.ClientError as err:
+            raise RuntimeError(f"Failed to call addon set-intervals: {err}") from err

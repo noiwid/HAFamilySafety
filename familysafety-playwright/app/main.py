@@ -395,6 +395,104 @@ async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/screentime/set-allowance")
+async def set_screentime_allowance(request: Request, _: None = Depends(_verify_api_key)):
+    """Set daily screen time allowance via browser session.
+
+    Expects JSON body: {childId, dayOfWeek, hours, minutes}
+    """
+    if browser_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    try:
+        data = await request.json()
+        child_id = data.get("childId")
+        day_of_week = data.get("dayOfWeek")
+        hours = data.get("hours", 0)
+        minutes = data.get("minutes", 0)
+
+        if not child_id or day_of_week is None:
+            raise HTTPException(status_code=400, detail="childId and dayOfWeek required")
+
+        body = {
+            "childId": str(child_id),
+            "dayOfWeek": int(day_of_week),
+            "timeSpanDays": 0,
+            "timeSpanHours": int(hours),
+            "timeSpanMinutes": int(minutes),
+        }
+        result = await browser_manager.browser_post(
+            "https://account.microsoft.com/family/api//st/day-allow",
+            body,
+        )
+        if isinstance(result, dict) and result.get("__error"):
+            error_code = result.get("code", "POST_ERROR")
+            status = result.get("status", 502)
+            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
+            raise HTTPException(
+                status_code=http_status,
+                detail={
+                    "error": error_code,
+                    "microsoft_status": status,
+                    "message": str(result.get("text", "unknown error"))[:500],
+                },
+            )
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _LOGGER.error(f"Set screentime allowance failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/screentime/set-intervals")
+async def set_screentime_intervals(request: Request, _: None = Depends(_verify_api_key)):
+    """Set allowed time intervals via browser session.
+
+    Expects JSON body: {childId, dayOfWeek, allowedIntervals: [48 booleans]}
+    """
+    if browser_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    try:
+        data = await request.json()
+        child_id = data.get("childId")
+        day_of_week = data.get("dayOfWeek")
+        allowed_intervals = data.get("allowedIntervals")
+
+        if not child_id or day_of_week is None or not allowed_intervals:
+            raise HTTPException(
+                status_code=400,
+                detail="childId, dayOfWeek, and allowedIntervals required",
+            )
+
+        body = {
+            "childId": str(child_id),
+            "dayOfWeek": int(day_of_week),
+            "allowedIntervals": allowed_intervals,
+        }
+        result = await browser_manager.browser_post(
+            "https://account.microsoft.com/family/api//st/day-allow-int",
+            body,
+        )
+        if isinstance(result, dict) and result.get("__error"):
+            error_code = result.get("code", "POST_ERROR")
+            status = result.get("status", 502)
+            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
+            raise HTTPException(
+                status_code=http_status,
+                detail={
+                    "error": error_code,
+                    "microsoft_status": status,
+                    "message": str(result.get("text", "unknown error"))[:500],
+                },
+            )
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _LOGGER.error(f"Set screentime intervals failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run(
         app, host=config.host, port=config.port, log_level=config.log_level.lower()

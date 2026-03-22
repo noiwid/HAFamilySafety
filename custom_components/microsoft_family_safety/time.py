@@ -78,19 +78,31 @@ def _extract_day_times(
     if not day_data or not isinstance(day_data, dict):
         return None, None
 
-    # Try format 1: allowedIntervals as list of 48 booleans
+    # Try allowedIntervals — can be either:
+    # - list of 48 booleans (timeline format)
+    # - list of {begin, beginTimeSpan, end, endTimeSpan} objects
     intervals = day_data.get("allowedIntervals", day_data.get("AllowedIntervals"))
-    if isinstance(intervals, list) and len(intervals) == 48:
-        return _intervals_to_start_end(intervals)
+    if isinstance(intervals, list):
+        if len(intervals) == 48 and isinstance(intervals[0], bool):
+            return _intervals_to_start_end(intervals)
+        if intervals and isinstance(intervals[0], dict):
+            first = intervals[0]
+            start_str = (first.get("beginTimeSpan") or first.get("start")
+                         or first.get("Start") or first.get("begin"))
+            end_str = (first.get("endTimeSpan") or first.get("end")
+                       or first.get("End"))
+            return _parse_time(start_str), _parse_time(end_str)
 
-    # Try format 2: intervals as list of {start, end} objects
+    # Try alternate keys: intervals, allottedIntervals
     interval_list = day_data.get("intervals", day_data.get("Intervals",
                      day_data.get("allottedIntervals", day_data.get("AllottedIntervals"))))
     if isinstance(interval_list, list) and interval_list:
         first = interval_list[0]
         if isinstance(first, dict):
-            start_str = first.get("start", first.get("Start"))
-            end_str = first.get("end", first.get("End"))
+            start_str = (first.get("beginTimeSpan") or first.get("start")
+                         or first.get("Start"))
+            end_str = (first.get("endTimeSpan") or first.get("end")
+                       or first.get("End"))
             return _parse_time(start_str), _parse_time(end_str)
 
     return None, None

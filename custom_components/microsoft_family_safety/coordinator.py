@@ -223,10 +223,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_set_screentime_limit(
         self, child_id: str, day_of_week: int, hours: int, minutes: int
     ) -> None:
-        """Set screen time daily allowance."""
-        if self.web_api is None:
-            raise RuntimeError("Web API not initialized")
-        await self.web_api.set_screentime_daily_allowance(
+        """Set screen time daily allowance via addon browser."""
+        await self._addon_client.set_screentime_allowance(
             child_id, day_of_week, hours, minutes
         )
         await self.async_request_refresh()
@@ -240,11 +238,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         end_hour: int,
         end_minute: int,
     ) -> None:
-        """Set screen time allowed intervals."""
-        if self.web_api is None:
-            raise RuntimeError("Web API not initialized")
-        await self.web_api.set_screentime_intervals_from_range(
-            child_id, day_of_week, start_hour, start_minute, end_hour, end_minute
+        """Set screen time allowed intervals via addon browser."""
+        # Build 48-slot boolean array from start/end range
+        intervals = [False] * 48
+        start_slot = start_hour * 2 + (1 if start_minute >= 30 else 0)
+        end_slot = end_hour * 2 + (1 if end_minute >= 30 else 0)
+        for i in range(start_slot, min(end_slot, 48)):
+            intervals[i] = True
+        await self._addon_client.set_screentime_intervals(
+            child_id, day_of_week, intervals
         )
         await self.async_request_refresh()
 
