@@ -166,6 +166,7 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_interval_{day_key}_{kind.lower()}"
         self._attr_name = f"{account_name} {day_label} {kind}"
         self._attr_icon = "mdi:clock-start" if is_start else "mdi:clock-end"
+        self._optimistic_value: dt_time | None = None
 
     def _get_account_data(self) -> dict[str, Any] | None:
         """Get account data from coordinator."""
@@ -190,6 +191,8 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
     @property
     def native_value(self) -> dt_time | None:
         """Return current start or end time."""
+        if self._optimistic_value is not None:
+            return self._optimistic_value
         account_data = self._get_account_data()
         if not account_data:
             return None
@@ -198,7 +201,7 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
         return start if self._is_start else end
 
     async def async_set_value(self, value: dt_time) -> None:
-        """Set the interval start or end time.
+        """Set the interval start or end time (optimistic update).
 
         When either start or end is changed, we re-send both to the API.
         The other value is read from the current state.
@@ -218,6 +221,10 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
             "Setting %s interval for %s to %s-%s",
             self._day_key, self._account_name, start, end,
         )
+        # Optimistic: update UI immediately
+        self._optimistic_value = value
+        self.async_write_ha_state()
+
         try:
             await self.coordinator.async_set_screentime_intervals(
                 self._account_id,
@@ -227,7 +234,11 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
                 end.hour,
                 end.minute,
             )
+            self._optimistic_value = None
         except Exception as err:
+            # Revert on failure
+            self._optimistic_value = None
+            self.async_write_ha_state()
             _LOGGER.error(
                 "Failed to set %s interval for %s: %s",
                 self._day_key, self._account_name, err,

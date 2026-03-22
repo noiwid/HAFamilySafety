@@ -97,6 +97,7 @@ class FamilySafetyDailyLimitNumber(CoordinatorEntity, NumberEntity):
         self._account_name = account_name
         self._attr_unique_id = f"{entry.entry_id}_{account_id}_limit_{day_key}"
         self._attr_name = f"{account_name} {day_label} Limit"
+        self._optimistic_value: float | None = None
 
     def _get_account_data(self) -> dict[str, Any] | None:
         """Get account data from coordinator."""
@@ -121,6 +122,8 @@ class FamilySafetyDailyLimitNumber(CoordinatorEntity, NumberEntity):
     @property
     def native_value(self) -> float | None:
         """Return current daily allowance in minutes."""
+        if self._optimistic_value is not None:
+            return self._optimistic_value
         account_data = self._get_account_data()
         if not account_data:
             return None
@@ -137,7 +140,7 @@ class FamilySafetyDailyLimitNumber(CoordinatorEntity, NumberEntity):
         return _parse_allowance_to_minutes(allowance)
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set the daily screen time limit."""
+        """Set the daily screen time limit (optimistic update)."""
         total_minutes = int(value)
         hours = total_minutes // 60
         minutes = total_minutes % 60
@@ -145,11 +148,21 @@ class FamilySafetyDailyLimitNumber(CoordinatorEntity, NumberEntity):
             "Setting %s screen time limit for %s to %dh%02dm",
             self._day_key, self._account_name, hours, minutes,
         )
+        # Optimistic: update UI immediately
+        old_value = self.native_value
+        self._optimistic_value = float(total_minutes)
+        self.async_write_ha_state()
+
         try:
             await self.coordinator.async_set_screentime_limit(
                 self._account_id, self._day_index, hours, minutes
             )
+            # Clear optimistic value — coordinator refresh will provide real data
+            self._optimistic_value = None
         except Exception as err:
+            # Revert on failure
+            self._optimistic_value = None
+            self.async_write_ha_state()
             _LOGGER.error(
                 "Failed to set %s limit for %s: %s",
                 self._day_key, self._account_name, err,
