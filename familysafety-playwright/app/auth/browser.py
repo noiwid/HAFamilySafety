@@ -636,6 +636,30 @@ class BrowserAuthManager:
 
                 page = context.pages[0] if context.pages else await context.new_page()
 
+                # Inject saved cookies into the context before navigating.
+                # The persistent context *should* have them from the profile
+                # on disk, but Microsoft session cookies can get lost when the
+                # browser process is restarted between auth and fetch.
+                if self._storage:
+                    try:
+                        saved = await self._storage.load_cookies()
+                        if saved:
+                            # Playwright expects cookies with sameSite in
+                            # title-case ("Lax"/"Strict"/"None")
+                            for c in saved:
+                                ss = c.get("sameSite", "Lax")
+                                if isinstance(ss, str):
+                                    c["sameSite"] = ss.capitalize() if ss.lower() in ("lax", "strict", "none") else "Lax"
+                            await context.add_cookies(saved)
+                            _LOGGER.info(
+                                "browser_fetch: injected %d saved cookies",
+                                len(saved),
+                            )
+                    except Exception as e:
+                        _LOGGER.warning(
+                            "browser_fetch: failed to inject cookies: %s", e
+                        )
+
                 # Navigate to family dashboard, handling OAuth intermediate
                 # redirects and waiting until we're on the real page
                 final_url = await self._wait_for_family_dashboard(page)
