@@ -483,12 +483,23 @@ class BrowserAuthManager:
     def _on_monitor_done(self, session_id: str, task: asyncio.Task):
         """Handle monitor task completion."""
         self._monitor_tasks.pop(session_id, None)
+        if task.cancelled():
+            _LOGGER.info(f"Monitor task for session {session_id} was cancelled")
+            return
         try:
             exc = task.exception()
-        except (asyncio.CancelledError, asyncio.InvalidStateError):
+        except asyncio.InvalidStateError:
+            _LOGGER.warning(f"Monitor task for session {session_id} in unexpected state")
             return
         if exc:
-            _LOGGER.error(f"Monitor task for session {session_id} failed: {exc}")
+            _LOGGER.error(
+                f"Monitor task for session {session_id} failed: {exc}",
+                exc_info=exc,
+            )
+            session = self._sessions.get(session_id)
+            if session:
+                session["status"] = "error"
+                session["error"] = f"Monitor failed: {exc}"
 
     def _prune_old_sessions(self, max_age: int = 3600):
         """Remove completed/errored sessions older than max_age seconds."""
@@ -695,7 +706,7 @@ class BrowserAuthManager:
                 _LOGGER.info("browser_post: success for %s", full_url)
                 return result
 
-            except Exception as exc:
+            except BaseException as exc:
                 _LOGGER.error("browser_post failed: %s", exc, exc_info=True)
                 return {
                     "__error": True, "status": 500,
@@ -847,7 +858,7 @@ class BrowserAuthManager:
                 _LOGGER.info("browser_fetch: success for %s", full_url)
                 return result
 
-            except Exception as exc:
+            except BaseException as exc:
                 _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
                 return {
                     "__error": True,

@@ -620,6 +620,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not self._is_retrying_auth:
                     _LOGGER.warning("Authentication failed, token may be expired")
                     self._is_retrying_auth = True
+                    self.web_api = None
                     raise ConfigEntryAuthFailed(ERROR_TOKEN_EXPIRED) from err
                 raise UpdateFailed(f"Authentication failed: {err}") from err
             raise UpdateFailed(f"Error communicating with API: {err}") from err
