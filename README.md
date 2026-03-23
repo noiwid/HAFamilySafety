@@ -11,7 +11,7 @@ A full-featured Home Assistant custom integration for **Microsoft Family Safety*
 
 > **Domain:** `microsoft_family_safety` | **IoT Class:** Cloud Polling | **Languages:** English, French
 
-![Dashboard Example](images/dashboard.png)
+![Dashboard Example](examples/dashboard.png)
 
 ---
 
