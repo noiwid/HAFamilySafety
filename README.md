@@ -1,4 +1,4 @@
-# Microsoft Family Safety for Home Assistant
+# <img src="custom_components/microsoft_family_safety/brand/icon.png" alt="Google Family Safety" width="30" > Microsoft Family Safety for Home Assistant
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/noiwid/HAFamilySafety.svg?style=for-the-badge)](https://github.com/noiwid/HAFamilySafety/releases)
