@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import unquote
 
 from pyfamilysafety.authenticator import Authenticator
 from pyfamilysafety.exceptions import HttpException
@@ -48,6 +49,10 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
     """Validate the redirect URL by attempting to authenticate."""
     try:
         _LOGGER.debug("Config flow received - testing credentials")
+
+        # URL-decode the redirect URL to handle encoded characters (e.g. %24 -> $)
+        # Microsoft's OAuth redirect often contains URL-encoded special characters
+        redirect_url = unquote(redirect_url)
 
         authenticator = await Authenticator.create(
             token=redirect_url,
