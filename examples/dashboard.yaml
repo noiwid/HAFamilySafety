@@ -1,11 +1,11 @@
 # Microsoft Family Safety — Dashboard Card Example
 #
 # Requirements:
-#   - custom:button-card (HACS)
-#   - custom:stack-in-card (HACS)
-#   - custom:vertical-stack-in-card (HACS)
-#   - custom:mod-card (HACS)
-#   - custom:mushroom-title-card (HACS)
+#    - custom:button-card (HACS)
+#    - custom:stack-in-card (HACS)
+#    - custom:vertical-stack-in-card (HACS)
+#    - custom:mod-card (HACS)
+#    - custom:mushroom-title-card (HACS)
 #
 # Replace entity names to match your child's name and device ID.
 # Entity naming pattern: sensor.{firstname}_{...}, number.{firstname}_{day}_limit, etc.
@@ -53,13 +53,13 @@ cards:
             ha-card { padding: 0 !important; background: inherit !important; }
         cards:
           - type: custom:button-card
-            entity: sensor.maceo_screen_time
+            entity: sensor.firstname_screen_time
             name: Temps total
             icon: mdi:clock-outline
             show_state: true
             state_display: |
               [[[
-                const e = states['sensor.maceo_screen_time'];
+                const e = states['sensor.firstname_screen_time'];
                 if (e && e.attributes && e.attributes.formatted_time) {
                   let parts = e.attributes.formatted_time.split(':');
                   return parts[0] + 'h' + parts[1];
@@ -127,7 +127,7 @@ cards:
                 - font-weight: bold
                 - z-index: 1
           - type: custom:button-card
-            entity: sensor.maceo_pending_requests
+            entity: sensor.firstname_pending_requests
             name: Demandes
             icon: mdi:bell-ring-outline
             show_state: true
@@ -179,7 +179,7 @@ cards:
             ha-card { padding: 0 !important; background: inherit !important; }
         cards:
           - type: custom:button-card
-            entity: switch.maceo_lock
+            entity: switch.firstname_lock
             name: Verrouiller
             icon: mdi:lock
             tap_action:
@@ -229,7 +229,7 @@ cards:
                 - font-weight: 500
                 - z-index: 1
           - type: custom:button-card
-            entity: switch.maceo_windows_lock
+            entity: switch.firstname_windows_lock
             name: Windows
             icon: mdi:microsoft-windows
             tap_action:
@@ -290,8 +290,8 @@ cards:
   - type: custom:vertical-stack-in-card
     cards:
       - type: custom:button-card
-        entity: switch.maceo_lock
-        name: PC — DESKTOP-9N6PNLL
+        entity: switch.firstname_lock
+        name: Laptop Usage
         icon: mdi:desktop-tower-monitor
         show_state: false
         show_name: true
@@ -311,27 +311,27 @@ cards:
                 - color: "#4CAF50"
         triggers_update:
           - sensor.desktop_9n6pnll_screen_time
-          - sensor.maceo_screen_time
-          - switch.maceo_lock
-          - number.maceo_monday_limit
-          - number.maceo_tuesday_limit
-          - number.maceo_wednesday_limit
-          - number.maceo_thursday_limit
-          - number.maceo_friday_limit
-          - number.maceo_saturday_limit
-          - number.maceo_sunday_limit
+          - sensor.firstname_screen_time
+          - switch.firstname_lock
+          - number.firstname_monday_limit
+          - number.firstname_tuesday_limit
+          - number.firstname_wednesday_limit
+          - number.firstname_thursday_limit
+          - number.firstname_friday_limit
+          - number.firstname_saturday_limit
+          - number.firstname_sunday_limit
         variables:
           screen_data: |
             [[[
               let days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
               let today = days[new Date().getDay()];
-              let limitEntity = states['number.maceo_' + today + '_limit'];
+              let limitEntity = states['number.firstname_' + today + '_limit'];
               let limit = limitEntity ? parseFloat(limitEntity.state) : 0;
               if (isNaN(limit)) limit = 0;
-              let used = parseFloat(states['sensor.maceo_screen_time']?.state) || 0;
+              let used = parseFloat(states['sensor.firstname_screen_time']?.state) || 0;
               let percent = (limit > 0) ? Math.min(Math.round((used / limit) * 100), 100) : 0;
-              let startEntity = states['time.maceo_' + today + '_start'];
-              let endEntity = states['time.maceo_' + today + '_end'];
+              let startEntity = states['time.firstname_' + today + '_start'];
+              let endEntity = states['time.firstname_' + today + '_end'];
               let start = startEntity && startEntity.state !== 'unknown' && startEntity.state !== 'unavailable'
                 ? startEntity.state.substring(0,5) : '--:--';
               let end = endEntity && endEntity.state !== 'unknown' && endEntity.state !== 'unavailable'
@@ -444,7 +444,7 @@ cards:
             ha-card { padding: 0 4px !important; background: inherit !important; }
         cards:
           - type: custom:button-card
-            entity: number.maceo_monday_limit
+            entity: number.firstname_monday_limit
             name: Lun
             show_state: true
             show_icon: false
@@ -460,7 +460,7 @@ cards:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.maceo_monday_start
+              entity: time.firstname_monday_start
             styles: &day_styles
               card:
                 - height: 55px
@@ -474,74 +474,8 @@ cards:
                 - font-size: 14px
                 - font-weight: bold
           - type: custom:button-card
-            entity: number.maceo_tuesday_limit
+            entity: number.firstname_tuesday_limit
             name: Mar
             show_state: true
             show_icon: false
             state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.maceo_tuesday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.maceo_wednesday_limit
-            name: Mer
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.maceo_wednesday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.maceo_thursday_limit
-            name: Jeu
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.maceo_thursday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.maceo_friday_limit
-            name: Ven
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.maceo_friday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.maceo_saturday_limit
-            name: Sam
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.maceo_saturday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.maceo_sunday_limit
-            name: Dim
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.maceo_sunday_start
-            styles: *day_styles
