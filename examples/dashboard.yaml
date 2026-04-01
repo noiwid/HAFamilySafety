@@ -1,3 +1,15 @@
+# Microsoft Family Safety — Dashboard Card Example
+#
+# Requirements:
+#    - custom:button-card (HACS)
+#    - custom:stack-in-card (HACS)
+#    - custom:vertical-stack-in-card (HACS)
+#    - custom:mod-card (HACS)
+#    - custom:mushroom-title-card (HACS)
+#
+# Replace entity names to match your child's name and device ID.
+# Entity naming pattern: sensor.{firstname}_{...}, number.{firstname}_{day}_limit, etc.
+
 type: vertical-stack
 cards:
   - type: custom:vertical-stack-in-card
