@@ -1,22 +1,9 @@
-# Microsoft Family Safety — Dashboard Card Example
-#
-# Requirements:
-#    - custom:button-card (HACS)
-#    - custom:stack-in-card (HACS)
-#    - custom:vertical-stack-in-card (HACS)
-#    - custom:mod-card (HACS)
-#    - custom:mushroom-title-card (HACS)
-#
-# Replace entity names to match your child's name and device ID.
-# Entity naming pattern: sensor.{firstname}_{...}, number.{firstname}_{day}_limit, etc.
-
 type: vertical-stack
 cards:
-  # ── Header + Stats ──────────────────────────────────────────
   - type: custom:vertical-stack-in-card
     cards:
       - type: custom:button-card
-        name: "Temps d'écran"
+        name: Macéo's Laptop
         tap_action:
           action: none
         styles:
@@ -30,7 +17,6 @@ cards:
             - font-size: 15px
             - font-weight: bold
             - justify-self: start
-
       - type: custom:mod-card
         card_mod:
           style: |
@@ -43,8 +29,6 @@ cards:
         card:
           type: custom:mushroom-title-card
           title: ""
-
-      # ── Top row: Screen time stats ──
       - type: custom:stack-in-card
         mode: horizontal
         card_mod:
@@ -54,7 +38,7 @@ cards:
         cards:
           - type: custom:button-card
             entity: sensor.firstname_screen_time
-            name: Temps total
+            name: Total Time
             icon: mdi:clock-outline
             show_state: true
             state_display: |
@@ -90,45 +74,8 @@ cards:
                 - font-weight: bold
                 - z-index: 1
           - type: custom:button-card
-            entity: sensor.desktop_9n6pnll_screen_time
-            name: PC
-            icon: mdi:desktop-tower-monitor
-            show_state: true
-            state_display: |
-              [[[
-                const e = states['sensor.desktop_9n6pnll_screen_time'];
-                if (e && e.attributes && e.attributes.formatted_time) {
-                  let parts = e.attributes.formatted_time.split(':');
-                  return parts[0] + 'h' + parts[1];
-                }
-                return entity.state + ' min';
-              ]]]
-            tap_action:
-              action: more-info
-            styles:
-              card:
-                - height: 90px
-                - border: none
-                - border-right: 1px solid rgba(152,152,157,0.3)
-                - border-radius: 0
-                - padding: 10px 0
-                - background: transparent
-              icon:
-                - width: 32px
-                - color: var(--primary-color)
-                - z-index: 1
-              name:
-                - font-size: 13px
-                - font-weight: 500
-                - opacity: 0.7
-                - z-index: 1
-              state:
-                - font-size: 16px
-                - font-weight: bold
-                - z-index: 1
-          - type: custom:button-card
             entity: sensor.firstname_pending_requests
-            name: Demandes
+            name: Requests
             icon: mdi:bell-ring-outline
             show_state: true
             tap_action:
@@ -156,7 +103,6 @@ cards:
                 - font-size: 16px
                 - font-weight: bold
                 - z-index: 1
-
       - type: custom:mod-card
         card_mod:
           style: |
@@ -169,8 +115,6 @@ cards:
         card:
           type: custom:mushroom-title-card
           title: ""
-
-      # ── Lock buttons ──
       - type: custom:stack-in-card
         mode: horizontal
         card_mod:
@@ -180,7 +124,7 @@ cards:
         cards:
           - type: custom:button-card
             entity: switch.firstname_lock
-            name: Verrouiller
+            name: Lock Device
             icon: mdi:lock
             tap_action:
               action: toggle
@@ -272,7 +216,6 @@ cards:
                 - font-size: 13px
                 - font-weight: 500
                 - z-index: 1
-
       - type: custom:mod-card
         card_mod:
           style: |
@@ -285,13 +228,11 @@ cards:
         card:
           type: custom:mushroom-title-card
           title: ""
-
-  # ── Device card with progress bar ──────────────────────────
   - type: custom:vertical-stack-in-card
     cards:
       - type: custom:button-card
         entity: switch.firstname_lock
-        name: Laptop Usage
+        name: PC — DESKTOP-9N6PNLL
         icon: mdi:desktop-tower-monitor
         show_state: false
         show_name: true
@@ -302,10 +243,12 @@ cards:
           action: more-info
         state:
           - value: "on"
+            icon: mdi:desktop-tower-monitor
             styles:
               icon:
                 - color: "#F44336"
           - value: "off"
+            icon: mdi:desktop-tower-monitor
             styles:
               icon:
                 - color: "#4CAF50"
@@ -402,9 +345,8 @@ cards:
           sched: |
             [[[
               let s = variables.screen_data;
-              return `Plage autorisée : ${s.start} — ${s.end}`;
+              return `<span style="cursor:pointer" title="Click on the day below to edit">Allowed Schedule: ${s.start} — ${s.end}</span>`;
             ]]]
-
       - type: custom:mod-card
         card_mod:
           style: |
@@ -417,10 +359,8 @@ cards:
         card:
           type: custom:mushroom-title-card
           title: ""
-
-      # ── Weekly limits ──
       - type: custom:button-card
-        name: Limites de la semaine
+        name: Weekly Limits
         tap_action:
           action: none
         styles:
@@ -435,20 +375,19 @@ cards:
             - font-weight: 600
             - opacity: 0.7
             - justify-self: start
-
       - type: custom:stack-in-card
         mode: horizontal
         card_mod:
           style: >
-            :host { --stack-card-gap: 0 !important; }
-            ha-card { padding: 0 4px !important; background: inherit !important; }
+            :host { --stack-card-gap: 0 !important; } ha-card { padding: 0 4px
+            !important; background: inherit !important; }
         cards:
           - type: custom:button-card
             entity: number.firstname_monday_limit
-            name: Lun
+            name: Mon
             show_state: true
             show_icon: false
-            state_display: &limit_display |
+            state_display: |
               [[[
                 let v = parseFloat(entity.state);
                 if (isNaN(v)) return '—';
@@ -461,12 +400,16 @@ cards:
             hold_action:
               action: more-info
               entity: time.firstname_monday_start
-            styles: &day_styles
+            styles:
               card:
                 - height: 55px
                 - border: none
                 - border-radius: 8px
                 - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 1 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
               name:
                 - font-size: 11px
                 - opacity: 0.6
@@ -475,7 +418,205 @@ cards:
                 - font-weight: bold
           - type: custom:button-card
             entity: number.firstname_tuesday_limit
-            name: Mar
+            name: Tue
             show_state: true
             show_icon: false
-            state_display: *limit_display
+            state_display: |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.firstname_tuesday_start
+            styles:
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 2 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
+          - type: custom:button-card
+            entity: number.firstname_wednesday_limit
+            name: Wed
+            show_state: true
+            show_icon: false
+            state_display: |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.firstname_wednesday_start
+            styles:
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 3 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
+          - type: custom:button-card
+            entity: number.firstname_thursday_limit
+            name: Thu
+            show_state: true
+            show_icon: false
+            state_display: |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.firstname_thursday_start
+            styles:
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 4 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
+          - type: custom:button-card
+            entity: number.firstname_friday_limit
+            name: Fri
+            show_state: true
+            show_icon: false
+            state_display: |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.firstname_friday_start
+            styles:
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 5 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
+          - type: custom:button-card
+            entity: number.firstname_saturday_limit
+            name: Sat
+            show_state: true
+            show_icon: false
+            state_display: |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.firstname_saturday_start
+            styles:
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 6 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
+          - type: custom:button-card
+            entity: number.firstname_sunday_limit
+            name: Sun
+            show_state: true
+            show_icon: false
+            state_display: |
+              [[[
+                let v = parseFloat(entity.state);
+                if (isNaN(v)) return '—';
+                let h = Math.floor(v/60);
+                let m = v % 60;
+                return h + 'h' + (m > 0 ? (m < 10 ? '0' : '') + m : '');
+              ]]]
+            tap_action:
+              action: more-info
+            hold_action:
+              action: more-info
+              entity: time.firstname_sunday_start
+            styles:
+              card:
+                - height: 55px
+                - border: none
+                - border-radius: 8px
+                - padding: 4px 0
+                - background: |
+                    [[[
+                      return new Date().getDay() === 0 ? 'rgba(var(--rgb-primary-color), 0.15)' : 'transparent';
+                    ]]]
+              name:
+                - font-size: 11px
+                - opacity: 0.6
+              state:
+                - font-size: 14px
+                - font-weight: bold
