@@ -146,7 +146,7 @@ The integration creates two types of HA devices:
 
 | Device Type | Name Example | Manufacturer | Model |
 |-------------|-------------|--------------|-------|
-| Child account | Maceo Collin (Family Safety) | Microsoft | Family Safety Account |
+| Child account | Firsname Name (Family Safety) | Microsoft | Family Safety Account |
 | Physical device | DESKTOP-9N6PNLL | From API | From API |
 
 Physical devices are linked to their parent child account via `via_device`.
@@ -369,7 +369,7 @@ automation:
     action:
       - action: switch.turn_on
         target:
-          entity_id: switch.maceo_lock
+          entity_id: switch.firstname_lock
 
   - alias: "Unlock account at 07:00"
     trigger:
@@ -378,7 +378,7 @@ automation:
     action:
       - action: switch.turn_off
         target:
-          entity_id: switch.maceo_lock
+          entity_id: switch.firstname_lock
 ```
 
 ### Screen time alert
@@ -388,14 +388,14 @@ automation:
   - alias: "Screen time limit alert"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.maceo_screen_time
+        entity_id: sensor.firstname_screen_time
         above: 120
     action:
       - action: notify.mobile_app_your_phone
         data:
           title: "Screen Time Alert"
           message: >
-            {{ state_attr('sensor.maceo_screen_time', 'formatted_time') }}
+            {{ state_attr('sensor.firstname_screen_time', 'formatted_time') }}
             of screen time used today.
 ```
 
@@ -426,7 +426,7 @@ automation:
   - alias: "Anti-bypass watchdog"
     trigger:
       - trigger: state
-        entity_id: switch.maceo_lock
+        entity_id: switch.firstname_lock
         to: "off"
     condition:
       - condition: time
@@ -435,7 +435,7 @@ automation:
     action:
       - action: switch.turn_on
         target:
-          entity_id: switch.maceo_lock
+          entity_id: switch.firstname_lock
 ```
 
 ### Dashboard card
