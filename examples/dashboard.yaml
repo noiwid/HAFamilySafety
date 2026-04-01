@@ -1,11 +1,11 @@
 # Microsoft Family Safety — Dashboard Card Example
 #
 # Requirements:
-#   - custom:button-card (HACS)
-#   - custom:stack-in-card (HACS)
-#   - custom:vertical-stack-in-card (HACS)
-#   - custom:mod-card (HACS)
-#   - custom:mushroom-title-card (HACS)
+#    - custom:button-card (HACS)
+#    - custom:stack-in-card (HACS)
+#    - custom:vertical-stack-in-card (HACS)
+#    - custom:mod-card (HACS)
+#    - custom:mushroom-title-card (HACS)
 #
 # Replace entity names to match your child's name and device ID.
 # Entity naming pattern: sensor.{firstname}_{...}, number.{firstname}_{day}_limit, etc.
@@ -291,7 +291,7 @@ cards:
     cards:
       - type: custom:button-card
         entity: switch.firstname_lock
-        name: PC — DESKTOP-9N6PNLL
+        name: Laptop Usage
         icon: mdi:desktop-tower-monitor
         show_state: false
         show_name: true
@@ -479,69 +479,3 @@ cards:
             show_state: true
             show_icon: false
             state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.firstname_tuesday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.firstname_wednesday_limit
-            name: Mer
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.firstname_wednesday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.firstname_thursday_limit
-            name: Jeu
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.firstname_thursday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.firstname_friday_limit
-            name: Ven
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.firstname_friday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.firstname_saturday_limit
-            name: Sam
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.firstname_saturday_start
-            styles: *day_styles
-          - type: custom:button-card
-            entity: number.firstname_sunday_limit
-            name: Dim
-            show_state: true
-            show_icon: false
-            state_display: *limit_display
-            tap_action:
-              action: more-info
-            hold_action:
-              action: more-info
-              entity: time.firstname_sunday_start
-            styles: *day_styles
