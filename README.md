@@ -146,7 +146,7 @@ The integration creates two types of HA devices:
 
 | Device Type | Name Example | Manufacturer | Model |
 |-------------|-------------|--------------|-------|
-| Child account | Firstname Lastname (Family Safety) | Microsoft | Family Safety Account |
+| Child account | Firsname Name (Family Safety) | Microsoft | Family Safety Account |
 | Physical device | DESKTOP-9N6PNLL | From API | From API |
 
 Physical devices are linked to their parent child account via `via_device`.
