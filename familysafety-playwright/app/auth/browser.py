@@ -228,6 +228,28 @@ class BrowserAuthManager:
         except Exception as e:
             _LOGGER.warning("Failed to check/remove SingletonLock: %s", e)
 
+    async def _wipe_browser_session(self) -> None:
+        """Remove cookies and browser profile to start auth from a clean state.
+
+        Called at the beginning of start_auth_session() to prevent stale
+        cookies or a broken profile from causing redirects during the new
+        login attempt.
+        """
+        import shutil
+        try:
+            profile_path = Path(_PROFILE_DIR)
+            if profile_path.exists():
+                shutil.rmtree(profile_path, ignore_errors=True)
+                _LOGGER.info("Wiped browser profile at %s", _PROFILE_DIR)
+        except Exception as e:
+            _LOGGER.warning("Failed to wipe browser profile: %s", e)
+
+        if self._storage:
+            try:
+                await self._storage.clear_cookies()
+            except Exception as e:
+                _LOGGER.warning("Failed to clear stored cookies: %s", e)
+
     async def start_auth_session(self) -> str:
         """Start a new authentication session."""
         self._prune_old_sessions()
@@ -243,6 +265,10 @@ class BrowserAuthManager:
 
         session_id = str(uuid.uuid4())
         _LOGGER.info(f"Starting authentication session: {session_id}")
+
+        # Start from a clean slate — wipe any stale cookies/profile
+        # so we don't redirect to a previous Microsoft account
+        await self._wipe_browser_session()
 
         # Acquire the browser lock to prevent conflict with browser_fetch
         await self._browser_lock.acquire()
