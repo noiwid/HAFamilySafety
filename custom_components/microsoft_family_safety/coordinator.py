@@ -23,6 +23,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from ._pyfamilysafety_compat import apply_patches
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
 from .auth.addon_client import AddonCookieClient
 from .const import (
@@ -92,6 +93,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_setup_api(self) -> None:
         """Set up the Family Safety API client."""
         refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
+
+        # Apply pyfamilysafety 1.1.2 compatibility patches before any auth call:
+        # reuse HA's shared aiohttp session (fixes "'ClientSession' object is not
+        # callable" on Python 3.14, issue #22) and decode auth responses
+        # defensively (fixes crashes on Microsoft HTML error pages, issue #23).
+        apply_patches(self.hass)
 
         try:
             self.api = await FamilySafety.create(
@@ -205,10 +212,20 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_approve_request(
         self, request_id: str, extension_time: int = 3600
     ) -> bool:
-        """Approve a pending screen time request."""
+        """Approve a pending screen time request.
+
+        ``extension_time`` is expressed in seconds.
+
+        Workaround for issue #20: pyfamilysafety 1.1.2 converts the value with
+        ``extension_time * 100`` while commenting "seconds to ms" — but seconds
+        to milliseconds is ``* 1000``. The library therefore grants only a tenth
+        of the requested time (e.g. 60 min -> 6 min). We pre-multiply by 10 so
+        the library's faulty ``* 100`` yields the correct milliseconds
+        (seconds * 10 * 100 == seconds * 1000).
+        """
         if self.api is None:
             return False
-        return await self.api.approve_pending_request(request_id, extension_time)
+        return await self.api.approve_pending_request(request_id, extension_time * 10)
 
     async def async_deny_request(self, request_id: str) -> bool:
         """Deny a pending screen time request."""
@@ -345,9 +362,17 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def async_lock_account(self, account_id: str) -> None:
-        """Lock an account by setting all 7-day screen time quotas to 0."""
+        """Lock an account by setting all 7-day screen time quotas to 0.
+
+        Guards against data loss (issue #23, "schedule data disappeared"): if
+        the current policy cannot be read AND nothing was saved on a previous
+        lock, we refuse to zero the schedule — otherwise the child's real
+        schedule would be wiped with no way to restore it on unlock.
+        """
         # Save current screentime policy before zeroing
         current_policy = await self._addon_client.fetch_screentime(account_id)
+        has_saved = account_id in self._saved_screentime
+
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
             has_nonzero = False
@@ -358,12 +383,36 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     has_nonzero = True
                     break
             if has_nonzero:
+                # Fresh non-zero schedule available: capture it as the restore point.
                 self._saved_screentime[account_id] = current_policy
                 await self._async_save_screentime()
                 _LOGGER.info(
                     "Saved screentime policy for account %s before locking",
                     account_id,
                 )
+            elif not has_saved:
+                # Already all-zero and nothing saved: account is effectively
+                # locked already (or never had a schedule). Don't overwrite a
+                # potential restore point with an empty one.
+                _LOGGER.info(
+                    "Account %s already has no screen time and no saved policy; "
+                    "proceeding to enforce lock without overwriting restore point",
+                    account_id,
+                )
+        elif not has_saved:
+            # Could not read the current schedule and we have no backup to fall
+            # back on. Zeroing now would destroy the schedule irrecoverably.
+            raise UpdateFailed(
+                f"Cannot lock account {account_id}: current schedule unreadable "
+                "and no saved policy to restore from. Refusing to wipe the "
+                "schedule. Check the Family Safety Auth add-on cookies."
+            )
+        else:
+            _LOGGER.warning(
+                "Could not read current schedule for account %s; relying on "
+                "previously saved policy for restore",
+                account_id,
+            )
 
         # Set all 7 days to 0 minutes via addon
         days_locked = 0
@@ -467,6 +516,124 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
         await self.async_request_refresh()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Screen time policy on/off (issue #24)
+    #
+    # Mirrors the Microsoft Family Safety app: a single toggle for "screen
+    # time limits". ON = limits enforced (the child's schedule applies),
+    # OFF = no limits (unlimited time). This is the inverse of the Family Link
+    # behaviour. It reuses the saved-policy machinery so disabling limits never
+    # destroys the schedule — it is restored verbatim when re-enabled.
+    # ──────────────────────────────────────────────────────────────────────
+
+    def is_policy_enabled(self, account_id: str) -> bool | None:
+        """Return True if screen time limits are enforced for the account.
+
+        Enabled means at least one day grants less than 24h (a real limit).
+        Disabled means every day is effectively unlimited (24h) or there is no
+        schedule at all.
+        """
+        locked = self.is_account_locked(account_id)
+        if locked is None:
+            return None
+        if locked:
+            # All days at 0 → fully locked, which is still "limits enabled".
+            return True
+        if not self.data:
+            return None
+        account = self.data.get("accounts", {}).get(account_id)
+        policy = (account or {}).get("screentime_policy")
+        if not policy or not isinstance(policy, dict):
+            return None
+        daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
+        if not daily or not isinstance(daily, dict):
+            return None
+        for day_key in self.DAYS_OF_WEEK:
+            day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
+            allowance = day_data.get("allowance") or day_data.get("Allowance") or "24:00:00"
+            if allowance != "24:00:00":
+                return True
+        return False
+
+    async def async_set_policy_enabled(self, account_id: str, enabled: bool) -> None:
+        """Enable or disable screen time limits for an account.
+
+        enabled=True  → restore the saved schedule (limits apply again).
+        enabled=False → grant unlimited time (24h/day) after saving the
+                        current schedule so it can be restored later.
+        """
+        if enabled:
+            # Re-enable limits: restore the saved schedule (same path as unlock).
+            await self.async_unlock_account(account_id)
+            return
+
+        # Disable limits: save the current schedule, then open all days to 24h.
+        current_policy = await self._addon_client.fetch_screentime(account_id)
+        if current_policy and account_id not in self._saved_screentime:
+            daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
+            has_limit = False
+            for day_key in self.DAYS_OF_WEEK:
+                day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
+                allowance = day_data.get("allowance") or day_data.get("Allowance") or "24:00:00"
+                if allowance != "24:00:00":
+                    has_limit = True
+                    break
+            if has_limit:
+                self._saved_screentime[account_id] = current_policy
+                await self._async_save_screentime()
+                _LOGGER.info(
+                    "Saved screentime policy for account %s before removing limits",
+                    account_id,
+                )
+
+        days_set = 0
+        for day_index in range(7):
+            try:
+                await self._addon_client.set_screentime_allowance(
+                    account_id, day_index, hours=24, minutes=0
+                )
+                await self._addon_client.set_screentime_intervals(
+                    account_id, day_index, [True] * 48
+                )
+                days_set += 1
+            except Exception as err:
+                _LOGGER.warning(
+                    "Could not remove limits for day %d on account %s: %s",
+                    day_index, account_id, err,
+                )
+        _LOGGER.info(
+            "Account %s limits removed (%d/7 days set to unlimited)",
+            account_id, days_set,
+        )
+        await self.async_request_refresh()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Connection / health state (issue #23)
+    # ──────────────────────────────────────────────────────────────────────
+
+    def connection_state(self) -> dict[str, Any]:
+        """Return a snapshot of the integration's connection health.
+
+        Used by the connection sensor (#23) so users can see at a glance
+        whether the mobile API and the web (cookie) session are working,
+        and when data was last refreshed successfully.
+        """
+        mobile_ok = self.api is not None and self.last_update_success
+        web_ok = bool(self.web_api and self.web_api.has_web_cookies)
+        if mobile_ok and web_ok:
+            state = "connected"
+        elif mobile_ok:
+            state = "degraded"  # mobile works, web cookies missing/expired
+        else:
+            state = "disconnected"
+        return {
+            "state": state,
+            "mobile_api": "ok" if mobile_ok else "error",
+            "web_session": "ok" if web_ok else "expired",
+            "cookies_loaded": self._web_cookies_loaded,
+            "last_update_success": self.last_update_success,
+        }
 
     # ──────────────────────────────────────────────────────────────────────
     # Data fetching

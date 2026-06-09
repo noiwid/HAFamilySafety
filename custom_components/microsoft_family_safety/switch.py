@@ -68,6 +68,13 @@ async def async_setup_entry(
                 )
             )
 
+            # Create screen time limits on/off switch (issue #24)
+            entities.append(
+                FamilySafetyScreenTimePolicySwitch(
+                    coordinator, entry, account_id, account_name,
+                )
+            )
+
     async_add_entities(entities)
 
 
@@ -319,6 +326,94 @@ class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
         try:
             await self.coordinator.async_unlock_account(self._account_id)
+            self._optimistic_state = None
+        except Exception:
+            self._optimistic_state = None
+            self.async_write_ha_state()
+            raise
+
+
+class FamilySafetyScreenTimePolicySwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable screen time limits for a child account.
+
+    Mirrors the Microsoft Family Safety app's screen time limits toggle
+    (issue #24):
+    ON  = limits enforced (the child's schedule applies)
+    OFF = no limits (unlimited time; the schedule is saved and restored on ON)
+
+    This is the inverse of the Account Lock switch and of the Family Link
+    behaviour: here ON means "limits active", not "device locked".
+    """
+
+    _attr_icon = "mdi:clock-check"
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+        account_name: str,
+    ) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator)
+        self._account_id = account_id
+        self._account_name = account_name
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_screentime_policy"
+        self._attr_name = f"{account_name} Screen Time Limits"
+        self._optimistic_state: bool | None = None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to a child account device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if screen time limits are enforced."""
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+        return self.coordinator.is_policy_enabled(self._account_id)
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on state."""
+        return "mdi:clock-check" if self.is_on else "mdi:clock-remove"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        has_saved = self._account_id in self.coordinator._saved_screentime
+        return {
+            ATTR_USER_ID: self._account_id,
+            "has_saved_policy": has_saved,
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable screen time limits (restore the saved schedule)."""
+        _LOGGER.info("Enabling screen time limits for %s", self._account_name)
+        self._optimistic_state = True
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_set_policy_enabled(self._account_id, True)
+            self._optimistic_state = None
+        except Exception:
+            self._optimistic_state = None
+            self.async_write_ha_state()
+            raise
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable screen time limits (grant unlimited time)."""
+        _LOGGER.info("Disabling screen time limits for %s", self._account_name)
+        self._optimistic_state = False
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_set_policy_enabled(self._account_id, False)
             self._optimistic_state = None
         except Exception:
             self._optimistic_state = None
