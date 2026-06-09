@@ -1,0 +1,56 @@
+# ==============================================================================
+# Standalone deployment of the Microsoft Family Safety Auth service.
+#
+# Use this on a plain Docker host (e.g. a Debian server) when you do not want to
+# run the service as a Home Assistant add-on, for example to save space on a
+# Home Assistant Green / Yellow.
+#
+# Quick start:
+#   1. docker compose up -d
+#   2. Open the noVNC web UI at http://YOUR_SERVER_IP:6081 and sign in to your
+#      Microsoft parent account (VNC password: the value of VNC_PASSWORD below).
+#   3. In Home Assistant, set the integration's auth URL option to
+#      http://YOUR_SERVER_IP:8098
+#
+# Cookies and the encryption key are stored in the named volume below, so they
+# persist across container restarts and upgrades.
+# ==============================================================================
+services:
+  familysafety-auth:
+    container_name: familysafety-auth
+
+    # Option A: pull the prebuilt image (published on release).
+    image: ghcr.io/noiwid/hafamilysafety-auth:latest
+
+    # Option B: build locally from this repository instead of pulling.
+    # Comment out the `image:` line above and uncomment the block below.
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.standalone
+
+    restart: unless-stopped
+
+    ports:
+      - "8098:8098"   # HTTP API consumed by the Home Assistant integration
+      - "6081:6081"   # noVNC web UI for the one-time Microsoft sign-in
+
+    environment:
+      LOG_LEVEL: "info"            # trace | debug | info | warning | error
+      AUTH_TIMEOUT: "300"          # seconds to wait for sign-in (60-600)
+      SESSION_DURATION: "86400"    # session validity in seconds (3600-604800)
+      LANGUAGE: "en-US"            # browser locale, e.g. fr-FR
+      TIMEZONE: "Europe/Paris"     # browser timezone
+      VNC_PASSWORD: "familysafety" # password for the noVNC interface
+
+    volumes:
+      - familysafety_data:/share/familysafety
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8098/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  familysafety_data:
