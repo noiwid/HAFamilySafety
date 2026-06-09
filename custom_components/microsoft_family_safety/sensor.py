@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -101,6 +101,9 @@ async def async_setup_entry(
     coordinator: FamilySafetyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities: list[SensorEntity] = []
+
+    # Integration-level connection/health sensor (issue #23)
+    entities.append(FamilySafetyConnectionSensor(coordinator, entry))
 
     if coordinator.data:
         for account_id, account_data in coordinator.data.get("accounts", {}).items():
@@ -631,3 +634,62 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
             except Exception:
                 attrs["raw_policy"] = str(policy)[:2000]
         return attrs
+
+
+class FamilySafetyConnectionSensor(CoordinatorEntity, SensorEntity):
+    """Integration-level connection/health sensor (issue #23).
+
+    Surfaces whether the mobile API and the web (cookie) session are working,
+    so users can see at a glance if the integration is connected, degraded
+    (mobile only, web cookies expired), or disconnected — addressing the
+    "test connection / connection state" request in issue #23.
+    """
+
+    _attr_icon = "mdi:lan-connect"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the connection sensor."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_connection"
+        self._attr_name = "Microsoft Family Safety Connection"
+
+    @property
+    def available(self) -> bool:
+        """The connection sensor is always available to report status."""
+        return True
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Link to a shared integration device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.entry_id}_service")},
+            name="Microsoft Family Safety",
+            manufacturer="Microsoft",
+            model="Family Safety Integration",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return the overall connection state."""
+        return self.coordinator.connection_state()["state"]
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on connection state."""
+        state = self.native_value
+        if state == "connected":
+            return "mdi:lan-connect"
+        if state == "degraded":
+            return "mdi:lan-pending"
+        return "mdi:lan-disconnect"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed connection diagnostics."""
+        return self.coordinator.connection_state()
