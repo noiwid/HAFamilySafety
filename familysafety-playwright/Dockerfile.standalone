@@ -1,0 +1,78 @@
+# ==============================================================================
+# Standalone image for the Microsoft Family Safety Auth service.
+#
+# Unlike the Home Assistant add-on image (Dockerfile), this one does not depend
+# on the hassio-addons base image or s6. It targets a plain Docker host (e.g. a
+# Debian server) and is driven entirely by environment variables.
+#
+# Build:
+#   docker build -f Dockerfile.standalone -t familysafety-auth:local .
+# Run (preferably via docker-compose.yml in this folder).
+# ==============================================================================
+FROM debian:bookworm-slim
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# System dependencies required for Playwright/Chromium, the virtual display,
+# and the VNC + noVNC stack. Mirrors the add-on Dockerfile.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-dev \
+        curl \
+        nodejs \
+        npm \
+        ca-certificates \
+        fonts-liberation \
+        libnss3 \
+        libatk-bridge2.0-0 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libasound2 \
+        xvfb \
+        x11vnc \
+        novnc \
+        python3-websockify \
+        fluxbox \
+        dbus \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=0
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Python dependencies
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+
+# Playwright + Chromium
+RUN pip3 install --no-cache-dir --break-system-packages playwright \
+    && playwright install --with-deps chromium
+
+# Application code
+COPY app/ /app/app/
+
+# Standalone entrypoint (no bashio / no s6)
+COPY rootfs-standalone/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Shared storage for cookies + encryption key (mount a volume here)
+RUN mkdir -p /share/familysafety && chmod 700 /share/familysafety
+VOLUME ["/share/familysafety"]
+
+# 8098 = HTTP API consumed by the integration, 6081 = noVNC web UI
+EXPOSE 8098 6081
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8098/api/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
