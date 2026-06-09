@@ -70,7 +70,7 @@ The addon runs a headless Chromium browser that maintains an authenticated sessi
 
 ### Prerequisites
 
-- **Home Assistant OS** or **Home Assistant Supervised** (the addon requires the Supervisor)
+- **Home Assistant OS** or **Home Assistant Supervised** to run the auth service as an add-on. On **HA Core / Container**, or if you simply prefer to offload the browser based service to a separate machine, you can run it as a standalone Docker container instead (see [Standalone Docker deployment](#standalone-docker-deployment)).
 - A **Microsoft parent account** with at least one child in the Family Safety group
 
 ### Step 1 — Install the Add-on
@@ -85,6 +85,14 @@ The addon provides the browser-based authentication required for screen time fea
 6. Open the addon **Web UI** (port 8098) — you'll see the authentication page
 7. Click **Start Authentication** and sign in with your Microsoft parent account via the noVNC interface (port 6081)
 8. Once authenticated, the addon will extract and store cookies automatically
+
+### Standalone Docker deployment
+
+If you run **HA Core / Container** (no Supervisor), or you prefer to keep the browser based service off your Home Assistant box (for example to save disk space on a Green / Yellow), you can run the auth service as a plain Docker container instead of the add-on.
+
+A multi-arch image (amd64 and arm64) is published to GHCR on each release, and a `docker-compose.yml` is provided. Full setup, configuration, and add-on to standalone migration steps are documented in [`familysafety-playwright/README.standalone.md`](familysafety-playwright/README.standalone.md).
+
+Once the container is running, set the integration's **auth URL** option to `http://YOUR_SERVER_IP:8098` (see [Integration Options](#integration-options)). Everything else works exactly as with the add-on.
 
 ### Step 2 — Install the Integration
 
@@ -115,7 +123,8 @@ The addon provides the browser-based authentication required for screen time fea
    ```
 6. Paste the redirect URL back into the Home Assistant form
 7. Select your monitored platforms (Windows, Xbox, Mobile) and polling interval
-8. Submit — the integration will discover all child accounts and devices automatically
+8. *(Standalone Docker only)* Set the optional **auth URL** field to your container address, e.g. `http://YOUR_SERVER_IP:8098`. Leave it empty when using the add-on, which is detected automatically.
+9. Submit, and the integration will discover all child accounts and devices automatically
 
 > **Note:** The addon status is shown during setup. If detected, screen time schedule reading and writing will be enabled automatically.
 
@@ -134,9 +143,12 @@ The addon provides the browser-based authentication required for screen time fea
 
 After setup, go to **Settings > Devices & Services > Microsoft Family Safety > Configure**:
 
-| Option | Range | Default |
-|--------|-------|---------|
+| Option | Range / Format | Default |
+|--------|----------------|---------|
 | Update interval | 30 – 3600 seconds | 300 seconds (5 min) |
+| Auth URL | `http://HOST:8098` | *(empty)*, add-on auto-detected when blank |
+
+> Set **Auth URL** only when running the auth service as a [standalone Docker container](#standalone-docker-deployment). When left empty, the add-on is discovered automatically via the Supervisor.
 
 ---
 
