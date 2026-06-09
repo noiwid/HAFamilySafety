@@ -65,6 +65,27 @@ http://YOUR_SERVER_IP:8098
 The integration will load cookies and read/write screen time through this
 container exactly as it does with the add-on.
 
+## Migrating from the Home Assistant add-on
+
+If you already run the Family Safety auth add-on and want to move it to a
+standalone container, follow these steps:
+
+1. **Stop** the auth add-on in Home Assistant.
+2. **Delete** the existing Microsoft Family Safety integration entry
+   (Settings > Devices & Services). Changing `auth_url` on an existing entry is
+   not enough — remove it and re-add it.
+3. **Start the standalone container** and complete the
+   [first-time authentication](#first-time-authentication) over noVNC.
+4. **Re-add** the integration. The config flow will ask you to authenticate
+   again (this is expected even though the container already holds the
+   cookies), then set the **auth URL** to `http://YOUR_SERVER_IP:8098`.
+5. **Clean up** on the Home Assistant host: uninstall the add-on and delete the
+   now-unused `/share/familysafety` folder to reclaim disk space
+   (~2.6 GB: image + browser profile).
+
+Thanks to @laurentlbm for testing this path and reporting the exact steps in
+issue #25.
+
 ## Configuration
 
 All settings are environment variables (see `docker-compose.yml`):
