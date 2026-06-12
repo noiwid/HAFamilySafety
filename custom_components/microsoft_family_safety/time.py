@@ -13,20 +13,10 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_FIRST_NAME, ATTR_SURNAME, DOMAIN
+from .const import ATTR_FIRST_NAME, ATTR_SURNAME, DAYS, DOMAIN
 from .coordinator import FamilySafetyDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-DAYS = [
-    (0, "sunday", "Sunday"),
-    (1, "monday", "Monday"),
-    (2, "tuesday", "Tuesday"),
-    (3, "wednesday", "Wednesday"),
-    (4, "thursday", "Thursday"),
-    (5, "friday", "Friday"),
-    (6, "saturday", "Saturday"),
-]
 
 
 def _parse_time(time_str: str | None) -> dt_time | None:
@@ -116,25 +106,31 @@ async def async_setup_entry(
     """Set up Microsoft Family Safety time entities."""
     coordinator: FamilySafetyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[TimeEntity] = []
+    known_accounts: set[str] = set()
 
-    if coordinator.data:
-        for account_id in coordinator.data.get("accounts", {}):
+    def _add_new_entities() -> None:
+        """Add time entities for accounts that appeared since last update."""
+        entities: list[TimeEntity] = []
+        data = coordinator.data or {}
+
+        for account_id in data.get("accounts", {}):
+            if account_id in known_accounts:
+                continue
+            known_accounts.add(account_id)
             for day_index, day_key, day_label in DAYS:
-                entities.append(
-                    FamilySafetyIntervalTime(
-                        coordinator, entry, account_id,
-                        day_index, day_key, day_label, is_start=True,
+                for is_start in (True, False):
+                    entities.append(
+                        FamilySafetyIntervalTime(
+                            coordinator, entry, account_id,
+                            day_index, day_key, day_label, is_start=is_start,
+                        )
                     )
-                )
-                entities.append(
-                    FamilySafetyIntervalTime(
-                        coordinator, entry, account_id,
-                        day_index, day_key, day_label, is_start=False,
-                    )
-                )
 
-    async_add_entities(entities)
+        if entities:
+            async_add_entities(entities)
+
+    _add_new_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):

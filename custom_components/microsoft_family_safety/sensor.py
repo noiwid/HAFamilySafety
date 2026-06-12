@@ -100,19 +100,34 @@ async def async_setup_entry(
     """Set up Microsoft Family Safety sensors."""
     coordinator: FamilySafetyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[SensorEntity] = []
-
     # Integration-level connection/health sensor (issue #23)
-    entities.append(FamilySafetyConnectionSensor(coordinator, entry))
+    async_add_entities([FamilySafetyConnectionSensor(coordinator, entry)])
 
-    if coordinator.data:
-        for account_id, account_data in coordinator.data.get("accounts", {}).items():
-            entities.extend(_create_account_sensors(coordinator, entry, account_id, account_data))
+    known_accounts: set[str] = set()
+    known_devices: set[str] = set()
 
-        for device_id in coordinator.data.get("devices", {}):
-            entities.extend(_create_device_sensors(coordinator, entry, device_id))
+    def _add_new_entities() -> None:
+        """Add sensors for accounts/devices that appeared since last update."""
+        entities: list[SensorEntity] = []
+        data = coordinator.data or {}
 
-    async_add_entities(entities)
+        for account_id, account_data in data.get("accounts", {}).items():
+            if account_id not in known_accounts:
+                known_accounts.add(account_id)
+                entities.extend(
+                    _create_account_sensors(coordinator, entry, account_id, account_data)
+                )
+
+        for device_id in data.get("devices", {}):
+            if device_id not in known_devices:
+                known_devices.add(device_id)
+                entities.extend(_create_device_sensors(coordinator, entry, device_id))
+
+        if entities:
+            async_add_entities(entities)
+
+    _add_new_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class FamilySafetyAccountSensor(CoordinatorEntity, SensorEntity):
@@ -617,22 +632,12 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
         policy = account_data.get("screentime_policy")
         attrs = {ATTR_USER_ID: self._account_id}
         if policy and isinstance(policy, dict):
-            # Include raw top-level keys for debugging
-            attrs["raw_keys"] = list(policy.keys())
-            # Try multiple possible structures
             daily = policy.get("dailyRestrictions", policy.get("DailyRestrictions"))
             if daily and isinstance(daily, dict):
                 for day_name, day_data in daily.items():
                     if isinstance(day_data, dict):
                         allowance = day_data.get("allowance", day_data.get("Allowance", ""))
                         attrs[f"{day_name.lower()}_allowance"] = allowance
-            # Expose raw policy for debugging (truncated if too large)
-            import json
-            try:
-                raw = json.dumps(policy, default=str)
-                attrs["raw_policy"] = raw[:2000] if len(raw) > 2000 else raw
-            except Exception:
-                attrs["raw_policy"] = str(policy)[:2000]
         return attrs
 
 

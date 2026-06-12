@@ -30,31 +30,40 @@ async def async_setup_entry(
     """Set up Microsoft Family Safety buttons."""
     coordinator: FamilySafetyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[ButtonEntity] = []
+    known_accounts: set[str] = set()
 
-    if coordinator.data:
-        for account_id, account_data in coordinator.data.get("accounts", {}).items():
+    def _add_new_entities() -> None:
+        """Add buttons for accounts that appeared since last update."""
+        entities: list[ButtonEntity] = []
+        data = coordinator.data or {}
+
+        for account_id, account_data in data.get("accounts", {}).items():
+            if account_id in known_accounts:
+                continue
+            known_accounts.add(account_id)
             account_name = account_data.get(ATTR_FIRST_NAME, "Unknown")
 
             # Create approve/deny buttons per account
             entities.append(
-                FamilySafetyApproveRequestButton(
-                    coordinator, entry, account_id, account_name,
+                FamilySafetyRequestButton(
+                    coordinator, entry, account_id, account_name, approve=True,
                 )
             )
             entities.append(
-                FamilySafetyDenyRequestButton(
-                    coordinator, entry, account_id, account_name,
+                FamilySafetyRequestButton(
+                    coordinator, entry, account_id, account_name, approve=False,
                 )
             )
 
-    async_add_entities(entities)
+        if entities:
+            async_add_entities(entities)
+
+    _add_new_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
-class FamilySafetyApproveRequestButton(CoordinatorEntity, ButtonEntity):
-    """Button to approve the oldest pending request for an account."""
-
-    _attr_icon = "mdi:check-circle"
+class FamilySafetyRequestButton(CoordinatorEntity, ButtonEntity):
+    """Button to approve or deny the oldest pending request for an account."""
 
     def __init__(
         self,
@@ -62,14 +71,18 @@ class FamilySafetyApproveRequestButton(CoordinatorEntity, ButtonEntity):
         entry: ConfigEntry,
         account_id: str,
         account_name: str,
+        approve: bool,
     ) -> None:
         """Initialize the button."""
         super().__init__(coordinator)
         self._account_id = account_id
         self._account_name = account_name
         self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_{account_id}_approve_request"
-        self._attr_name = f"{account_name} Approve Request"
+        self._approve = approve
+        action = "approve" if approve else "deny"
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_{action}_request"
+        self._attr_name = f"{account_name} {action.capitalize()} Request"
+        self._attr_icon = "mdi:check-circle" if approve else "mdi:close-circle"
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -93,7 +106,7 @@ class FamilySafetyApproveRequestButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if there's a pending request to approve."""
+        """Return True if there's a pending request to act on."""
         return self._get_oldest_request() is not None
 
     @property
@@ -105,86 +118,29 @@ class FamilySafetyApproveRequestButton(CoordinatorEntity, ButtonEntity):
             attrs[ATTR_REQUEST_ID] = request.get("id")
             attrs["request_type"] = request.get("type")
             attrs["platform"] = request.get("platform")
-            attrs["requested_time"] = request.get("requestedTime")
+            if self._approve:
+                attrs["requested_time"] = request.get("requestedTime")
         return attrs
 
     async def async_press(self) -> None:
-        """Approve the oldest pending request (1 hour extension)."""
+        """Approve (1 hour extension) or deny the oldest pending request."""
         request = self._get_oldest_request()
+        action = "approve" if self._approve else "deny"
         if request is None:
-            _LOGGER.warning("No pending request to approve for %s", self._account_name)
+            _LOGGER.warning(
+                "No pending request to %s for %s", action, self._account_name
+            )
             return
         request_id = request.get("id")
-        _LOGGER.info(
-            "Approving request %s for %s (1h extension)", request_id, self._account_name
-        )
-        await self.coordinator.async_approve_request(request_id, extension_time=3600)
-        await self.coordinator.async_request_refresh()
-
-
-class FamilySafetyDenyRequestButton(CoordinatorEntity, ButtonEntity):
-    """Button to deny the oldest pending request for an account."""
-
-    _attr_icon = "mdi:close-circle"
-
-    def __init__(
-        self,
-        coordinator: FamilySafetyDataUpdateCoordinator,
-        entry: ConfigEntry,
-        account_id: str,
-        account_name: str,
-    ) -> None:
-        """Initialize the button."""
-        super().__init__(coordinator)
-        self._account_id = account_id
-        self._account_name = account_name
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_{account_id}_deny_request"
-        self._attr_name = f"{account_name} Deny Request"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device info to link this entity to a child account device."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._account_id)},
-            name=f"{self._account_name} (Family Safety)",
-            manufacturer="Microsoft",
-            model="Family Safety Account",
-        )
-
-    def _get_oldest_request(self) -> dict | None:
-        """Get the oldest pending request for this account."""
-        if not self.coordinator.data:
-            return None
-        all_requests = self.coordinator.data.get("pending_requests", [])
-        account_requests = [
-            r for r in all_requests if r.get("puid") == self._account_id
-        ]
-        return account_requests[0] if account_requests else None
-
-    @property
-    def available(self) -> bool:
-        """Return True if there's a pending request to deny."""
-        return self._get_oldest_request() is not None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        request = self._get_oldest_request()
-        attrs: dict[str, Any] = {ATTR_USER_ID: self._account_id}
-        if request:
-            attrs[ATTR_REQUEST_ID] = request.get("id")
-            attrs["request_type"] = request.get("type")
-            attrs["platform"] = request.get("platform")
-        return attrs
-
-    async def async_press(self) -> None:
-        """Deny the oldest pending request."""
-        request = self._get_oldest_request()
-        if request is None:
-            _LOGGER.warning("No pending request to deny for %s", self._account_name)
-            return
-        request_id = request.get("id")
-        _LOGGER.info("Denying request %s for %s", request_id, self._account_name)
-        await self.coordinator.async_deny_request(request_id)
+        if self._approve:
+            _LOGGER.info(
+                "Approving request %s for %s (1h extension)",
+                request_id, self._account_name,
+            )
+            await self.coordinator.async_approve_request(
+                request_id, extension_time=3600
+            )
+        else:
+            _LOGGER.info("Denying request %s for %s", request_id, self._account_name)
+            await self.coordinator.async_deny_request(request_id)
         await self.coordinator.async_request_refresh()

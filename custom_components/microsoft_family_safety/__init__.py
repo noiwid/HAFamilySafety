@@ -187,248 +187,86 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 def _register_services(hass: HomeAssistant) -> None:
-    """Register integration services."""
+    """Register integration services.
 
-    # ── Existing services (via pyfamilysafety) ───────────────────────────
+    Each service maps to a coordinator method; the args extractor turns the
+    validated service call data into positional arguments for that method.
+    """
 
-    async def handle_block_app(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_block_app(
-            call.data["account_id"], call.data["app_id"]
+    def _app_allowance(data: dict) -> str:
+        return f"{data['hours']:02d}:{data.get('minutes', 0):02d}:00"
+
+    # (service name, schema, coordinator method, args extractor)
+    services = [
+        (SERVICE_BLOCK_APP, SERVICE_BLOCK_APP_SCHEMA, "async_block_app",
+         lambda d: (d["account_id"], d["app_id"])),
+        (SERVICE_UNBLOCK_APP, SERVICE_BLOCK_APP_SCHEMA, "async_unblock_app",
+         lambda d: (d["account_id"], d["app_id"])),
+        (SERVICE_LOCK_PLATFORM, SERVICE_LOCK_PLATFORM_SCHEMA, "async_lock_platform",
+         lambda d: (
+             d["account_id"], d["platform"],
+             datetime.now() + timedelta(hours=d.get("duration_hours", 24)),
+         )),
+        (SERVICE_UNLOCK_PLATFORM, SERVICE_UNLOCK_PLATFORM_SCHEMA, "async_unlock_platform",
+         lambda d: (d["account_id"], d["platform"])),
+        (SERVICE_APPROVE_REQUEST, SERVICE_APPROVE_REQUEST_SCHEMA, "async_approve_request",
+         lambda d: (d["request_id"], d.get("extension_minutes", 60) * 60)),
+        (SERVICE_DENY_REQUEST, SERVICE_DENY_REQUEST_SCHEMA, "async_deny_request",
+         lambda d: (d["request_id"],)),
+        (SERVICE_SET_SCREENTIME_LIMIT, SERVICE_SET_SCREENTIME_LIMIT_SCHEMA,
+         "async_set_screentime_limit",
+         lambda d: (d["account_id"], d["day_of_week"], d["hours"], d.get("minutes", 0))),
+        (SERVICE_SET_SCREENTIME_INTERVALS, SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA,
+         "async_set_screentime_intervals",
+         lambda d: (
+             d["account_id"], d["day_of_week"],
+             d["start_hour"], d.get("start_minute", 0),
+             d["end_hour"], d.get("end_minute", 0),
+         )),
+        (SERVICE_SET_APP_TIME_LIMIT, SERVICE_SET_APP_TIME_LIMIT_SCHEMA,
+         "async_set_app_time_limit",
+         lambda d: (
+             d["account_id"], d["app_id"], d["app_name"],
+             d.get("platform", "windows"), _app_allowance(d),
+             d.get("start_time", "07:00:00"), d.get("end_time", "22:00:00"),
+         )),
+        (SERVICE_REMOVE_APP_TIME_LIMIT, SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA,
+         "async_remove_app_time_limit",
+         lambda d: (
+             d["account_id"], d["app_id"], d["app_name"],
+             d.get("platform", "windows"),
+         )),
+        (SERVICE_BLOCK_WEBSITE, SERVICE_BLOCK_WEBSITE_SCHEMA, "async_block_website",
+         lambda d: (d["account_id"], d["website"])),
+        (SERVICE_REMOVE_WEBSITE, SERVICE_REMOVE_WEBSITE_SCHEMA, "async_remove_website",
+         lambda d: (d["account_id"], d["website"])),
+        (SERVICE_TOGGLE_WEB_FILTER, SERVICE_TOGGLE_WEB_FILTER_SCHEMA,
+         "async_toggle_web_filter",
+         lambda d: (d["account_id"], d["enabled"])),
+        (SERVICE_SET_AGE_RATING, SERVICE_SET_AGE_RATING_SCHEMA, "async_set_age_rating",
+         lambda d: (d["account_id"], d["age"])),
+        (SERVICE_SET_ACQUISITION_POLICY, SERVICE_SET_ACQUISITION_POLICY_SCHEMA,
+         "async_set_acquisition_policy",
+         lambda d: (d["account_id"], d["require_approval"])),
+        (SERVICE_LOCK_ACCOUNT, SERVICE_LOCK_ACCOUNT_SCHEMA, "async_lock_account",
+         lambda d: (d["account_id"],)),
+        (SERVICE_UNLOCK_ACCOUNT, SERVICE_UNLOCK_ACCOUNT_SCHEMA, "async_unlock_account",
+         lambda d: (d["account_id"],)),
+    ]
+
+    def make_handler(method_name, extract_args):
+        async def handler(call: ServiceCall) -> None:
+            coordinator = _get_coordinator(hass)
+            if coordinator is None:
+                _LOGGER.error("No Family Safety coordinator available")
+                return
+            await getattr(coordinator, method_name)(*extract_args(call.data))
+        return handler
+
+    for name, schema, method, extract in services:
+        hass.services.async_register(
+            DOMAIN, name, make_handler(method, extract), schema=schema
         )
-
-    async def handle_unblock_app(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_unblock_app(
-            call.data["account_id"], call.data["app_id"]
-        )
-
-    async def handle_lock_platform(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        duration_hours = call.data.get("duration_hours", 24)
-        valid_until = datetime.now() + timedelta(hours=duration_hours)
-        await coordinator.async_lock_platform(
-            call.data["account_id"], call.data["platform"], valid_until
-        )
-
-    async def handle_unlock_platform(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_unlock_platform(
-            call.data["account_id"], call.data["platform"]
-        )
-
-    async def handle_approve_request(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        extension_seconds = call.data.get("extension_minutes", 60) * 60
-        await coordinator.async_approve_request(
-            call.data["request_id"], extension_seconds
-        )
-
-    async def handle_deny_request(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_deny_request(call.data["request_id"])
-
-    # ── New services (via web API) ───────────────────────────────────────
-
-    async def handle_set_screentime_limit(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_set_screentime_limit(
-            call.data["account_id"],
-            call.data["day_of_week"],
-            call.data["hours"],
-            call.data.get("minutes", 0),
-        )
-
-    async def handle_set_screentime_intervals(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_set_screentime_intervals(
-            call.data["account_id"],
-            call.data["day_of_week"],
-            call.data["start_hour"],
-            call.data.get("start_minute", 0),
-            call.data["end_hour"],
-            call.data.get("end_minute", 0),
-        )
-
-    async def handle_set_app_time_limit(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        hours = call.data["hours"]
-        minutes = call.data.get("minutes", 0)
-        allowance = f"{hours:02d}:{minutes:02d}:00"
-        await coordinator.async_set_app_time_limit(
-            call.data["account_id"],
-            call.data["app_id"],
-            call.data["app_name"],
-            call.data.get("platform", "windows"),
-            allowance,
-            call.data.get("start_time", "07:00:00"),
-            call.data.get("end_time", "22:00:00"),
-        )
-
-    async def handle_remove_app_time_limit(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_remove_app_time_limit(
-            call.data["account_id"],
-            call.data["app_id"],
-            call.data["app_name"],
-            call.data.get("platform", "windows"),
-        )
-
-    async def handle_block_website(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_block_website(
-            call.data["account_id"], call.data["website"]
-        )
-
-    async def handle_remove_website(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_remove_website(
-            call.data["account_id"], call.data["website"]
-        )
-
-    async def handle_toggle_web_filter(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_toggle_web_filter(
-            call.data["account_id"], call.data["enabled"]
-        )
-
-    async def handle_set_age_rating(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_set_age_rating(
-            call.data["account_id"], call.data["age"]
-        )
-
-    async def handle_set_acquisition_policy(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_set_acquisition_policy(
-            call.data["account_id"], call.data["require_approval"]
-        )
-
-    # ── Account lock/unlock (screen time based) ─────────────────────────
-
-    async def handle_lock_account(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_lock_account(call.data["account_id"])
-
-    async def handle_unlock_account(call: ServiceCall) -> None:
-        coordinator = _get_coordinator(hass)
-        if coordinator is None:
-            _LOGGER.error("No Family Safety coordinator available")
-            return
-        await coordinator.async_unlock_account(call.data["account_id"])
-
-    # ── Register all services ────────────────────────────────────────────
-
-    hass.services.async_register(
-        DOMAIN, SERVICE_BLOCK_APP, handle_block_app, schema=SERVICE_BLOCK_APP_SCHEMA
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_UNBLOCK_APP, handle_unblock_app, schema=SERVICE_BLOCK_APP_SCHEMA
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_LOCK_PLATFORM, handle_lock_platform, schema=SERVICE_LOCK_PLATFORM_SCHEMA
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_UNLOCK_PLATFORM, handle_unlock_platform, schema=SERVICE_UNLOCK_PLATFORM_SCHEMA
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_APPROVE_REQUEST, handle_approve_request, schema=SERVICE_APPROVE_REQUEST_SCHEMA
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_DENY_REQUEST, handle_deny_request, schema=SERVICE_DENY_REQUEST_SCHEMA
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_SET_SCREENTIME_LIMIT, handle_set_screentime_limit,
-        schema=SERVICE_SET_SCREENTIME_LIMIT_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_SET_SCREENTIME_INTERVALS, handle_set_screentime_intervals,
-        schema=SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_SET_APP_TIME_LIMIT, handle_set_app_time_limit,
-        schema=SERVICE_SET_APP_TIME_LIMIT_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_REMOVE_APP_TIME_LIMIT, handle_remove_app_time_limit,
-        schema=SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_BLOCK_WEBSITE, handle_block_website,
-        schema=SERVICE_BLOCK_WEBSITE_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_REMOVE_WEBSITE, handle_remove_website,
-        schema=SERVICE_REMOVE_WEBSITE_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_TOGGLE_WEB_FILTER, handle_toggle_web_filter,
-        schema=SERVICE_TOGGLE_WEB_FILTER_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_SET_AGE_RATING, handle_set_age_rating,
-        schema=SERVICE_SET_AGE_RATING_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_SET_ACQUISITION_POLICY, handle_set_acquisition_policy,
-        schema=SERVICE_SET_ACQUISITION_POLICY_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_LOCK_ACCOUNT, handle_lock_account,
-        schema=SERVICE_LOCK_ACCOUNT_SCHEMA,
-    )
-    hass.services.async_register(
-        DOMAIN, SERVICE_UNLOCK_ACCOUNT, handle_unlock_account,
-        schema=SERVICE_UNLOCK_ACCOUNT_SCHEMA,
-    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -445,9 +283,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.services.async_remove(DOMAIN, service)
 
     return unload_ok
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)

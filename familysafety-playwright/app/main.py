@@ -2,6 +2,7 @@
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -23,11 +24,42 @@ logging.basicConfig(
 
 _LOGGER = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Initialize services on startup, clean up on shutdown."""
+    global browser_manager
+    _LOGGER.info("Starting Microsoft Family Safety Auth Service v1.0.0")
+    _LOGGER.info(
+        f"Configuration: log_level={config.log_level}, auth_timeout={config.auth_timeout}s"
+    )
+
+    try:
+        browser_manager = BrowserAuthManager(
+            auth_timeout=config.auth_timeout,
+            language=config.language,
+            timezone=config.timezone,
+            storage=storage,
+        )
+        await browser_manager.initialize()
+        _LOGGER.info("Service started successfully")
+    except Exception as e:
+        _LOGGER.error(f"Failed to start service: {e}")
+        raise
+
+    yield
+
+    _LOGGER.info("Shutting down Microsoft Family Safety Auth Service")
+    if browser_manager:
+        await browser_manager.cleanup()
+
+
 # Create FastAPI app
 app = FastAPI(
     title="Microsoft Family Safety Auth Service",
     description="Authentication service for Microsoft Family Safety integration",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS configuration
@@ -60,35 +92,43 @@ def _verify_api_key(request: Request):
         raise HTTPException(status_code=403, detail="Invalid or missing API key")
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
-    global browser_manager
-    _LOGGER.info("Starting Microsoft Family Safety Auth Service v1.0.0")
-    _LOGGER.info(
-        f"Configuration: log_level={config.log_level}, auth_timeout={config.auth_timeout}s"
-    )
+def _require_browser_manager() -> BrowserAuthManager:
+    """Return the browser manager or fail with 503 if not ready."""
+    if browser_manager is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    return browser_manager
 
-    try:
-        browser_manager = BrowserAuthManager(
-            auth_timeout=config.auth_timeout,
-            language=config.language,
-            timezone=config.timezone,
-            storage=storage,
+
+def _unwrap_browser_result(result, default_error_code: str) -> dict:
+    """Raise an HTTPException if a browser call returned an error dict."""
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "NO_RESPONSE",
+                "microsoft_status": "unknown",
+                "message": "browser call returned None unexpectedly",
+            },
         )
-        await browser_manager.initialize()
-        _LOGGER.info("Service started successfully")
-    except Exception as e:
-        _LOGGER.error(f"Failed to start service: {e}")
-        raise
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
-    _LOGGER.info("Shutting down Microsoft Family Safety Auth Service")
-    if browser_manager:
-        await browser_manager.cleanup()
+    if isinstance(result, dict) and result.get("__error"):
+        error_code = result.get("code", default_error_code)
+        status = result.get("status", 502)
+        text = str(result.get("text", result.get("message", "unknown error")))[:500]
+        _LOGGER.warning(
+            "Browser call returned error: code=%s status=%s text=%s",
+            error_code, status, text,
+        )
+        # Forward the status code from the browser call (e.g. 503 for BROWSER_BUSY)
+        http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
+        raise HTTPException(
+            status_code=http_status,
+            detail={
+                "error": error_code,
+                "microsoft_status": status,
+                "message": text,
+            },
+        )
+    return result
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -290,10 +330,9 @@ async def health_check():
 @app.post("/api/auth/start")
 async def start_authentication(_: None = Depends(_verify_api_key)):
     """Start browser authentication flow."""
-    if browser_manager is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
+    manager = _require_browser_manager()
     try:
-        session_id = await browser_manager.start_auth_session()
+        session_id = await manager.start_auth_session()
         return {"session_id": session_id, "status": "started"}
     except Exception as e:
         _LOGGER.error(f"Failed to start auth: {e}")
@@ -303,9 +342,7 @@ async def start_authentication(_: None = Depends(_verify_api_key)):
 @app.get("/api/auth/status/{session_id}")
 async def check_auth_status(session_id: str, _: None = Depends(_verify_api_key)):
     """Check authentication status."""
-    if browser_manager is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
-    return await browser_manager.get_session_status(session_id)
+    return await _require_browser_manager().get_session_status(session_id)
 
 
 @app.get("/api/cookies/check")
@@ -346,48 +383,17 @@ async def delete_cookies(_: None = Depends(_verify_api_key)):
 async def get_screentime(childId: str, _: None = Depends(_verify_api_key)):
     """Fetch screen time policy through an authenticated browser session.
 
-    This launches a headless Chromium with saved cookies, navigates to the
-    family page (so JS session tokens are established), then calls the
-    Microsoft API via fetch() from within the browser context.
+    Navigates to the family page with saved cookies (so JS session tokens
+    are established), then calls the Microsoft API via fetch() from within
+    the browser context.
     """
-    if browser_manager is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
+    manager = _require_browser_manager()
     try:
-        result = await browser_manager.browser_fetch(
+        result = await manager.browser_fetch(
             "https://account.microsoft.com/family/api/st",
             params={"childId": childId},
         )
-        if result is None:
-            raise HTTPException(
-                status_code=502,
-                detail={
-                    "error": "NO_RESPONSE",
-                    "microsoft_status": "unknown",
-                    "message": "browser_fetch returned None unexpectedly",
-                },
-            )
-        # browser_fetch now returns error dicts instead of None
-        if isinstance(result, dict) and result.get("__error"):
-            error_code = result.get("code", "FETCH_ERROR")
-            status = result.get("status", 502)
-            text = str(result.get("text", "unknown error"))[:500]
-            _LOGGER.warning(
-                "Screen time fetch returned error: code=%s status=%s text=%s",
-                error_code,
-                status,
-                text,
-            )
-            # Forward the status code from browser_fetch (e.g. 503 for BROWSER_BUSY)
-            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
-            raise HTTPException(
-                status_code=http_status,
-                detail={
-                    "error": error_code,
-                    "microsoft_status": status,
-                    "message": text,
-                },
-            )
-        return {"status": "success", "data": result}
+        return {"status": "success", "data": _unwrap_browser_result(result, "FETCH_ERROR")}
     except HTTPException:
         raise
     except Exception as e:
@@ -401,14 +407,11 @@ async def set_screentime_allowance(request: Request, _: None = Depends(_verify_a
 
     Expects JSON body: {childId, dayOfWeek, hours, minutes}
     """
-    if browser_manager is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
+    manager = _require_browser_manager()
     try:
         data = await request.json()
         child_id = data.get("childId")
         day_of_week = data.get("dayOfWeek")
-        hours = data.get("hours", 0)
-        minutes = data.get("minutes", 0)
 
         if not child_id or day_of_week is None:
             raise HTTPException(status_code=400, detail="childId and dayOfWeek required")
@@ -417,26 +420,14 @@ async def set_screentime_allowance(request: Request, _: None = Depends(_verify_a
             "childId": str(child_id),
             "dayOfWeek": int(day_of_week),
             "timeSpanDays": 0,
-            "timeSpanHours": int(hours),
-            "timeSpanMinutes": int(minutes),
+            "timeSpanHours": int(data.get("hours", 0)),
+            "timeSpanMinutes": int(data.get("minutes", 0)),
         }
-        result = await browser_manager.browser_post(
+        result = await manager.browser_post(
             "https://account.microsoft.com/family/api//st/day-allow",
             body,
         )
-        if isinstance(result, dict) and result.get("__error"):
-            error_code = result.get("code", "POST_ERROR")
-            status = result.get("status", 502)
-            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
-            raise HTTPException(
-                status_code=http_status,
-                detail={
-                    "error": error_code,
-                    "microsoft_status": status,
-                    "message": str(result.get("text", "unknown error"))[:500],
-                },
-            )
-        return {"status": "success", "data": result}
+        return {"status": "success", "data": _unwrap_browser_result(result, "POST_ERROR")}
     except HTTPException:
         raise
     except Exception as e:
@@ -450,8 +441,7 @@ async def set_screentime_intervals(request: Request, _: None = Depends(_verify_a
 
     Expects JSON body: {childId, dayOfWeek, allowedIntervals: [48 booleans]}
     """
-    if browser_manager is None:
-        raise HTTPException(status_code=503, detail="Service not ready")
+    manager = _require_browser_manager()
     try:
         data = await request.json()
         child_id = data.get("childId")
@@ -469,23 +459,11 @@ async def set_screentime_intervals(request: Request, _: None = Depends(_verify_a
             "dayOfWeek": int(day_of_week),
             "allowedIntervals": allowed_intervals,
         }
-        result = await browser_manager.browser_post(
+        result = await manager.browser_post(
             "https://account.microsoft.com/family/api//st/day-allow-int",
             body,
         )
-        if isinstance(result, dict) and result.get("__error"):
-            error_code = result.get("code", "POST_ERROR")
-            status = result.get("status", 502)
-            http_status = status if isinstance(status, int) and 400 <= status < 600 else 502
-            raise HTTPException(
-                status_code=http_status,
-                detail={
-                    "error": error_code,
-                    "microsoft_status": status,
-                    "message": str(result.get("text", "unknown error"))[:500],
-                },
-            )
-        return {"status": "success", "data": result}
+        return {"status": "success", "data": _unwrap_browser_result(result, "POST_ERROR")}
     except HTTPException:
         raise
     except Exception as e:

@@ -36,6 +36,9 @@ class AddonCookieClient:
         self.key_file = self.SHARE_DIR / self.KEY_FILE
         self._detected_url: str | None = None
         self._supervisor_url_resolved = False
+        # Error code from the last fetch_screentime call (e.g. "LOGIN_REDIRECT"),
+        # used by the coordinator to surface a re-authentication notification
+        self.last_error_code: str | None = None
 
     async def _resolve_addon_url(self) -> str | None:
         """Resolve addon URL via Supervisor API (works on any installation)."""
@@ -173,17 +176,20 @@ class AddonCookieClient:
             self._detected_url = _FALLBACK_AUTH_URL
             return ("api", _FALLBACK_AUTH_URL)
 
-        # 3. Fallback to file
+        # 4. Fallback to file
         if await self._file_available():
             return ("file", None)
 
-        # 4. Nothing available
+        # 5. Nothing available
         return ("none", None)
 
     async def load_cookies(self) -> list[dict[str, Any]] | None:
         """Load cookies using best available method."""
+        tried: set[str] = set()
+
         # 1. If custom URL is configured, use it
         if self.auth_url:
+            tried.add(self.auth_url)
             cookies = await self._fetch_cookies_from_url(self.auth_url)
             if cookies is not None:
                 return cookies
@@ -191,12 +197,21 @@ class AddonCookieClient:
                 "Failed to load cookies from configured URL: %s", self.auth_url
             )
 
-        # 2. Try default local API
-        cookies = await self._fetch_cookies_from_url(_FALLBACK_AUTH_URL)
-        if cookies is not None:
-            return cookies
+        # 2. Try the Supervisor-resolved addon URL (HAOS installations)
+        resolved_url = await self._get_addon_url()
+        if resolved_url and resolved_url not in tried:
+            tried.add(resolved_url)
+            cookies = await self._fetch_cookies_from_url(resolved_url)
+            if cookies is not None:
+                return cookies
 
-        # 3. Fallback to file
+        # 3. Try default local API (standalone / Docker Compose)
+        if _FALLBACK_AUTH_URL not in tried:
+            cookies = await self._fetch_cookies_from_url(_FALLBACK_AUTH_URL)
+            if cookies is not None:
+                return cookies
+
+        # 4. Fallback to file
         _LOGGER.debug("API not available, trying file fallback")
         return await self._load_cookies_from_file()
 
@@ -228,6 +243,7 @@ class AddonCookieClient:
         """
         url = await self._get_addon_url()
         api_url = f"{url.rstrip('/')}/api/screentime"
+        self.last_error_code = None
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -248,7 +264,6 @@ class AddonCookieClient:
                     detail = text
                     error_code = None
                     try:
-                        import json
                         err_data = json.loads(text)
                         if isinstance(err_data, dict):
                             err_detail = err_data.get("detail", {})
@@ -262,6 +277,7 @@ class AddonCookieClient:
                                 )
                     except Exception:
                         pass
+                    self.last_error_code = error_code
                     if response.status == 503 and error_code == "BROWSER_BUSY":
                         _LOGGER.info(
                             "Addon browser busy (auth in progress), "

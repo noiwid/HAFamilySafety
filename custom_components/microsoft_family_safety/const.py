@@ -21,6 +21,15 @@ CONF_PLATFORMS: Final = "platforms"
 AVAILABLE_PLATFORMS: Final = ["Windows", "Xbox", "Mobile"]
 DEFAULT_PLATFORMS: Final = ["Windows"]
 
+# Days of week, in Microsoft API order (index 0 = Sunday)
+DAY_KEYS: Final = [
+    "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+]
+# (day_of_week index, API day key, display label)
+DAYS: Final = [
+    (index, key, key.capitalize()) for index, key in enumerate(DAY_KEYS)
+]
+
 # Authentication URLs
 MS_LOGIN_URL: Final = "https://login.live.com/oauth20_authorize.srf"
 MS_AUTH_PARAMS: Final = {
