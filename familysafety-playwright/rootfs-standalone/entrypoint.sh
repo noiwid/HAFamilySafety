@@ -19,6 +19,9 @@ export AUTH_TIMEOUT="${AUTH_TIMEOUT:-300}"
 export SESSION_DURATION="${SESSION_DURATION:-86400}"
 export LANGUAGE="${LANGUAGE:-en-US}"
 export TIMEZONE="${TIMEZONE:-Europe/Paris}"
+# Optional fixed API key; if empty the app generates and persists one in the
+# shared volume (/share/familysafety/.api_key).
+export API_KEY="${API_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-familysafety}"
 
 log "Starting Microsoft Family Safety Auth Service (standalone)"

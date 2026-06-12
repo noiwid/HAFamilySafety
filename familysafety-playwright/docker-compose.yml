@@ -41,6 +41,11 @@ services:
       LANGUAGE: "en-US"            # browser locale, e.g. fr-FR
       TIMEZONE: "Europe/Paris"     # browser timezone
       VNC_PASSWORD: "familysafety" # password for the noVNC interface
+      # API key protecting the cookie/screen-time endpoints. Leave empty to
+      # auto-generate one in the volume; set it (and the matching "API key"
+      # option in the Home Assistant integration) when HA runs on another host
+      # and cannot read the shared volume.
+      API_KEY: ""
 
     volumes:
       - familysafety_data:/share/familysafety

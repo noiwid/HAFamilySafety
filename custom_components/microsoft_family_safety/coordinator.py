@@ -27,6 +27,7 @@ from ._pyfamilysafety_compat import apply_patches
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .const import (
+    CONF_API_KEY,
     CONF_AUTH_URL,
     CONF_REFRESH_TOKEN,
     CONF_UPDATE_INTERVAL,
@@ -91,9 +92,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._saved_screentime: dict[str, dict[str, Any]] = {}
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         # Addon cookie client for web API reads.
-        # Options take precedence so the URL can be changed after setup.
+        # Options take precedence so the URL/key can be changed after setup.
         auth_url = entry.options.get(CONF_AUTH_URL) or entry.data.get(CONF_AUTH_URL)
-        self._addon_client = AddonCookieClient(hass, auth_url=auth_url)
+        api_key = entry.options.get(CONF_API_KEY) or entry.data.get(CONF_API_KEY)
+        self._addon_client = AddonCookieClient(
+            hass, auth_url=auth_url, api_key=api_key
+        )
         self._web_cookies_loaded = False
         self._auth_notification_sent = False
 
