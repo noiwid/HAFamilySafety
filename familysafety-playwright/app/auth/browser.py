@@ -6,6 +6,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Dict
+from urllib.parse import urlencode
 
 from playwright.async_api import (
     async_playwright,
@@ -59,11 +60,23 @@ _USER_AGENT = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 
+# OAuth intermediate pages Microsoft routes through before the real dashboard
+_OAUTH_FRAGMENTS = (
+    "complete-signin-oauth",
+    "complete-client-signin",
+    "oauth20_authorize",
+)
+
 
 class BrowserAuthManager:
     """Manages browser-based authentication sessions for Microsoft Family Safety."""
 
     MAX_CONCURRENT_SESSIONS = 1
+
+    # Close the shared API context after this many seconds without a call,
+    # so bursts (multi-child refresh, lock/unlock sequences) reuse a warm
+    # browser while an idle service does not pin Chromium in memory.
+    CONTEXT_IDLE_TIMEOUT = 180
 
     def __init__(
         self,
@@ -82,6 +95,13 @@ class BrowserAuthManager:
         self._storage = storage
         # Lock guards the Chrome profile directory — both auth and fetch must acquire it
         self._browser_lock = asyncio.Lock()
+        # True while the auth flow holds _browser_lock; release goes through
+        # _release_auth_lock so we never release a lock another task acquired
+        self._auth_owns_lock = False
+        # Long-lived context shared by API calls (browser_fetch/browser_post)
+        self._shared_context = None
+        self._shared_page = None
+        self._idle_close_task: asyncio.Task | None = None
 
         # Ensure profile directory exists
         Path(_PROFILE_DIR).mkdir(parents=True, exist_ok=True)
@@ -106,13 +126,6 @@ class BrowserAuthManager:
 
         Returns the final page URL.
         """
-        import time
-
-        _OAUTH_FRAGMENTS = (
-            "complete-signin-oauth",
-            "complete-client-signin",
-            "oauth20_authorize",
-        )
         _NOT_AUTH_PATTERNS = (
             "www.microsoft.com",  # marketing page redirect
         )
@@ -266,16 +279,21 @@ class BrowserAuthManager:
         session_id = str(uuid.uuid4())
         _LOGGER.info(f"Starting authentication session: {session_id}")
 
-        # Start from a clean slate — wipe any stale cookies/profile
-        # so we don't redirect to a previous Microsoft account
-        await self._wipe_browser_session()
-
         # Acquire the browser lock to prevent conflict with browser_fetch
         await self._browser_lock.acquire()
+        self._auth_owns_lock = True
 
         context = None
         page = None
         try:
+            # Close the shared API context — it holds the profile directory
+            self._cancel_idle_close()
+            await self._close_shared_context()
+
+            # Start from a clean slate — wipe any stale cookies/profile
+            # so we don't redirect to a previous Microsoft account
+            await self._wipe_browser_session()
+
             self._remove_stale_singleton_lock()
 
             # Launch persistent browser context (non-headless for VNC interaction)
@@ -330,16 +348,24 @@ class BrowserAuthManager:
             except Exception as cleanup_err:
                 _LOGGER.warning(f"Cleanup after failed session start: {cleanup_err}")
             # Release lock on failure
-            if self._browser_lock.locked():
-                self._browser_lock.release()
+            self._release_auth_lock()
             raise
+
+    def _release_auth_lock(self) -> None:
+        """Release _browser_lock if (and only if) the auth flow holds it."""
+        if not self._auth_owns_lock:
+            return
+        self._auth_owns_lock = False
+        try:
+            self._browser_lock.release()
+        except RuntimeError:
+            pass
 
     async def _monitor_authentication(self, session_id: str):
         """Monitor authentication progress for Microsoft login."""
         session = self._sessions.get(session_id)
         if not session:
-            if self._browser_lock.locked():
-                self._browser_lock.release()
+            self._release_auth_lock()
             return
 
         context: BrowserContext = session["context"]
@@ -503,8 +529,7 @@ class BrowserAuthManager:
 
         finally:
             # Always release the browser lock when auth is done
-            if self._browser_lock.locked():
-                self._browser_lock.release()
+            self._release_auth_lock()
 
     def _on_monitor_done(self, session_id: str, task: asyncio.Task):
         """Handle monitor task completion."""
@@ -573,12 +598,13 @@ class BrowserAuthManager:
                     "created_at": session.get("created_at"),
                 }
 
-    # _FETCH_JS accepts [url, canary] — canary is the cookie value (extracted
-    # on the Python side because httpOnly cookies are not accessible via JS).
+    # _API_CALL_JS accepts [url, canary, body] — body null means GET, anything
+    # else is sent as a JSON POST. canary is the cookie value (extracted on
+    # the Python side because httpOnly cookies are not accessible via JS).
     # The __RequestVerificationToken header needs the value from the hidden
     # input in the DOM — that is the CSRF token the server validates against
     # the canary cookie.
-    _FETCH_JS = """async ([url, canary]) => {
+    _API_CALL_JS = """async ([url, canary, body]) => {
         try {
             // Extract CSRF token from hidden input in the page DOM
             const csrfInput = document.querySelector(
@@ -596,52 +622,13 @@ class BrowserAuthManager:
                 hdrs['__RequestVerificationToken'] = csrfToken;
             }
 
-            const resp = await fetch(url, {
-                credentials: 'include',
-                headers: hdrs
-            });
-            const text = await resp.text();
-            if (!resp.ok) {
-                return {
-                    __error: true,
-                    status: resp.status,
-                    text: text.substring(0, 500),
-                    headers: Object.fromEntries(resp.headers.entries())
-                };
-            }
-            try {
-                return JSON.parse(text);
-            } catch (e) {
-                return { __error: true, status: resp.status, text: text.substring(0, 500), message: 'Invalid JSON response' };
-            }
-        } catch (e) {
-            return { __error: true, message: e.message };
-        }
-    }"""
-
-    _POST_JS = """async ([url, canary, body]) => {
-        try {
-            const csrfInput = document.querySelector(
-                'input[name="__RequestVerificationToken"]'
-            );
-            const csrfToken = csrfInput ? csrfInput.value : canary;
-
-            const hdrs = {
-                'Accept': 'application/json, text/plain, */*',
-                'Content-Type': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-AMC-JsonMode': 'CamelCase'
-            };
-            if (csrfToken) {
-                hdrs['__RequestVerificationToken'] = csrfToken;
+            const opts = { credentials: 'include', headers: hdrs };
+            if (body !== null) {
+                opts.method = 'POST';
+                opts.body = JSON.stringify(body);
             }
 
-            const resp = await fetch(url, {
-                method: 'POST',
-                credentials: 'include',
-                headers: hdrs,
-                body: JSON.stringify(body)
-            });
+            const resp = await fetch(url, opts);
             const text = await resp.text();
             if (!resp.ok) {
                 return {
@@ -653,107 +640,26 @@ class BrowserAuthManager:
             try {
                 return JSON.parse(text);
             } catch (e) {
-                // Some POST endpoints return empty body on success
-                return { success: true, status: resp.status };
+                if (body !== null) {
+                    // Some POST endpoints return empty body on success
+                    return { success: true, status: resp.status };
+                }
+                return { __error: true, status: resp.status, text: text.substring(0, 500), message: 'Invalid JSON response' };
             }
         } catch (e) {
             return { __error: true, message: e.message };
         }
     }"""
 
-    async def browser_post(
-        self, url: str, body: dict
-    ) -> dict | None:
-        """Make a POST API call through an authenticated browser session."""
-        return await self._persistent_context_post(url, body)
-
-    async def _persistent_context_post(self, full_url: str, body: dict) -> dict:
-        """POST API data using a persistent browser context."""
-        async with self._browser_lock:
-            context = None
-            try:
-                self._remove_stale_singleton_lock()
-                _LOGGER.info("browser_post: opening persistent context")
-
-                context = await self._playwright.chromium.launch_persistent_context(
-                    _PROFILE_DIR,
-                    headless=False,
-                    args=_CHROME_ARGS + ["--ozone-platform=x11"],
-                    user_agent=_USER_AGENT,
-                    viewport={"width": 1280, "height": 800},
-                    locale=self._language,
-                    timezone_id=self._timezone,
-                )
-
-                page = context.pages[0] if context.pages else await context.new_page()
-
-                # Inject saved cookies
-                if self._storage:
-                    try:
-                        saved = await self._storage.load_cookies()
-                        if saved:
-                            for c in saved:
-                                ss = c.get("sameSite", "Lax")
-                                if isinstance(ss, str):
-                                    c["sameSite"] = ss.capitalize() if ss.lower() in ("lax", "strict", "none") else "Lax"
-                            await context.add_cookies(saved)
-                    except Exception as e:
-                        _LOGGER.warning("browser_post: failed to inject cookies: %s", e)
-
-                final_url = await self._wait_for_family_dashboard(page)
-
-                if "account.microsoft.com/family" not in final_url:
-                    _LOGGER.error("browser_post: not on dashboard (%s)", final_url)
-                    return {
-                        "__error": True, "status": 401,
-                        "text": f"Not on family dashboard: {final_url}",
-                        "code": "LOGIN_REDIRECT",
-                    }
-
-                await page.wait_for_timeout(2000)
-
-                canary = ""
-                for c in await context.cookies():
-                    if c.get("name") == "canary":
-                        canary = c["value"]
-                        break
-
-                _LOGGER.info("browser_post: calling %s", full_url)
-                result = await page.evaluate(self._POST_JS, [full_url, canary, body])
-
-                if isinstance(result, dict) and result.get("__error"):
-                    _LOGGER.warning(
-                        "browser_post error: status=%s text=%s",
-                        result.get("status", "?"),
-                        str(result.get("text", result.get("message", "")))[:500],
-                    )
-                    return result
-
-                _LOGGER.info("browser_post: success for %s", full_url)
-                return result
-
-            except BaseException as exc:
-                _LOGGER.error("browser_post failed: %s", exc, exc_info=True)
-                return {
-                    "__error": True, "status": 500,
-                    "text": f"browser_post exception: {type(exc).__name__}: {exc}",
-                    "code": "EXCEPTION",
-                }
-            finally:
-                if context:
-                    try:
-                        await context.close()
-                    except Exception:
-                        pass
-
     async def browser_fetch(
         self, url: str, params: dict | None = None
     ) -> dict | None:
-        """Make an API call through an authenticated browser session.
+        """Make a GET API call through an authenticated browser session.
 
-        Uses a persistent browser context that shares the same Chrome profile
-        as the authentication browser.  All session state (cookies, localStorage,
-        MSAL tokens, etc.) is preserved across calls and restarts.
+        Uses a shared persistent browser context backed by the same Chrome
+        profile as the authentication browser.  All session state (cookies,
+        localStorage, MSAL tokens, etc.) is preserved across calls and
+        restarts.
         """
         # If auth is in progress (lock held), return immediately
         # instead of blocking until the HA HTTP request times out
@@ -764,144 +670,207 @@ class BrowserAuthManager:
                 "text": "Browser is busy (authentication may be in progress). Try again later.",
             }
 
-        # Build the full URL with params
-        from urllib.parse import urlencode
         query = "?" + urlencode(params) if params else ""
-        full_url = url + query
+        return await self._browser_call(url + query)
 
-        # Use persistent context — all session state is on disk
-        return await self._persistent_context_fetch(full_url)
+    async def browser_post(self, url: str, body: dict) -> dict | None:
+        """Make a POST API call through an authenticated browser session."""
+        return await self._browser_call(url, body=body)
 
-    async def _persistent_context_fetch(self, full_url: str) -> dict:
-        """Fetch API data using a persistent browser context.
+    async def _browser_call(self, full_url: str, body: dict | None = None) -> dict:
+        """Execute an API call from the shared authenticated browser context.
 
-        Opens the same Chrome profile used during authentication so that
-        cookies, localStorage (MSAL tokens), and all other browser state
-        are available.  Navigates to the family page to let JS establish
-        the session, then executes a fetch() from within the page.
+        The context is kept alive between calls so bursts (multi-child
+        refresh, the 14 POSTs of a lock/unlock) skip the expensive
+        launch + navigation; it is closed after CONTEXT_IDLE_TIMEOUT of
+        inactivity.  On an auth-like failure from a reused context the
+        context is recycled and the call retried once with a fresh
+        navigation.
         """
-        # _browser_lock ensures mutual exclusion with auth AND other fetches
+        label = "browser_post" if body is not None else "browser_fetch"
+        # _browser_lock ensures mutual exclusion with auth AND other calls
         async with self._browser_lock:
-            context = None
+            self._cancel_idle_close()
             try:
-                self._remove_stale_singleton_lock()
-
-                _LOGGER.info("browser_fetch: opening persistent context from %s", _PROFILE_DIR)
-
-                context = await self._playwright.chromium.launch_persistent_context(
-                    _PROFILE_DIR,
-                    headless=False,
-                    args=_CHROME_ARGS + ["--ozone-platform=x11"],
-                    user_agent=_USER_AGENT,
-                    viewport={"width": 1280, "height": 800},
-                    locale=self._language,
-                    timezone_id=self._timezone,
-                )
-
-                page = context.pages[0] if context.pages else await context.new_page()
-
-                # Inject saved cookies into the context before navigating.
-                # The persistent context *should* have them from the profile
-                # on disk, but Microsoft session cookies can get lost when the
-                # browser process is restarted between auth and fetch.
-                if self._storage:
-                    try:
-                        saved = await self._storage.load_cookies()
-                        if saved:
-                            # Playwright expects cookies with sameSite in
-                            # title-case ("Lax"/"Strict"/"None")
-                            for c in saved:
-                                ss = c.get("sameSite", "Lax")
-                                if isinstance(ss, str):
-                                    c["sameSite"] = ss.capitalize() if ss.lower() in ("lax", "strict", "none") else "Lax"
-                            await context.add_cookies(saved)
-                            _LOGGER.info(
-                                "browser_fetch: injected %d saved cookies",
-                                len(saved),
-                            )
-                    except Exception as e:
-                        _LOGGER.warning(
-                            "browser_fetch: failed to inject cookies: %s", e
-                        )
-
-                # Navigate to family dashboard, handling OAuth intermediate
-                # redirects and waiting until we're on the real page
-                final_url = await self._wait_for_family_dashboard(page)
-
-                # Detect login redirect — session expired, need re-auth
-                _LOGIN_DOMAINS = (
-                    "login.microsoftonline.com",
-                    "login.live.com",
-                    "login.microsoft.com",
-                )
-                if (
-                    any(domain in final_url for domain in _LOGIN_DOMAINS)
-                    or "www.microsoft.com" in final_url
-                    or "account.microsoft.com/family" not in final_url
-                ):
-                    _LOGGER.error(
-                        "browser_fetch: not on family dashboard (%s) "
-                        "— session expired, need re-auth",
-                        final_url,
+                result, was_fresh = await self._attempt_call(full_url, body, label)
+                if self._is_auth_error(result) and not was_fresh:
+                    _LOGGER.info(
+                        "%s: auth-like error from reused context, "
+                        "recycling and retrying once", label,
                     )
-                    return {
-                        "__error": True,
-                        "status": 401,
-                        "text": f"Not on family dashboard: {final_url}",
-                        "code": "LOGIN_REDIRECT",
-                    }
-
-                # Extra wait for JS-based session tokens (MSAL) to initialize
-                await page.wait_for_timeout(2000)
-
-                # Extract canary token from cookies (httpOnly — not accessible via JS)
-                canary = ""
-                for c in await context.cookies():
-                    if c.get("name") == "canary":
-                        canary = c["value"]
-                        break
-
-                # Check if page has the CSRF hidden input (for logging)
-                has_csrf_input = await page.evaluate(
-                    "!!document.querySelector('input[name=\"__RequestVerificationToken\"]')"
-                )
-                _LOGGER.info(
-                    "browser_fetch: calling %s (canary=%s, csrf_input=%s)",
-                    full_url,
-                    "yes" if canary else "no",
-                    "yes" if has_csrf_input else "no",
-                )
-                result = await page.evaluate(self._FETCH_JS, [full_url, canary])
-
-                if isinstance(result, dict) and result.get("__error"):
-                    _LOGGER.warning(
-                        "browser_fetch error: status=%s text=%s",
-                        result.get("status", "?"),
-                        str(result.get("text", result.get("message", "")))[:500],
-                    )
-                    return result
-
-                _LOGGER.info("browser_fetch: success for %s", full_url)
+                    await self._close_shared_context()
+                    result, _ = await self._attempt_call(full_url, body, label)
                 return result
-
-            except BaseException as exc:
-                _LOGGER.error("browser_fetch failed: %s", exc, exc_info=True)
+            except Exception as exc:
+                _LOGGER.error("%s failed: %s", label, exc, exc_info=True)
+                await self._close_shared_context()
                 return {
-                    "__error": True,
-                    "status": 500,
-                    "text": f"browser_fetch exception: {type(exc).__name__}: {exc}",
+                    "__error": True, "status": 500,
+                    "text": f"{label} exception: {type(exc).__name__}: {exc}",
                     "code": "EXCEPTION",
                 }
             finally:
-                if context:
-                    try:
-                        await context.close()
-                    except Exception:
-                        pass
+                self._schedule_idle_close()
+
+    @staticmethod
+    def _is_auth_error(result: dict | None) -> bool:
+        """Return True if the result looks like an expired/invalid session."""
+        return (
+            isinstance(result, dict)
+            and result.get("__error")
+            and (
+                result.get("code") == "LOGIN_REDIRECT"
+                or result.get("status") in (401, 403)
+            )
+        )
+
+    async def _attempt_call(
+        self, full_url: str, body: dict | None, label: str
+    ) -> tuple[dict, bool]:
+        """Run one API call attempt. Returns (result, context_was_fresh)."""
+        context, page, fresh = await self._ensure_shared_context(label)
+
+        current_url = page.url
+        on_dashboard = (
+            "account.microsoft.com/family" in current_url
+            and not any(frag in current_url for frag in _OAUTH_FRAGMENTS)
+        )
+        if not on_dashboard:
+            # Navigate to the family dashboard, handling OAuth intermediate
+            # redirects and waiting until we're on the real page
+            final_url = await self._wait_for_family_dashboard(page)
+            if "account.microsoft.com/family" not in final_url:
+                _LOGGER.error(
+                    "%s: not on family dashboard (%s) — session expired, "
+                    "need re-auth", label, final_url,
+                )
+                return {
+                    "__error": True,
+                    "status": 401,
+                    "text": f"Not on family dashboard: {final_url}",
+                    "code": "LOGIN_REDIRECT",
+                }, fresh
+            # Extra wait for JS-based session tokens (MSAL) to initialize
+            await page.wait_for_timeout(2000)
+
+        # Extract canary token from cookies (httpOnly — not accessible via JS)
+        canary = ""
+        for c in await context.cookies():
+            if c.get("name") == "canary":
+                canary = c["value"]
+                break
+
+        _LOGGER.info(
+            "%s: calling %s (canary=%s, warm_context=%s)",
+            label, full_url, "yes" if canary else "no", "no" if fresh else "yes",
+        )
+        result = await page.evaluate(self._API_CALL_JS, [full_url, canary, body])
+
+        if isinstance(result, dict) and result.get("__error"):
+            _LOGGER.warning(
+                "%s error: status=%s text=%s",
+                label,
+                result.get("status", "?"),
+                str(result.get("text", result.get("message", "")))[:500],
+            )
+        else:
+            _LOGGER.info("%s: success for %s", label, full_url)
+        return result, fresh
+
+    async def _ensure_shared_context(self, label: str):
+        """Return (context, page, fresh) — reusing the live context if possible."""
+        if self._shared_context is not None:
+            page = self._shared_page
+            try:
+                if page is not None and not page.is_closed():
+                    return self._shared_context, page, False
+            except Exception:
+                pass
+            await self._close_shared_context()
+
+        self._remove_stale_singleton_lock()
+        _LOGGER.info("%s: opening persistent context from %s", label, _PROFILE_DIR)
+
+        context = await self._playwright.chromium.launch_persistent_context(
+            _PROFILE_DIR,
+            headless=False,
+            args=_CHROME_ARGS + ["--ozone-platform=x11"],
+            user_agent=_USER_AGENT,
+            viewport={"width": 1280, "height": 800},
+            locale=self._language,
+            timezone_id=self._timezone,
+        )
+        # Store immediately so a failure below still gets cleaned up
+        # by _close_shared_context in the caller's error handler
+        self._shared_context = context
+        page = context.pages[0] if context.pages else await context.new_page()
+
+        # Inject saved cookies into the context before navigating.
+        # The persistent context *should* have them from the profile
+        # on disk, but Microsoft session cookies can get lost when the
+        # browser process is restarted between auth and fetch.
+        if self._storage:
+            try:
+                saved = await self._storage.load_cookies()
+                if saved:
+                    # Playwright expects cookies with sameSite in
+                    # title-case ("Lax"/"Strict"/"None")
+                    for c in saved:
+                        ss = c.get("sameSite", "Lax")
+                        if isinstance(ss, str):
+                            c["sameSite"] = ss.capitalize() if ss.lower() in ("lax", "strict", "none") else "Lax"
+                    await context.add_cookies(saved)
+                    _LOGGER.info("%s: injected %d saved cookies", label, len(saved))
+            except FileNotFoundError:
+                _LOGGER.debug("%s: no saved cookies to inject", label)
+            except Exception as e:
+                _LOGGER.warning("%s: failed to inject cookies: %s", label, e)
+
+        self._shared_page = page
+        return context, page, True
+
+    async def _close_shared_context(self) -> None:
+        """Close the shared API browser context, if open."""
+        context = self._shared_context
+        self._shared_context = None
+        self._shared_page = None
+        if context is not None:
+            try:
+                await context.close()
+            except Exception as e:
+                _LOGGER.debug("Error closing shared context: %s", e)
+
+    def _cancel_idle_close(self) -> None:
+        """Cancel any pending idle-close of the shared context."""
+        if self._idle_close_task is not None and not self._idle_close_task.done():
+            self._idle_close_task.cancel()
+        self._idle_close_task = None
+
+    def _schedule_idle_close(self) -> None:
+        """(Re)arm closing the shared context after CONTEXT_IDLE_TIMEOUT."""
+        self._cancel_idle_close()
+        if self._shared_context is None:
+            return
+        self._idle_close_task = asyncio.get_running_loop().create_task(
+            self._idle_close()
+        )
+
+    async def _idle_close(self) -> None:
+        try:
+            await asyncio.sleep(self.CONTEXT_IDLE_TIMEOUT)
+            async with self._browser_lock:
+                if self._shared_context is not None:
+                    await self._close_shared_context()
+                    _LOGGER.info("Closed idle shared browser context")
+        except asyncio.CancelledError:
+            pass
 
     async def cleanup(self):
         """Cleanup all resources."""
         _LOGGER.info("Cleaning up all sessions...")
+        self._cancel_idle_close()
+        await self._close_shared_context()
+
         for session_id in list(self._sessions.keys()):
             await self._cleanup_session(session_id)
 

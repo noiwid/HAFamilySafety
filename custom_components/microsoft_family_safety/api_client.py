@@ -10,12 +10,16 @@ This module provides two authentication strategies:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 from yarl import URL
 
 import aiohttp
+
+from .const import DAY_KEYS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,17 +34,6 @@ _SCOPE = "service::familymobile.microsoft.com::MBI_SSL"
 # Emulate Android Family Safety app
 _APP_VERSION = "v 1.26.0.1001"
 _USER_AGENT = f"Family Safety-prod/({_APP_VERSION}) Android/33 google/Pixel 4 XL"
-
-# Days of week mapping
-DAYS_OF_WEEK = {
-    "sunday": 0,
-    "monday": 1,
-    "tuesday": 2,
-    "wednesday": 3,
-    "thursday": 4,
-    "friday": 5,
-    "saturday": 6,
-}
 
 
 class FamilySafetyWebAPI:
@@ -60,10 +53,22 @@ class FamilySafetyWebAPI:
         # Browser cookies for web API reads
         self._web_cookies: list[dict[str, Any]] | None = None
         self._web_canary: str | None = None
+        # Reusable session carrying the web cookie jar
+        self._web_session: aiohttp.ClientSession | None = None
 
     def set_web_cookies(self, cookies: list[dict[str, Any]]) -> None:
         """Set browser cookies for web API access (from Playwright addon)."""
+        if cookies == self._web_cookies:
+            return
         self._web_cookies = cookies
+        # Cookie set changed — drop the cached session so its jar is rebuilt
+        if self._web_session and not self._web_session.closed:
+            session = self._web_session
+            self._web_session = None
+            try:
+                asyncio.get_running_loop().create_task(session.close())
+            except RuntimeError:
+                pass
         _LOGGER.info(
             "Web API cookies configured (%d cookies)",
             len(cookies) if cookies else 0,
@@ -208,6 +213,15 @@ class FamilySafetyWebAPI:
             )
         return jar
 
+    def _get_web_session(self) -> aiohttp.ClientSession:
+        """Return the cached cookie-bearing session, creating it if needed."""
+        if self._web_session is None or self._web_session.closed:
+            self._web_session = aiohttp.ClientSession(
+                cookie_jar=self._build_cookie_jar(),
+                timeout=aiohttp.ClientTimeout(total=30, connect=10),
+            )
+        return self._web_session
+
     async def _web_request(
         self,
         method: str,
@@ -220,7 +234,6 @@ class FamilySafetyWebAPI:
             _LOGGER.warning("No web cookies available for web API request")
             return None
 
-        cookie_jar = self._build_cookie_jar()
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
@@ -253,48 +266,45 @@ class FamilySafetyWebAPI:
         if canary:
             headers["__requestverificationtoken"] = canary
 
-        timeout = aiohttp.ClientTimeout(total=30, connect=10)
-        async with aiohttp.ClientSession(
-            cookie_jar=cookie_jar, timeout=timeout
-        ) as session:
-            _LOGGER.debug("Web API %s %s", method, url)
-            async with session.request(
-                method,
-                url,
-                headers=headers,
-                params=params,
-                json=json_data,
-                allow_redirects=False,
-            ) as resp:
-                if resp.status == 200:
-                    if resp.content_type and "json" in resp.content_type:
-                        data = await resp.json()
-                        _LOGGER.debug("Web API success: %s", str(data)[:300])
-                        return data
-                    return None
-
-                if resp.status in (301, 302, 303, 307, 308):
-                    location = resp.headers.get("Location", "unknown")
-                    _LOGGER.warning(
-                        "Web API redirected (status %s) to %s — cookies may be expired",
-                        resp.status,
-                        location,
-                    )
-                    return None
-
-                text = await resp.text()
-                _LOGGER.warning(
-                    "Web API error %s: %s", resp.status, text[:200]
-                )
-
-                # On 401, log cookie domains for diagnostics
-                if resp.status == 401:
-                    domains = {c.get("domain", "?") for c in (self._web_cookies or [])}
-                    _LOGGER.debug(
-                        "Web API 401 — cookie domains present: %s",
-                        ", ".join(sorted(domains)),
-                    )
+        session = self._get_web_session()
+        _LOGGER.debug("Web API %s %s", method, url)
+        async with session.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json_data,
+            allow_redirects=False,
+        ) as resp:
+            if resp.status == 200:
+                if resp.content_type and "json" in resp.content_type:
+                    data = await resp.json()
+                    _LOGGER.debug("Web API success: %s", str(data)[:300])
+                    return data
                 return None
+
+            if resp.status in (301, 302, 303, 307, 308):
+                location = resp.headers.get("Location", "unknown")
+                _LOGGER.warning(
+                    "Web API redirected (status %s) to %s — cookies may be expired",
+                    resp.status,
+                    location,
+                )
+                return None
+
+            text = await resp.text()
+            _LOGGER.warning(
+                "Web API error %s: %s", resp.status, text[:200]
+            )
+
+            # On 401, log cookie domains for diagnostics
+            if resp.status == 401:
+                domains = {c.get("domain", "?") for c in (self._web_cookies or [])}
+                _LOGGER.debug(
+                    "Web API 401 — cookie domains present: %s",
+                    ", ".join(sorted(domains)),
+                )
+            return None
 
     async def _warm_web_session(self) -> str | None:
         """Visit the family page to initialize the web session and extract canary token.
@@ -305,7 +315,6 @@ class FamilySafetyWebAPI:
         if not self._web_cookies:
             return None
 
-        cookie_jar = self._build_cookie_jar()
         headers = {
             "Accept": "text/html,application/xhtml+xml",
             "User-Agent": (
@@ -315,33 +324,29 @@ class FamilySafetyWebAPI:
             ),
         }
 
-        timeout = aiohttp.ClientTimeout(total=30, connect=10)
         try:
-            async with aiohttp.ClientSession(
-                cookie_jar=cookie_jar, timeout=timeout
-            ) as session:
-                async with session.get(
-                    f"{self.WEB_API_BASE}/family",
-                    headers=headers,
-                    allow_redirects=True,
-                ) as resp:
-                    if resp.status == 200:
-                        text = await resp.text()
-                        # Extract canary token from page if present
-                        import re
-                        match = re.search(
-                            r'"canary"\s*:\s*"([^"]+)"', text
-                        ) or re.search(
-                            r'name="canary"\s+(?:content|value)="([^"]+)"', text
-                        ) or re.search(
-                            r'"apiCanary"\s*:\s*"([^"]+)"', text
-                        )
-                        if match:
-                            _LOGGER.debug("Extracted canary token from family page")
-                            return match.group(1)
-                        _LOGGER.debug("Family page loaded (no canary token found)")
-                    else:
-                        _LOGGER.debug("Family page warm-up returned %s", resp.status)
+            session = self._get_web_session()
+            async with session.get(
+                f"{self.WEB_API_BASE}/family",
+                headers=headers,
+                allow_redirects=True,
+            ) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    # Extract canary token from page if present
+                    match = re.search(
+                        r'"canary"\s*:\s*"([^"]+)"', text
+                    ) or re.search(
+                        r'name="canary"\s+(?:content|value)="([^"]+)"', text
+                    ) or re.search(
+                        r'"apiCanary"\s*:\s*"([^"]+)"', text
+                    )
+                    if match:
+                        _LOGGER.debug("Extracted canary token from family page")
+                        return match.group(1)
+                    _LOGGER.debug("Family page loaded (no canary token found)")
+                else:
+                    _LOGGER.debug("Family page warm-up returned %s", resp.status)
         except Exception as exc:
             _LOGGER.debug("Family page warm-up failed: %s", exc)
         return None
@@ -429,11 +434,7 @@ class FamilySafetyWebAPI:
         platform: str = "Windows",
     ) -> dict | None:
         """Set daily screen time allowance via device limits schedule."""
-        day_names = [
-            "sunday", "monday", "tuesday", "wednesday",
-            "thursday", "friday", "saturday",
-        ]
-        day_name = day_names[day_of_week]
+        day_name = DAY_KEYS[day_of_week]
         allowance = f"{hours:02d}:{minutes:02d}:00"
         schedule = {
             day_name: {"allowance": allowance}
@@ -455,11 +456,7 @@ class FamilySafetyWebAPI:
         """Set allowed time intervals for a specific day."""
         if len(allowed_intervals) != 48:
             raise ValueError("allowed_intervals must contain exactly 48 booleans")
-        day_names = [
-            "sunday", "monday", "tuesday", "wednesday",
-            "thursday", "friday", "saturday",
-        ]
-        day_name = day_names[day_of_week]
+        day_name = DAY_KEYS[day_of_week]
 
         intervals = []
         i = 0
@@ -490,23 +487,6 @@ class FamilySafetyWebAPI:
             json_data=schedule,
             extra_headers={"Plat-Info": platform},
         )
-
-    async def set_screentime_intervals_from_range(
-        self,
-        child_id: str,
-        day_of_week: int,
-        start_hour: int,
-        start_minute: int,
-        end_hour: int,
-        end_minute: int,
-    ) -> dict | None:
-        """Set allowed time interval using start/end time."""
-        intervals = [False] * 48
-        start_slot = start_hour * 2 + (1 if start_minute >= 30 else 0)
-        end_slot = end_hour * 2 + (1 if end_minute >= 30 else 0)
-        for i in range(start_slot, min(end_slot, 48)):
-            intervals[i] = True
-        return await self.set_screentime_intervals(child_id, day_of_week, intervals)
 
     # ──────────────────────────────────────────────────────────────────────
     # App Limits Controls (mobile API — WRITE)
@@ -632,10 +612,13 @@ class FamilySafetyWebAPI:
     # ──────────────────────────────────────────────────────────────────────
 
     async def close(self) -> None:
-        """Close the HTTP session."""
+        """Close the HTTP sessions."""
         if self._session and not self._session.closed:
             await self._session.close()
-            self._session = None
+        self._session = None
+        if self._web_session and not self._web_session.closed:
+            await self._web_session.close()
+        self._web_session = None
         self._access_token = None
         self._token_expires = None
 

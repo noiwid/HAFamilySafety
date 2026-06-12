@@ -37,20 +37,33 @@ async def async_setup_entry(
     """Set up Microsoft Family Safety switches."""
     coordinator: FamilySafetyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities: list[SwitchEntity] = []
+    known_accounts: set[str] = set()
+    known_apps: set[tuple[str, str]] = set()
 
-    if coordinator.data:
-        for account_id, account_data in coordinator.data.get("accounts", {}).items():
+    def _add_new_entities() -> None:
+        """Add switches for accounts/apps that appeared since last update."""
+        entities: list[SwitchEntity] = []
+        data = coordinator.data or {}
+
+        for account_id, account_data in data.get("accounts", {}).items():
             account_name = account_data.get(ATTR_FIRST_NAME, "Unknown")
 
-            # Create app block switches for each application
+            # Create app block switches for each (new) application
             for app in account_data.get("applications", []):
+                app_key = (account_id, app["app_id"])
+                if app_key in known_apps:
+                    continue
+                known_apps.add(app_key)
                 entities.append(
                     FamilySafetyAppBlockSwitch(
                         coordinator, entry, account_id, account_name,
                         app["app_id"], app["app_name"],
                     )
                 )
+
+            if account_id in known_accounts:
+                continue
+            known_accounts.add(account_id)
 
             # Create per-platform lock switches only for selected platforms
             enabled_platforms = entry.options.get(CONF_PLATFORMS, DEFAULT_PLATFORMS)
@@ -75,7 +88,11 @@ async def async_setup_entry(
                 )
             )
 
-    async_add_entities(entities)
+        if entities:
+            async_add_entities(entities)
+
+    _add_new_entities()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_entities))
 
 
 class FamilySafetyAppBlockSwitch(CoordinatorEntity, SwitchEntity):

@@ -24,12 +24,13 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from ._pyfamilysafety_compat import apply_patches
-from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
+from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .const import (
     CONF_AUTH_URL,
     CONF_REFRESH_TOKEN,
     CONF_UPDATE_INTERVAL,
+    DAY_KEYS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ERROR_AUTH_FAILED,
@@ -40,6 +41,25 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_KEY = f"{DOMAIN}.saved_screentime"
 STORAGE_VERSION = 1
+
+AUTH_NOTIFICATION_ID = "familysafety_auth_expired"
+
+
+def _range_to_slots(
+    start_hour: int, start_minute: int, end_hour: int, end_minute: int
+) -> list[bool]:
+    """Convert a start/end time range to the 48 half-hour slot booleans.
+
+    The start slot is floored and the end slot is ceiled so the requested
+    range is fully covered — e.g. an end time of 23:59 includes the
+    23:30-24:00 slot instead of silently dropping it.
+    """
+    intervals = [False] * 48
+    start_slot = (start_hour * 60 + start_minute) // 30
+    end_slot = -(-(end_hour * 60 + end_minute) // 30)  # ceiling division
+    for i in range(start_slot, min(end_slot, 48)):
+        intervals[i] = True
+    return intervals
 
 
 def _ms_to_minutes(milliseconds: int | None) -> int:
@@ -70,8 +90,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Saved screentime state for lock/unlock per account (persisted via HA Store)
         self._saved_screentime: dict[str, dict[str, Any]] = {}
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        # Addon cookie client for web API reads
-        auth_url = entry.data.get(CONF_AUTH_URL) or entry.options.get(CONF_AUTH_URL)
+        # Addon cookie client for web API reads.
+        # Options take precedence so the URL can be changed after setup.
+        auth_url = entry.options.get(CONF_AUTH_URL) or entry.data.get(CONF_AUTH_URL)
         self._addon_client = AddonCookieClient(hass, auth_url=auth_url)
         self._web_cookies_loaded = False
         self._auth_notification_sent = False
@@ -132,15 +153,19 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             cookies = await self._addon_client.load_cookies()
             if cookies and self.web_api:
                 self.web_api.set_web_cookies(cookies)
+                if not self._web_cookies_loaded:
+                    _LOGGER.info(
+                        "Web cookies loaded from addon (%d cookies) — "
+                        "screen time schedule reading enabled",
+                        len(cookies),
+                    )
                 self._web_cookies_loaded = True
-                if self._auth_notification_sent:
-                    self._auth_notification_sent = False
-                _LOGGER.info(
-                    "Web cookies loaded from addon (%d cookies) — "
-                    "screen time schedule reading enabled",
-                    len(cookies),
-                )
             else:
+                if self._web_cookies_loaded:
+                    # Cookies were available before and vanished — the user
+                    # must re-authenticate via the add-on
+                    self._web_cookies_loaded = False
+                    await self._create_auth_notification()
                 _LOGGER.debug(
                     "No web cookies available from addon — "
                     "screen time schedule reading disabled. "
@@ -256,12 +281,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         end_minute: int,
     ) -> None:
         """Set screen time allowed intervals via addon browser."""
-        # Build 48-slot boolean array from start/end range
-        intervals = [False] * 48
-        start_slot = start_hour * 2 + (1 if start_minute >= 30 else 0)
-        end_slot = end_hour * 2 + (1 if end_minute >= 30 else 0)
-        for i in range(start_slot, min(end_slot, 48)):
-            intervals[i] = True
+        intervals = _range_to_slots(start_hour, start_minute, end_hour, end_minute)
         await self._addon_client.set_screentime_intervals(
             child_id, day_of_week, intervals
         )
@@ -337,8 +357,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Account lock/unlock (screen time based)
     # ──────────────────────────────────────────────────────────────────────
 
-    DAYS_OF_WEEK = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
-
     def is_account_locked(self, account_id: str) -> bool | None:
         """Check if an account is currently locked (all 7 days at 0 minutes)."""
         if not self.data:
@@ -352,7 +370,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
         if not daily or not isinstance(daily, dict):
             return None
-        for day_key in self.DAYS_OF_WEEK:
+        for day_key in DAY_KEYS:
             day_data = daily.get(day_key) or daily.get(day_key.capitalize())
             if not day_data:
                 return None
@@ -376,7 +394,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
             has_nonzero = False
-            for day_key in self.DAYS_OF_WEEK:
+            for day_key in DAY_KEYS:
                 day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
                 allowance = day_data.get("allowance") or day_data.get("Allowance") or "00:00:00"
                 if allowance != "00:00:00":
@@ -476,7 +494,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if saved:
             daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
-            for day_index, day_key in enumerate(self.DAYS_OF_WEEK):
+            for day_index, day_key in enumerate(DAY_KEYS):
                 day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
                 allowance = day_data.get("allowance") or day_data.get("Allowance") or "02:00:00"
                 try:
@@ -549,7 +567,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions")
         if not daily or not isinstance(daily, dict):
             return None
-        for day_key in self.DAYS_OF_WEEK:
+        for day_key in DAY_KEYS:
             day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
             allowance = day_data.get("allowance") or day_data.get("Allowance") or "24:00:00"
             if allowance != "24:00:00":
@@ -573,7 +591,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_policy and account_id not in self._saved_screentime:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
             has_limit = False
-            for day_key in self.DAYS_OF_WEEK:
+            for day_key in DAY_KEYS:
                 day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
                 allowance = day_data.get("allowance") or day_data.get("Allowance") or "24:00:00"
                 if allowance != "24:00:00":
@@ -658,8 +676,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Use addon's browser-based fetch (avoids 401 from direct cookie replay)
             screentime = await self._addon_client.fetch_screentime(account_id)
             if screentime is None:
+                if self._addon_client.last_error_code == "LOGIN_REDIRECT":
+                    # Web session expired — the user must re-authenticate
+                    await self._create_auth_notification()
                 # Fallback to direct web API call
                 screentime = await self.web_api.get_screentime_policy(account_id)
+            if screentime is not None:
+                # Web session works again — clear any stale notification
+                await self._dismiss_auth_notification()
             _LOGGER.debug("Screen time policy response for %s: %s", account_id, screentime)
             result["screentime_policy"] = screentime
         except Exception as err:
@@ -737,29 +761,38 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             accounts_data = {}
             devices_data = {}
+            new_accounts: dict[str, Account] = {}
+            new_devices: dict[str, Device] = {}
 
             _LOGGER.debug("Found %d Family Safety accounts", len(self.api.accounts))
 
             for account in self.api.accounts:
                 account_id, account_data = self._transform_account_data(account)
                 accounts_data[account_id] = account_data
-                self._accounts[account_id] = account
+                new_accounts[account_id] = account
 
                 for device in account.devices:
                     device_id, device_data = self._transform_device_data(device, account_id)
                     devices_data[device_id] = device_data
                     accounts_data[account_id]["devices"].append(device_id)
-                    self._devices[device_id] = device
+                    new_devices[device_id] = device
 
                 # Fetch web API data for this account
                 web_data = await self._fetch_web_api_data(account_id)
                 accounts_data[account_id]["web_browsing"] = web_data.get("web_browsing")
                 accounts_data[account_id]["screentime_policy"] = web_data.get("screentime_policy")
 
+            # Replace caches wholesale so removed accounts/devices are purged
+            self._accounts = new_accounts
+            self._devices = new_devices
+
             # Collect pending requests
             pending_requests = []
             if hasattr(self.api, 'pending_requests') and self.api.pending_requests:
                 pending_requests = self.api.pending_requests
+
+            # Successful cycle — allow a future 401 to trigger the reauth flow
+            self._is_retrying_auth = False
 
             return {
                 "accounts": accounts_data,
@@ -798,11 +831,23 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "3. Log in with your Microsoft account\n"
                     "4. The integration will automatically resume once authenticated."
                 ),
-                "notification_id": "familysafety_auth_expired",
+                "notification_id": AUTH_NOTIFICATION_ID,
             },
         )
         self._auth_notification_sent = True
         _LOGGER.info("Created web authentication notification for user")
+
+    async def _dismiss_auth_notification(self) -> None:
+        """Dismiss the re-authentication notification once the session works."""
+        if not self._auth_notification_sent:
+            return
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {"notification_id": AUTH_NOTIFICATION_ID},
+        )
+        self._auth_notification_sent = False
+        _LOGGER.info("Web session restored — dismissed authentication notification")
 
     async def async_cleanup(self) -> None:
         """Clean up resources."""

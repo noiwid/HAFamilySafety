@@ -14,12 +14,8 @@ class Config(BaseModel):
 
     # Paths
     share_dir: str = "/share/familysafety"
-    cookie_file: str = "cookies.enc"
-    key_file: str = ".key"
 
     # Browser settings
-    browser_timeout: int = 300000  # 5 minutes in milliseconds
-    browser_navigation_timeout: int = 30000  # 30 seconds
     language: str = "en-US"
     timezone: str = "Europe/Paris"
 
