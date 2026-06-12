@@ -1,8 +1,10 @@
 """Main FastAPI application for Microsoft Family Safety Auth."""
 import logging
 import os
+import secrets
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -76,20 +78,79 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_API_KEY = os.getenv("API_KEY", "")
-
 # Global instances
 storage = SharedStorage(config.share_dir)
 browser_manager = None
 
+# Path where the auto-generated API key is persisted (shared with the
+# Home Assistant integration through the /share/familysafety directory).
+_API_KEY_FILE = Path(config.share_dir) / ".api_key"
+
+
+def _resolve_api_key() -> str:
+    """Return the API key, generating and persisting one if needed.
+
+    Resolution order:
+    1. ``API_KEY`` environment variable (set by the user, e.g. standalone).
+    2. The persisted ``.api_key`` file in the shared directory.
+    3. A freshly generated key, written to that file (mode 0600).
+
+    Because a key is always present, the high-harm endpoints below are
+    always authenticated — closing the LAN cookie-theft hole even when the
+    user never configured anything.
+    """
+    env_key = os.getenv("API_KEY", "").strip()
+    if env_key:
+        # Keep the file in sync so the integration (shared volume) can read it
+        try:
+            if not _API_KEY_FILE.exists() or _API_KEY_FILE.read_text().strip() != env_key:
+                _API_KEY_FILE.write_text(env_key)
+                os.chmod(_API_KEY_FILE, 0o600)
+        except Exception as err:  # noqa: BLE001 - best effort, env key still works
+            _LOGGER.warning("Could not persist API key file: %s", err)
+        return env_key
+
+    try:
+        if _API_KEY_FILE.exists():
+            existing = _API_KEY_FILE.read_text().strip()
+            if existing:
+                return existing
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Could not read API key file: %s", err)
+
+    key = secrets.token_urlsafe(32)
+    try:
+        _API_KEY_FILE.write_text(key)
+        os.chmod(_API_KEY_FILE, 0o600)
+        _LOGGER.info("Generated a new API key at %s", _API_KEY_FILE)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.error("Could not persist generated API key: %s", err)
+    return key
+
+
+_API_KEY = _resolve_api_key()
+
+# Lightweight, per-process token guarding the browser-driven auth endpoints
+# (start/status). It is injected into the served web UI so the parent's
+# browser can use it, but it never grants access to cookies or screen-time
+# data — so even if a LAN client scrapes it from the page, the worst it can
+# do is start/poll an auth session (it still cannot log in without the
+# parent's Microsoft credentials, nor read cookies or change limits).
+_UI_TOKEN = os.getenv("UI_TOKEN", "").strip() or secrets.token_urlsafe(16)
+
 
 def _verify_api_key(request: Request):
-    """Verify API key for sensitive endpoints."""
-    if not _API_KEY:
-        return
-    key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-    if key != _API_KEY:
+    """Authenticate high-harm endpoints (cookies, screen time) via API key."""
+    key = request.headers.get("X-API-Key", "")
+    if not secrets.compare_digest(key, _API_KEY):
         raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+
+def _verify_ui_token(request: Request):
+    """Authenticate browser-driven auth endpoints via the UI token."""
+    token = request.headers.get("X-UI-Token", "")
+    if not secrets.compare_digest(token, _UI_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid or missing UI token")
 
 
 def _require_browser_manager() -> BrowserAuthManager:
@@ -135,6 +196,7 @@ def _unwrap_browser_result(result, default_error_code: str) -> dict:
 async def index():
     """Serve the main authentication interface."""
     t = get_translations(config.language)
+    ui_token = _UI_TOKEN
     html_content = f"""
 <!DOCTYPE html>
 <html lang="{t['html_lang']}">
@@ -238,6 +300,9 @@ async def index():
         const novncUrl = window.location.protocol + '//' + window.location.hostname + ':6081/vnc.html?autoconnect=true&password=familysafety';
         document.getElementById('novnc-link').href = novncUrl;
 
+        // Token guarding the auth start/status endpoints (browser-driven).
+        const UI_TOKEN = "{ui_token}";
+
         let sessionId = null;
         let statusCheckInterval = null;
 
@@ -248,7 +313,10 @@ async def index():
             button.innerHTML = '<div class="loader"></div><span>' + T.starting + '</span>';
             try {{
                 showStatus(T.auth_starting, "info");
-                const response = await fetch('/api/auth/start', {{ method: 'POST' }});
+                const response = await fetch('/api/auth/start', {{
+                    method: 'POST',
+                    headers: {{ 'X-UI-Token': UI_TOKEN }}
+                }});
                 if (!response.ok) throw new Error(T.start_error);
                 const data = await response.json();
                 sessionId = data.session_id;
@@ -265,7 +333,9 @@ async def index():
         async function checkAuthStatus() {{
             if (!sessionId) return;
             try {{
-                const response = await fetch(`/api/auth/status/${{sessionId}}`);
+                const response = await fetch(`/api/auth/status/${{sessionId}}`, {{
+                    headers: {{ 'X-UI-Token': UI_TOKEN }}
+                }});
                 const data = await response.json();
                 if (data.status === 'completed') {{
                     clearInterval(statusCheckInterval);
@@ -328,8 +398,8 @@ async def health_check():
 
 
 @app.post("/api/auth/start")
-async def start_authentication(_: None = Depends(_verify_api_key)):
-    """Start browser authentication flow."""
+async def start_authentication(_: None = Depends(_verify_ui_token)):
+    """Start browser authentication flow (browser-driven, UI-token guarded)."""
     manager = _require_browser_manager()
     try:
         session_id = await manager.start_auth_session()
@@ -340,8 +410,8 @@ async def start_authentication(_: None = Depends(_verify_api_key)):
 
 
 @app.get("/api/auth/status/{session_id}")
-async def check_auth_status(session_id: str, _: None = Depends(_verify_api_key)):
-    """Check authentication status."""
+async def check_auth_status(session_id: str, _: None = Depends(_verify_ui_token)):
+    """Check authentication status (browser-driven, UI-token guarded)."""
     return await _require_browser_manager().get_session_status(session_id)
 
 

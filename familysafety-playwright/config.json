@@ -23,7 +23,8 @@
     "session_duration": 86400,
     "language": "",
     "timezone": "",
-    "vnc_password": "familysafety"
+    "vnc_password": "familysafety",
+    "api_key": ""
   },
   "schema": {
     "log_level": "list(trace|debug|info|warning|error)?",
@@ -31,7 +32,8 @@
     "session_duration": "int(3600,604800)?",
     "language": "str?",
     "timezone": "str?",
-    "vnc_password": "password?"
+    "vnc_password": "password?",
+    "api_key": "password?"
   },
   "webui": "http://[HOST]:[PORT:8098]",
   "host_network": false,

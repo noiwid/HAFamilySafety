@@ -11,6 +11,7 @@ CONF_REDIRECT_URL: Final = "redirect_url"
 CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 CONF_AUTH_URL: Final = "auth_url"
+CONF_API_KEY: Final = "api_key"
 
 # Defaults
 DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes in seconds

@@ -12,7 +12,8 @@
           "redirect_url": "Redirect URL",
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "auth_url": "Auth addon URL (optional, for Docker standalone)"
+          "auth_url": "Auth addon URL (optional, for Docker standalone)",
+          "api_key": "API key (optional, only if HA can't read the add-on's shared file)"
         }
       },
       "reauth_confirm": {
@@ -41,9 +42,10 @@
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "auth_url": "Auth addon URL (optional, for Docker standalone)"
+          "auth_url": "Auth addon URL (optional, for Docker standalone)",
+          "api_key": "API key (optional, only if HA can't read the add-on's shared file)"
         },
-        "description": "Configure the polling interval, monitored platforms, and auth addon URL."
+        "description": "Configure the polling interval, monitored platforms, auth addon URL, and API key."
       }
     }
   },

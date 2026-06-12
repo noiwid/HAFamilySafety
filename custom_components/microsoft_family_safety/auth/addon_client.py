@@ -27,18 +27,50 @@ class AddonCookieClient:
     SHARE_DIR = Path("/share/familysafety")
     COOKIE_FILE = "cookies.enc"
     KEY_FILE = ".key"
+    API_KEY_FILE = ".api_key"
 
-    def __init__(self, hass: HomeAssistant, auth_url: str | None = None):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        auth_url: str | None = None,
+        api_key: str | None = None,
+    ):
         """Initialize addon cookie client."""
         self.hass = hass
         self.auth_url = auth_url
         self.storage_path = self.SHARE_DIR / self.COOKIE_FILE
         self.key_file = self.SHARE_DIR / self.KEY_FILE
+        self.api_key_file = self.SHARE_DIR / self.API_KEY_FILE
         self._detected_url: str | None = None
         self._supervisor_url_resolved = False
+        # API key protecting the cookie/screen-time endpoints. Either provided
+        # explicitly (standalone, HA on another host) or read from the shared
+        # .api_key file written by the add-on.
+        self._api_key = api_key
+        self._api_key_resolved = bool(api_key)
         # Error code from the last fetch_screentime call (e.g. "LOGIN_REDIRECT"),
         # used by the coordinator to surface a re-authentication notification
         self.last_error_code: str | None = None
+
+    async def _get_api_key(self) -> str | None:
+        """Return the API key, reading it from the shared file if needed."""
+        if self._api_key_resolved:
+            return self._api_key
+        try:
+            if await self.hass.async_add_executor_job(self.api_key_file.exists):
+                raw = await self.hass.async_add_executor_job(
+                    self.api_key_file.read_text
+                )
+                self._api_key = raw.strip() or None
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not read API key file: %s", err)
+        self._api_key_resolved = True
+        return self._api_key
+
+    async def _auth_headers(self) -> dict[str, str]:
+        """Build the auth header for the protected add-on endpoints."""
+        key = await self._get_api_key()
+        return {"X-API-Key": key} if key else {}
 
     async def _resolve_addon_url(self) -> str | None:
         """Resolve addon URL via Supervisor API (works on any installation)."""
@@ -73,10 +105,11 @@ class AddonCookieClient:
     async def _fetch_cookies_from_url(self, url: str) -> list[dict[str, Any]] | None:
         """Fetch cookies from auth server API."""
         api_url = f"{url.rstrip('/')}/api/cookies"
+        headers = await self._auth_headers()
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    api_url, timeout=aiohttp.ClientTimeout(total=10)
+                    api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -243,12 +276,14 @@ class AddonCookieClient:
         """
         url = await self._get_addon_url()
         api_url = f"{url.rstrip('/')}/api/screentime"
+        headers = await self._auth_headers()
         self.last_error_code = None
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     api_url,
                     params={"childId": child_id},
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=120),
                 ) as response:
                     if response.status == 200:
@@ -303,6 +338,7 @@ class AddonCookieClient:
         """Set daily screen time allowance via addon browser POST."""
         url = await self._get_addon_url()
         api_url = f"{url.rstrip('/')}/api/screentime/set-allowance"
+        headers = await self._auth_headers()
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -313,6 +349,7 @@ class AddonCookieClient:
                         "hours": hours,
                         "minutes": minutes,
                     },
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=120),
                 ) as response:
                     if response.status == 200:
@@ -334,6 +371,7 @@ class AddonCookieClient:
         """Set allowed time intervals via addon browser POST."""
         url = await self._get_addon_url()
         api_url = f"{url.rstrip('/')}/api/screentime/set-intervals"
+        headers = await self._auth_headers()
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -343,6 +381,7 @@ class AddonCookieClient:
                         "dayOfWeek": day_of_week,
                         "allowedIntervals": allowed_intervals,
                     },
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=120),
                 ) as response:
                     if response.status == 200:

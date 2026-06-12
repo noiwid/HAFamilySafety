@@ -46,12 +46,19 @@ if [ -z "${TIMEZONE}" ] || [ "${TIMEZONE}" == "null" ]; then
     fi
 fi
 
+# Optional fixed API key (leave empty to auto-generate and persist one)
+API_KEY=$(bashio::config 'api_key' '')
+if [ "${API_KEY}" == "null" ]; then
+    API_KEY=""
+fi
+
 # Export environment variables
 export LOG_LEVEL="${LOG_LEVEL}"
 export AUTH_TIMEOUT="${AUTH_TIMEOUT}"
 export SESSION_DURATION="${SESSION_DURATION}"
 export LANGUAGE="${LANGUAGE}"
 export TIMEZONE="${TIMEZONE}"
+export API_KEY="${API_KEY}"
 
 bashio::log.info "Configuration loaded:"
 bashio::log.info "  - Log Level: ${LOG_LEVEL}"

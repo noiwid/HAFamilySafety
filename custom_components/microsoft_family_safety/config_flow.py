@@ -18,6 +18,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     AVAILABLE_PLATFORMS,
+    CONF_API_KEY,
     CONF_AUTH_URL,
     CONF_PLATFORMS,
     CONF_REDIRECT_URL,
@@ -144,6 +145,7 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             platforms = user_input.get(CONF_PLATFORMS, DEFAULT_PLATFORMS)
             auth_url = user_input.get(CONF_AUTH_URL, "").strip() or None
+            api_key = user_input.get(CONF_API_KEY, "").strip() or None
 
             # If user provided a custom auth URL, validate it
             if auth_url:
@@ -173,6 +175,10 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     effective_auth_url = auth_url or self._detected_url
                     if effective_auth_url:
                         data[CONF_AUTH_URL] = effective_auth_url
+                    # Optional API key (only needed when HA cannot read the
+                    # add-on's shared .api_key file, e.g. standalone on another host)
+                    if api_key:
+                        data[CONF_API_KEY] = api_key
 
                     return self.async_create_entry(
                         title=info["title"],
@@ -208,9 +214,11 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         }
 
-        # Only show auth URL field if addon was NOT auto-detected
+        # Only show auth URL + API key fields if addon was NOT auto-detected
+        # (otherwise HA reads the shared .api_key file automatically)
         if self._detected_source == "none":
             schema_fields[vol.Optional(CONF_AUTH_URL, default="")] = str
+            schema_fields[vol.Optional(CONF_API_KEY, default="")] = str
 
         return self.async_show_form(
             step_id="auth",
@@ -242,12 +250,14 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self.context["entry_id"]
                     )
                     if entry:
-                        # Preserve existing auth_url when reauthing
+                        # Preserve existing auth_url and API key when reauthing
                         new_data = {
                             CONF_REFRESH_TOKEN: info["refresh_token"],
                         }
                         if CONF_AUTH_URL in entry.data:
                             new_data[CONF_AUTH_URL] = entry.data[CONF_AUTH_URL]
+                        if CONF_API_KEY in entry.data:
+                            new_data[CONF_API_KEY] = entry.data[CONF_API_KEY]
 
                         self.hass.config_entries.async_update_entry(
                             entry,
@@ -298,7 +308,12 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         current_platforms = self._config_entry.options.get(
             CONF_PLATFORMS, DEFAULT_PLATFORMS
         )
-        current_auth_url = self._config_entry.data.get(CONF_AUTH_URL, "")
+        current_auth_url = self._config_entry.options.get(
+            CONF_AUTH_URL, self._config_entry.data.get(CONF_AUTH_URL, "")
+        )
+        current_api_key = self._config_entry.options.get(
+            CONF_API_KEY, self._config_entry.data.get(CONF_API_KEY, "")
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -317,6 +332,10 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_AUTH_URL,
                         default=current_auth_url,
+                    ): str,
+                    vol.Optional(
+                        CONF_API_KEY,
+                        default=current_api_key,
                     ): str,
                 }
             ),

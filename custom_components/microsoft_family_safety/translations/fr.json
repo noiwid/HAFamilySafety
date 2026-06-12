@@ -12,7 +12,8 @@
           "redirect_url": "URL de redirection",
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
-          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)"
+          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)",
+          "api_key": "Clé API (optionnel, seulement si HA ne peut pas lire le fichier partagé de l'addon)"
         }
       },
       "reauth_confirm": {
@@ -41,9 +42,10 @@
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
-          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)"
+          "auth_url": "URL de l'addon auth (optionnel, pour Docker standalone)",
+          "api_key": "Clé API (optionnel, seulement si HA ne peut pas lire le fichier partagé de l'addon)"
         },
-        "description": "Configurer l'intervalle d'interrogation, les plateformes surveillées et l'URL de l'addon auth."
+        "description": "Configurer l'intervalle d'interrogation, les plateformes surveillées, l'URL de l'addon auth et la clé API."
       }
     }
   },
