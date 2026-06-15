@@ -1,9 +1,9 @@
 # <img src="custom_components/microsoft_family_safety/brand/icon.png" alt="Google Family Safety" width="30" > Microsoft Family Safety for Home Assistant
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/release/noiwid/HAFamilySafety.svg?style=for-the-badge)](https://github.com/noiwid/HAFamilySafety/releases)
-[![License](https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge)](LICENSE)
-[![HA Minimum Version](https://img.shields.io/badge/HA-%3E%3D%202024.1-41BDF5?style=for-the-badge)](https://www.home-assistant.io/)
+[![GitHub Release][releases-shield]][releases]
+[![HACS][hacs-shield]][hacs]
+[![License][license-shield]][license]
+[![Buy Me A Beer](https://img.shields.io/badge/Buy%20me%20a%20beer-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/noiwid)
 
 A full-featured Home Assistant custom integration for **Microsoft Family Safety**. Monitor screen time, manage app restrictions, lock accounts, control web filtering, and adjust daily limits — all from your Home Assistant dashboard.
 
@@ -672,3 +672,10 @@ This project is licensed under the [MIT License](LICENSE).
 - [GitHub Discussions](https://github.com/noiwid/HAFamilySafety/discussions)
 
 When reporting an issue, please include: HA version, integration version, addon version, debug logs (both HA and addon), and steps to reproduce.
+
+[releases-shield]: https://img.shields.io/github/release/noiwid/HAFamilySafety.svg?style=for-the-badge
+[releases]: https://github.com/noiwid/HAFamilySafety/releases
+[license-shield]: https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge
+[license]: LICENSE
+[hacs-shield]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
+[hacs]: https://github.com/hacs/integration
