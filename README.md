@@ -677,5 +677,5 @@ When reporting an issue, please include: HA version, integration version, addon 
 [releases]: https://github.com/noiwid/HAFamilySafety/releases
 [license-shield]: https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge
 [license]: LICENSE
-[hacs-shield]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
+[hacs-shield]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
 [hacs]: https://github.com/hacs/integration
