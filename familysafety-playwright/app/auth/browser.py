@@ -78,6 +78,13 @@ class BrowserAuthManager:
     # browser while an idle service does not pin Chromium in memory.
     CONTEXT_IDLE_TIMEOUT = 180
 
+    # Max time an API call waits to acquire the browser lock before giving up
+    # with BROWSER_BUSY. Long enough for a normal in-flight call (launch +
+    # dashboard navigation + fetch) to finish, short enough that the caller's
+    # HTTP request (120s timeout on the integration side) never hangs on a
+    # stuck/leaked lock.
+    LOCK_ACQUIRE_TIMEOUT = 90
+
     def __init__(
         self,
         auth_timeout: int = 300,
@@ -297,15 +304,7 @@ class BrowserAuthManager:
             self._remove_stale_singleton_lock()
 
             # Launch persistent browser context (non-headless for VNC interaction)
-            context = await self._playwright.chromium.launch_persistent_context(
-                _PROFILE_DIR,
-                headless=False,
-                args=_CHROME_ARGS + ["--ozone-platform=x11"],
-                user_agent=_USER_AGENT,
-                viewport={"width": 1280, "height": 800},
-                locale=self._language,
-                timezone_id=self._timezone,
-            )
+            context = await self._launch_context()
 
             page = context.pages[0] if context.pages else await context.new_page()
 
@@ -661,13 +660,19 @@ class BrowserAuthManager:
         localStorage, MSAL tokens, etc.) is preserved across calls and
         restarts.
         """
-        # If auth is in progress (lock held), return immediately
-        # instead of blocking until the HA HTTP request times out
-        if self._browser_lock.locked():
-            _LOGGER.info("browser_fetch: browser lock held (auth in progress?), returning immediately")
+        # Only bail out immediately when a *real* auth flow owns the lock —
+        # then we yield to the user logging in over noVNC. If the lock is held
+        # by anything else (another API call in flight, or — crucially — a
+        # leaked/orphaned lock from a task that died or a hung
+        # launch_persistent_context), do NOT give up forever: fall through to
+        # _browser_call, which waits for the lock with a timeout so a stuck
+        # lock becomes self-recovering instead of pinning the service in
+        # BROWSER_BUSY until a manual restart.
+        if self._auth_owns_lock:
+            _LOGGER.info("browser_fetch: auth in progress, returning BROWSER_BUSY")
             return {
                 "__error": True, "status": 503, "code": "BROWSER_BUSY",
-                "text": "Browser is busy (authentication may be in progress). Try again later.",
+                "text": "Browser is busy (authentication in progress). Try again later.",
             }
 
         query = "?" + urlencode(params) if params else ""
@@ -688,8 +693,27 @@ class BrowserAuthManager:
         navigation.
         """
         label = "browser_post" if body is not None else "browser_fetch"
-        # _browser_lock ensures mutual exclusion with auth AND other calls
-        async with self._browser_lock:
+        # _browser_lock ensures mutual exclusion with auth AND other calls.
+        # Acquire with a timeout so a leaked/stuck lock can never pin an HA
+        # request indefinitely: we wait long enough to let a normal in-flight
+        # call (a single navigation+fetch is well under a minute) finish, then
+        # give up cleanly with BROWSER_BUSY rather than hang until the HTTP
+        # client times out.
+        try:
+            await asyncio.wait_for(
+                self._browser_lock.acquire(), timeout=self.LOCK_ACQUIRE_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "%s: could not acquire browser lock within %ss "
+                "(another call stuck?), returning BROWSER_BUSY",
+                label, self.LOCK_ACQUIRE_TIMEOUT,
+            )
+            return {
+                "__error": True, "status": 503, "code": "BROWSER_BUSY",
+                "text": "Browser is busy. Try again later.",
+            }
+        try:
             self._cancel_idle_close()
             try:
                 result, was_fresh = await self._attempt_call(full_url, body, label)
@@ -711,6 +735,11 @@ class BrowserAuthManager:
                 }
             finally:
                 self._schedule_idle_close()
+        finally:
+            # Always release the lock we acquired above, even if _attempt_call
+            # or context teardown raised — this is what prevents the orphaned
+            # lock that previously wedged the service into permanent BROWSER_BUSY.
+            self._browser_lock.release()
 
     @staticmethod
     def _is_auth_error(result: dict | None) -> bool:
@@ -777,6 +806,28 @@ class BrowserAuthManager:
             _LOGGER.info("%s: success for %s", label, full_url)
         return result, fresh
 
+    # Hard ceiling on launching Chromium. A persistent-context launch normally
+    # takes a few seconds; if Chromium wedges inside Xvfb it can otherwise hang
+    # forever while holding _browser_lock — the failure mode that wedged the
+    # service into permanent BROWSER_BUSY. Bounding it turns a hang into a
+    # clean, retryable error.
+    LAUNCH_TIMEOUT = 60
+
+    async def _launch_context(self):
+        """Launch a persistent Chromium context, bounded by LAUNCH_TIMEOUT."""
+        return await asyncio.wait_for(
+            self._playwright.chromium.launch_persistent_context(
+                _PROFILE_DIR,
+                headless=False,
+                args=_CHROME_ARGS + ["--ozone-platform=x11"],
+                user_agent=_USER_AGENT,
+                viewport={"width": 1280, "height": 800},
+                locale=self._language,
+                timezone_id=self._timezone,
+            ),
+            timeout=self.LAUNCH_TIMEOUT,
+        )
+
     async def _ensure_shared_context(self, label: str):
         """Return (context, page, fresh) — reusing the live context if possible."""
         if self._shared_context is not None:
@@ -791,15 +842,7 @@ class BrowserAuthManager:
         self._remove_stale_singleton_lock()
         _LOGGER.info("%s: opening persistent context from %s", label, _PROFILE_DIR)
 
-        context = await self._playwright.chromium.launch_persistent_context(
-            _PROFILE_DIR,
-            headless=False,
-            args=_CHROME_ARGS + ["--ozone-platform=x11"],
-            user_agent=_USER_AGENT,
-            viewport={"width": 1280, "height": 800},
-            locale=self._language,
-            timezone_id=self._timezone,
-        )
+        context = await self._launch_context()
         # Store immediately so a failure below still gets cleaned up
         # by _close_shared_context in the caller's error handler
         self._shared_context = context
