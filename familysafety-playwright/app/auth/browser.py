@@ -324,12 +324,17 @@ class BrowserAuthManager:
 
             context.on("page", on_page)
 
-            # Navigate to Microsoft Family Safety
+            # Navigate to Microsoft Family Safety.
+            # The profile was just wiped, so this is always a fully cold load
+            # (no DNS/JS/CDN cache): waiting for the full "load" event with a
+            # 30s timeout fails consistently on slow hosts (issue #32).
+            # "domcontentloaded" is enough — the monitor loop only needs the
+            # navigation to have started, the user finishes loading over VNC.
             _LOGGER.info("Navigating to Microsoft Family Safety...")
             await page.goto(
                 "https://account.microsoft.com/family",
-                wait_until="load",
-                timeout=30000,
+                wait_until="domcontentloaded",
+                timeout=120000,
             )
 
             # Start monitoring in background (will release _browser_lock when done)
