@@ -40,10 +40,12 @@ jobs:
 
       - name: Create integration ZIP with correct version
         run: |
-          # Create a ZIP of the integration folder with the correct version
-          cd custom_components
-          zip -r ../microsoft_family_safety.zip microsoft_family_safety
-          cd ..
+          # HACS (zip_release) extracts this archive directly into
+          # custom_components/microsoft_family_safety/, so the files must be
+          # at the root of the zip — do NOT wrap them in a folder.
+          cd custom_components/microsoft_family_safety
+          zip -r ../../microsoft_family_safety.zip .
+          cd ../..
           echo "Created microsoft_family_safety.zip with version ${{ steps.version.outputs.version }}"
           unzip -l microsoft_family_safety.zip
 
