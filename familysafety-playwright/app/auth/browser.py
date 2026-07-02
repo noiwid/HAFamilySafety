@@ -382,6 +382,7 @@ class BrowserAuthManager:
             start_time = asyncio.get_running_loop().time()
             authenticated = False
             last_url = None
+            login_redirected = False
 
             MS_AUTH_COOKIE_NAMES = {
                 "MSPAuth",
@@ -401,21 +402,31 @@ class BrowserAuthManager:
                 else:
                     _LOGGER.debug("Polling - URL unchanged")
 
-                # Detect marketing page redirect (expired profile cookies)
-                # Microsoft redirects to www.microsoft.com/.../family-safety when session is stale
+                # Detect marketing page redirect (signed-out/expired profile).
+                # With no session, /family always bounces to this marketing
+                # page, so re-navigating there loops forever and reloads the
+                # page under the user's fingers every few seconds. Instead go
+                # ONCE to the account portal root, which forces a real
+                # sign-in redirect; cookie-based detection below picks up the
+                # session once the user has logged in over VNC.
                 if "www.microsoft.com" in current_url and "family-safety" in current_url:
-                    _LOGGER.info(
-                        "Redirected to marketing page — profile session expired, "
-                        "navigating to login..."
-                    )
-                    try:
-                        await page.goto(
-                            "https://account.microsoft.com/family",
-                            wait_until="load",
-                            timeout=15000,
+                    if not login_redirected:
+                        _LOGGER.info(
+                            "Redirected to marketing page — navigating to "
+                            "sign-in (once)..."
                         )
-                    except Exception:
-                        pass
+                        login_redirected = True
+                        try:
+                            await page.goto(
+                                "https://account.microsoft.com/",
+                                wait_until="domcontentloaded",
+                                timeout=60000,
+                            )
+                        except Exception as e:
+                            _LOGGER.warning("Sign-in navigation failed: %s", e)
+                            # Transient failure — allow one retry next loop
+                            login_redirected = False
+                    await asyncio.sleep(2)
                     continue
 
                 # Method 1: URL-based detection
