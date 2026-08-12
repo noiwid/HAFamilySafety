@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -19,18 +20,28 @@ from .coordinator import FamilySafetyDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-def _parse_allowance_to_minutes(allowance: str | None) -> int:
-    """Parse an allowance string like '02:30:00' to total minutes."""
-    if not allowance:
+def _parse_allowance_to_minutes(allowance: str | int | float | None) -> int:
+    """Parse Microsoft allowance values to total minutes."""
+    if allowance is None:
         return 0
+    if isinstance(allowance, (int, float)):
+        return int(allowance)
     try:
-        parts = allowance.split(":")
+        text = str(allowance).strip()
+        if text.upper().startswith("PT"):
+            match = re.fullmatch(
+                r"PT(?:(\d+)H)?(?:(\d+)M)?(?:\d+(?:\.\d+)?S)?",
+                text.upper(),
+            )
+            if not match:
+                return 0
+            return int(match.group(1) or 0) * 60 + int(match.group(2) or 0)
+        parts = text.split(":")
         hours = int(parts[0])
         minutes = int(parts[1]) if len(parts) > 1 else 0
         return hours * 60 + minutes
-    except (ValueError, IndexError):
+    except (TypeError, ValueError, IndexError):
         return 0
-
 
 async def async_setup_entry(
     hass: HomeAssistant,

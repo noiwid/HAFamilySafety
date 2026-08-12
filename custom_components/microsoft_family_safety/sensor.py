@@ -221,7 +221,7 @@ class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
 
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:clock-outline"
 
     def __init__(
@@ -256,7 +256,15 @@ class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
             ATTR_USER_ID: account_data.get(ATTR_USER_ID),
             ATTR_AVERAGE_SCREENTIME: account_data.get("average_screentime_usage", 0),
             "state_class": "total",
-            "date": datetime.now().date().isoformat(),
+            "date": account_data.get("screen_time_date") or datetime.now().date().isoformat(),
+            "raw_microsoft_minutes": account_data.get("raw_today_screentime_usage"),
+            "raw_microsoft_ms": account_data.get("raw_today_screentime_ms"),
+            "last_api_poll": account_data.get("screen_time_polled_at"),
+            "update_interval_seconds": (
+                int(self.coordinator.update_interval.total_seconds())
+                if self.coordinator.update_interval
+                else None
+            ),
             **_format_duration_attributes(total_seconds),
         }
 
@@ -578,6 +586,17 @@ class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
             ):
                 if key in web_data:
                     attrs[key] = web_data[key]
+        content_data = account_data.get("content_settings")
+        if isinstance(content_data, dict):
+            attrs["content_settings"] = content_data
+            for source, target in (
+                ("maxAgeRating", "max_age_rating"),
+                ("MaxAgeRating", "max_age_rating"),
+                ("acquisitionPolicy", "acquisition_policy"),
+                ("AcquisitionPolicy", "acquisition_policy"),
+            ):
+                if source in content_data and target not in attrs:
+                    attrs[target] = content_data[source]
         return attrs
 
 
@@ -612,6 +631,11 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
                 return "enabled"
             if is_enabled is False:
                 return "disabled"
+        state = self.coordinator.is_policy_enabled(self._account_id)
+        if state is True:
+            return "enabled"
+        if state is False:
+            return "disabled"
         return "unknown"
 
     @property
@@ -638,6 +662,11 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
                     if isinstance(day_data, dict):
                         allowance = day_data.get("allowance", day_data.get("Allowance", ""))
                         attrs[f"{day_name.lower()}_allowance"] = allowance
+                        intervals = day_data.get(
+                            "allowedIntervals", day_data.get("AllowedIntervals")
+                        )
+                        if isinstance(intervals, list):
+                            attrs[f"{day_name.lower()}_allowed_intervals"] = intervals
         return attrs
 
 
