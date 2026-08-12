@@ -27,6 +27,8 @@ The patch is idempotent and only ever wraps the original once.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+import inspect
 import logging
 from typing import Any
 
@@ -128,3 +130,59 @@ def apply_patches(hass: HomeAssistant) -> None:
         "Applied pyfamilysafety compatibility patch "
         "(shared session + tolerant JSON decode)"
     )
+
+
+def authenticator_access_token_expired(authenticator: Authenticator) -> bool:
+    """Return token-expiry state across pyfamilysafety API versions.
+
+    pyfamilysafety 1.1.2 has ``expires`` but no ``access_token_expired``
+    property. Newer releases expose the property. A small safety margin avoids
+    starting a request with a token that is about to expire.
+    """
+    try:
+        value = getattr(authenticator, "access_token_expired")
+    except AttributeError:
+        value = None
+    if value is not None:
+        return bool(value() if callable(value) else value)
+
+    if not getattr(authenticator, "access_token", None):
+        return True
+    expires = getattr(authenticator, "expires", None)
+    if expires is None:
+        return True
+    now = datetime.now(tz=expires.tzinfo) if getattr(expires, "tzinfo", None) else datetime.now()
+    return expires <= now + timedelta(seconds=60)
+
+
+async def create_authenticator(
+    hass: HomeAssistant,
+    token: str,
+    *,
+    use_refresh_token: bool,
+) -> Authenticator:
+    """Create an Authenticator across pyfamilysafety API versions.
+
+    pyfamilysafety 1.1.2 exposes ``Authenticator.create(token,
+    use_refresh_token=False)`` and creates its own aiohttp session inside the
+    request handler. Newer releases accept ``client_session``. Our request
+    handler patch always uses Home Assistant's shared session, so on 1.1.2 we
+    intentionally omit the unsupported constructor argument.
+    """
+    apply_patches(hass)
+    create = Authenticator.create
+    parameters = inspect.signature(create).parameters
+    kwargs: dict[str, Any] = {
+        "token": token,
+        "use_refresh_token": use_refresh_token,
+    }
+    if "client_session" in parameters:
+        kwargs["client_session"] = async_get_clientsession(hass)
+        _LOGGER.debug(
+            "Creating pyfamilysafety Authenticator with Home Assistant client session"
+        )
+    else:
+        _LOGGER.debug(
+            "Creating pyfamilysafety Authenticator using legacy create() signature"
+        )
+    return await create(**kwargs)

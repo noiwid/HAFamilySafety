@@ -258,8 +258,7 @@ def _register_services(hass: HomeAssistant) -> None:
         async def handler(call: ServiceCall) -> None:
             coordinator = _get_coordinator(hass)
             if coordinator is None:
-                _LOGGER.error("No Family Safety coordinator available")
-                return
+                raise RuntimeError("No Microsoft Family Safety coordinator available")
             await getattr(coordinator, method_name)(*extract_args(call.data))
         return handler
 

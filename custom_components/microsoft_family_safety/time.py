@@ -20,15 +20,19 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _parse_time(time_str: str | None) -> dt_time | None:
-    """Parse a time string like '07:00:00' or '07:00' to datetime.time."""
+    """Parse a Microsoft time string to datetime.time."""
     if not time_str:
         return None
     try:
         parts = time_str.split(":")
-        return dt_time(int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
-    except (ValueError, IndexError):
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        # Microsoft may represent the end of a day as 24:00:00.
+        if hour >= 24:
+            return dt_time(23, 59)
+        return dt_time(hour, minute)
+    except (TypeError, ValueError, IndexError):
         return None
-
 
 def _intervals_to_start_end(intervals: list[bool]) -> tuple[dt_time | None, dt_time | None]:
     """Convert 48-boolean interval list to start/end times.
@@ -71,16 +75,17 @@ def _extract_day_times(
     # Try allowedIntervals — can be either:
     # - list of 48 booleans (timeline format)
     # - list of {begin, beginTimeSpan, end, endTimeSpan} objects
-    intervals = day_data.get("allowedIntervals", day_data.get("AllowedIntervals"))
+    intervals = day_data.get("timeline") or day_data.get("allowedIntervals", day_data.get("AllowedIntervals"))
     if isinstance(intervals, list):
         if len(intervals) == 48 and isinstance(intervals[0], bool):
             return _intervals_to_start_end(intervals)
         if intervals and isinstance(intervals[0], dict):
             first = intervals[0]
+            last = intervals[-1]
             start_str = (first.get("beginTimeSpan") or first.get("start")
-                         or first.get("Start") or first.get("begin"))
-            end_str = (first.get("endTimeSpan") or first.get("end")
-                       or first.get("End"))
+                         or first.get("Start") or first.get("begin") or first.get("Begin"))
+            end_str = (last.get("endTimeSpan") or last.get("end")
+                       or last.get("End"))
             return _parse_time(start_str), _parse_time(end_str)
 
     # Try alternate keys: intervals, allottedIntervals
