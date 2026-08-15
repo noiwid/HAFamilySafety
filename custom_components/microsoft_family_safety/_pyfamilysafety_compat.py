@@ -21,6 +21,11 @@ that surface on Home Assistant, especially on Python 3.14:
    a refresh-token grant. The stale access token is then reused until the
    mobile API answers ``HTTP Unauthorized``.
 
+4. In 1.1.2 ``Authenticator.access_token`` is the raw token value. Newer
+   releases expose the complete ``MSAuth1.0`` Authorization value instead.
+   Code written against the newer API can therefore send a raw token to the
+   mobile aggregator and receive ``Authentication.BadCompactTicket``.
+
 This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
@@ -50,6 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 _REQUEST_PATCH_MARKER = "_hafs_shared_session_patch"
 _REFRESH_PATCH_MARKER = "_hafs_refresh_validation_patch"
 _API_PATCH_MARKER = "_hafs_unauthorized_retry_patch"
+_WEB_API_HEADER_PATCH_MARKER = "_hafs_mobile_authorization_header_patch"
 
 # The HA-managed session, injected at setup time.
 _shared_session: aiohttp.ClientSession | None = None
@@ -130,6 +136,21 @@ def _set_access_token(authenticator: Authenticator, token: str) -> None:
         authenticator._access_token = token
     else:
         authenticator.access_token = token
+
+
+def authenticator_authorization_header(authenticator: Authenticator) -> str:
+    """Return the mobile API Authorization value across library versions.
+
+    pyfamilysafety 1.1.2 stores the raw access token in ``access_token`` and
+    constructs the MSAuth wrapper inside FamilySafetyAPI. Newer releases expose
+    the already wrapped value through the property itself. Never log the value.
+    """
+    value = str(getattr(authenticator, "access_token", "") or "")
+    if not value:
+        return value
+    if value.lstrip().lower().startswith("msauth1.0 "):
+        return value
+    return f'MSAuth1.0 usertoken="{value}", type="MSACT"'
 
 
 def _oauth_error(payload: object) -> str | None:
@@ -301,6 +322,41 @@ async def _patched_send_request(
         return result
 
 
+def _patch_combined_client_mobile_header() -> bool:
+    """Normalize the combined client's mobile Authorization header.
+
+    Import lazily to avoid a module import cycle: api_client imports this compat
+    module, while this patch is only applied later during coordinator setup.
+    """
+    try:
+        from .api_client import FamilySafetyWebAPI
+    except (ImportError, AttributeError):
+        return False
+
+    original = FamilySafetyWebAPI._build_headers
+    if getattr(original, _WEB_API_HEADER_PATCH_MARKER, False):
+        return False
+
+    def _patched_build_headers(self) -> dict[str, str]:
+        headers = original(self)
+        current = headers.get("Authorization", "")
+        normalized = authenticator_authorization_header(self._authenticator)
+        headers["Authorization"] = normalized
+        if current != normalized and not getattr(
+            self, "_legacy_mobile_auth_header_logged", False
+        ):
+            _LOGGER.debug(
+                "Normalized legacy pyfamilysafety raw mobile access token to "
+                "MSAuth1.0 Authorization format"
+            )
+            self._legacy_mobile_auth_header_logged = True
+        return headers
+
+    setattr(_patched_build_headers, _WEB_API_HEADER_PATCH_MARKER, True)
+    FamilySafetyWebAPI._build_headers = _patched_build_headers
+    return True
+
+
 def apply_patches(hass: HomeAssistant) -> None:
     """Apply the pyfamilysafety compatibility patches (idempotent)."""
     set_shared_session(async_get_clientsession(hass))
@@ -320,6 +376,9 @@ def apply_patches(hass: HomeAssistant) -> None:
         setattr(_patched_send_request, _API_PATCH_MARKER, True)
         FamilySafetyAPI.send_request = _patched_send_request
         applied.append("single Unauthorized refresh retry")
+
+    if _patch_combined_client_mobile_header():
+        applied.append("legacy mobile Authorization header normalization")
 
     if applied:
         _LOGGER.debug(
