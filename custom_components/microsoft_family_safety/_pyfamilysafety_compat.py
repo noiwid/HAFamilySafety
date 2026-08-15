@@ -1,8 +1,7 @@
 """Runtime compatibility patches for pyfamilysafety 1.1.2.
 
-The pinned PyPI release of ``pyfamilysafety`` (1.1.2, the newest published
-version) has two problems that surface on Home Assistant, especially on
-Python 3.14:
+The pinned PyPI release of ``pyfamilysafety`` (1.1.2) has several problems
+that surface on Home Assistant, especially on Python 3.14:
 
 1. ``Authenticator._request_handler`` creates a brand new
    ``aiohttp.ClientSession()`` on *every* auth/refresh request and never
@@ -18,12 +17,11 @@ Python 3.14:
    (the recurring 400 in issue #23), that call raises and crashes the whole
    update cycle instead of surfacing a clean status code.
 
-This module monkey-patches ``Authenticator._request_handler`` to:
-- reuse Home Assistant's shared aiohttp session (no per-request session,
-  no dependency on the fragile module-level ``aiohttp.ClientSession`` symbol);
-- decode JSON defensively so non-JSON error bodies don't crash the refresh.
+3. ``Authenticator.perform_refresh`` silently returns when Microsoft rejects
+   a refresh-token grant. The stale access token is then reused until the
+   mobile API answers ``HTTP Unauthorized``.
 
-The patch is idempotent and only ever wraps the original once.
+This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
 
@@ -33,16 +31,25 @@ import logging
 from typing import Any
 
 import aiohttp
+from pyfamilysafety.api import FamilySafetyAPI
 from pyfamilysafety.authenticator import Authenticator
-from pyfamilysafety.authenticator.const import USER_AGENT
+from pyfamilysafety.authenticator.const import (
+    CLIENT_ID,
+    SCOPE,
+    TOKEN_ENDPOINT,
+    USER_AGENT,
+)
+from pyfamilysafety.exceptions import HttpException, Unauthorized
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
 
-# Marker so we never double-patch.
-_PATCH_MARKER = "_hafs_shared_session_patch"
+# Markers so we never double-patch.
+_REQUEST_PATCH_MARKER = "_hafs_shared_session_patch"
+_REFRESH_PATCH_MARKER = "_hafs_refresh_validation_patch"
+_API_PATCH_MARKER = "_hafs_unauthorized_retry_patch"
 
 # The HA-managed session, injected at setup time.
 _shared_session: aiohttp.ClientSession | None = None
@@ -117,19 +124,208 @@ async def _patched_request_handler(
     return response
 
 
+def _set_access_token(authenticator: Authenticator, token: str) -> None:
+    """Set the raw access token across pyfamilysafety API versions."""
+    if hasattr(authenticator, "_access_token"):
+        authenticator._access_token = token
+    else:
+        authenticator.access_token = token
+
+
+def _oauth_error(payload: object) -> str | None:
+    """Extract a non-secret OAuth error code."""
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    if isinstance(error, str):
+        return error
+    if isinstance(error, dict) and error.get("code"):
+        return str(error["code"])
+    return None
+
+
+async def _patched_perform_refresh(self: Authenticator) -> None:
+    """Refresh the mobile token and fail when Microsoft rejects the grant."""
+    lock = self._login_lock
+    if lock.locked():
+        _LOGGER.debug("Mobile token refresh already in progress; waiting")
+        async with lock:
+            pass
+        if authenticator_access_token_expired(self):
+            raise HttpException(
+                "authentication failed: concurrent mobile token refresh "
+                "did not produce a valid access token"
+            )
+        return
+
+    async with lock:
+        old_refresh_token = self.refresh_token
+        _LOGGER.info(
+            "Refreshing Microsoft Family Safety mobile access token "
+            "(previous_expiry=%s)",
+            self.expires.isoformat() if isinstance(self.expires, datetime) else None,
+        )
+
+        form = aiohttp.FormData()
+        form.add_field("client_id", CLIENT_ID)
+        form.add_field("refresh_token", old_refresh_token or "")
+        form.add_field("grant_type", "refresh_token")
+        form.add_field("scope", SCOPE)
+
+        try:
+            tokens = await self._request_handler(
+                method="POST", url=TOKEN_ENDPOINT, data=form
+            )
+        except Exception as err:
+            _LOGGER.warning(
+                "Microsoft Family Safety mobile token refresh request failed: %s",
+                type(err).__name__,
+            )
+            raise
+
+        status = tokens.get("status")
+        payload = tokens.get("json")
+        error = _oauth_error(payload)
+        if status != 200 or not isinstance(payload, dict):
+            _LOGGER.error(
+                "Microsoft Family Safety mobile token refresh rejected: "
+                "status=%s error=%s",
+                status, error,
+            )
+            raise HttpException(
+                "authentication failed during mobile token refresh",
+                status,
+                error or "token_endpoint_rejected",
+            )
+
+        access_token = payload.get("access_token")
+        refresh_token = payload.get("refresh_token")
+        expires_in = payload.get("expires_in")
+        if not access_token or not refresh_token or expires_in is None:
+            _LOGGER.error(
+                "Microsoft Family Safety mobile token refresh returned an "
+                "incomplete response (status=%s)",
+                status,
+            )
+            raise HttpException(
+                "authentication failed: incomplete mobile token refresh response"
+            )
+
+        try:
+            expires_seconds = int(expires_in)
+        except (TypeError, ValueError) as err:
+            raise HttpException(
+                "authentication failed: invalid mobile token expiry"
+            ) from err
+
+        _set_access_token(self, str(access_token))
+        self.expires = datetime.now() + timedelta(seconds=expires_seconds)
+        self.refresh_token = str(refresh_token)
+        if payload.get("user_id") is not None:
+            self.user_id = payload["user_id"]
+
+        _LOGGER.info(
+            "Microsoft Family Safety mobile token refresh succeeded "
+            "(expires_in=%ss refresh_token_rotated=%s)",
+            expires_seconds,
+            bool(old_refresh_token and self.refresh_token != old_refresh_token),
+        )
+
+
+_original_send_request = FamilySafetyAPI.send_request
+
+
+async def _patched_send_request(
+    self: FamilySafetyAPI,
+    endpoint: str,
+    body: object = None,
+    headers: dict | None = None,
+    platform: str | None = None,
+    **kwargs: Any,
+):
+    """Retry one mobile API 401 after forcing a fresh access token."""
+    try:
+        return await _original_send_request(
+            self,
+            endpoint,
+            body=body,
+            headers=headers,
+            platform=platform,
+            **kwargs,
+        )
+    except Unauthorized as err:
+        authenticator = getattr(self, "authenticator", None)
+        if authenticator is None:
+            raise HttpException(
+                "authentication failed: mobile API returned HTTP Unauthorized"
+            ) from err
+
+        _LOGGER.warning(
+            "Microsoft Family Safety mobile API returned HTTP Unauthorized "
+            "for endpoint=%s; forcing one token refresh and retry",
+            endpoint,
+        )
+        await authenticator.perform_refresh()
+
+        session = getattr(self, "_session", None)
+        if session is not None:
+            try:
+                session.headers.pop("Authorization")
+            except KeyError:
+                pass
+
+        try:
+            result = await _original_send_request(
+                self,
+                endpoint,
+                body=body,
+                headers=headers,
+                platform=platform,
+                **kwargs,
+            )
+        except Unauthorized as retry_err:
+            _LOGGER.error(
+                "Microsoft Family Safety mobile API still returned HTTP "
+                "Unauthorized after token refresh for endpoint=%s",
+                endpoint,
+            )
+            raise HttpException(
+                "authentication failed: HTTP Unauthorized after mobile token refresh"
+            ) from retry_err
+
+        _LOGGER.info(
+            "Microsoft Family Safety mobile API recovered after forced token "
+            "refresh for endpoint=%s",
+            endpoint,
+        )
+        return result
+
+
 def apply_patches(hass: HomeAssistant) -> None:
     """Apply the pyfamilysafety compatibility patches (idempotent)."""
     set_shared_session(async_get_clientsession(hass))
+    applied: list[str] = []
 
-    if getattr(Authenticator._request_handler, _PATCH_MARKER, False):
-        return
+    if not getattr(Authenticator._request_handler, _REQUEST_PATCH_MARKER, False):
+        setattr(_patched_request_handler, _REQUEST_PATCH_MARKER, True)
+        Authenticator._request_handler = _patched_request_handler
+        applied.append("shared session + tolerant JSON decode")
 
-    setattr(_patched_request_handler, _PATCH_MARKER, True)
-    Authenticator._request_handler = _patched_request_handler
-    _LOGGER.debug(
-        "Applied pyfamilysafety compatibility patch "
-        "(shared session + tolerant JSON decode)"
-    )
+    if not getattr(Authenticator.perform_refresh, _REFRESH_PATCH_MARKER, False):
+        setattr(_patched_perform_refresh, _REFRESH_PATCH_MARKER, True)
+        Authenticator.perform_refresh = _patched_perform_refresh
+        applied.append("validated mobile token refresh")
+
+    if not getattr(FamilySafetyAPI.send_request, _API_PATCH_MARKER, False):
+        setattr(_patched_send_request, _API_PATCH_MARKER, True)
+        FamilySafetyAPI.send_request = _patched_send_request
+        applied.append("single Unauthorized refresh retry")
+
+    if applied:
+        _LOGGER.debug(
+            "Applied pyfamilysafety compatibility patches (%s)",
+            "; ".join(applied),
+        )
 
 
 def authenticator_access_token_expired(authenticator: Authenticator) -> bool:
