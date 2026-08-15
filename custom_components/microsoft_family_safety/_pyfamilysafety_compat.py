@@ -31,6 +31,11 @@ that surface on Home Assistant, especially on Python 3.14:
    therefore hide otherwise readable policy data and make every coordinator
    cycle take more than a minute.
 
+6. The supplied browser HAR proves that the active Windows/per-device screen-
+   time schedule is read directly from ``/family/api/st?childId=...``. Earlier
+   compatibility code guessed that the mobile PATCH schedule resource might
+   also support GET, which Microsoft rejects with HTTP 400.
+
 This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
@@ -419,15 +424,8 @@ def _patch_web_probe_backoff() -> bool:
     return True
 
 
-def _safe_payload_keys(payload: object) -> list[str]:
-    """Return only structural keys for diagnostics, never payload values."""
-    if not isinstance(payload, dict):
-        return []
-    return sorted(str(key) for key in payload.keys())[:30]
-
-
 def _patch_combined_client_data_sources() -> bool:
-    """Prefer authenticated mobile reads and use private web only as fallback."""
+    """Prefer authenticated mobile reads and HAR-confirmed policy reads."""
     try:
         from .api_client import FamilySafetyWebAPI
     except (ImportError, AttributeError):
@@ -492,87 +490,24 @@ def _patch_combined_client_data_sources() -> bool:
         self.content_settings_status = "ok" if isinstance(result, dict) else "no_data"
         return result
 
-    async def _probe_mobile_schedule(self, child_id: str, platform: str):
-        """Probe GET on the mobile schedule resource without forcing token refresh."""
-        await self._ensure_session()
-        await self._ensure_auth()
-        session = self._session
-        if session is None:
-            return None, None
-        headers = self._build_headers()
-        headers["Plat-Info"] = str(platform).upper()
-        url = f"https://mobileaggregator.family.microsoft.com/api/v4/devicelimits/schedules/{child_id}"
-        try:
-            async with session.request("GET", url, headers=headers) as resp:
-                status = resp.status
-                if status not in (200, 201, 204):
-                    await resp.read()
-                    return status, None
-                if status == 204:
-                    return status, None
-                try:
-                    payload = await resp.json(content_type=None)
-                except (aiohttp.ContentTypeError, ValueError):
-                    return status, None
-                return status, payload
-        except (aiohttp.ClientError, TimeoutError) as err:
-            _LOGGER.debug(
-                "Mobile screen-time schedule probe transport failure for child=%s: %s",
-                child_id,
-                type(err).__name__,
-            )
-            return None, None
-
     async def _patched_get_screentime_policy(
         self, child_id: str, platform: str = "Windows"
     ):
+        """Read the active Windows/per-device policy exactly as seen in the HAR.
+
+        The capture first reports ``time-allowance-policy`` as ``perDeviceType``
+        and then GETs ``/family/api/st?childId=...``. The /st response is enabled
+        and its allowance/interval values match the child's ``timeRestrictions``
+        object from landing-page-feeds. Therefore /st is the authoritative first
+        read for the Windows schedule; landing-page-feeds remains fallback only.
+        """
         self.screentime_policy_status = "checking"
         self.screentime_policy_source = None
-
-        mobile_supported = getattr(self, "_mobile_schedule_get_supported", None)
-        if mobile_supported is not False:
-            status, payload = await _probe_mobile_schedule(self, child_id, platform)
-            if status in (200, 201, 204):
-                self._mobile_schedule_get_supported = True
-                policy = self._normalize_screentime_policy(payload, child_id)
-                if policy is not None:
-                    self.screentime_policy_status = "ok"
-                    self.screentime_policy_source = "mobile_schedule"
-                    _LOGGER.info(
-                        "Loaded screen-time weekday policy from mobile schedule API "
-                        "for child=%s",
-                        child_id,
-                    )
-                    return policy
-                _LOGGER.debug(
-                    "Mobile schedule GET succeeded but contained no recognized policy "
-                    "for child=%s payload_type=%s top_level_keys=%s",
-                    child_id,
-                    type(payload).__name__,
-                    _safe_payload_keys(payload),
-                )
-            elif status in (404, 405):
-                self._mobile_schedule_get_supported = False
-                if not getattr(self, "_mobile_schedule_unsupported_logged", False):
-                    _LOGGER.info(
-                        "Mobile screen-time schedule GET is not supported by this "
-                        "Microsoft endpoint (status=%s); using web fallback",
-                        status,
-                    )
-                    self._mobile_schedule_unsupported_logged = True
-            elif status is not None:
-                _LOGGER.debug(
-                    "Mobile screen-time schedule GET unavailable for child=%s status=%s; "
-                    "using web fallback",
-                    child_id,
-                    status,
-                )
 
         now = time.monotonic()
         backoff_until = float(getattr(self, "_family_web_backoff_until", 0.0) or 0.0)
         if backoff_until > now:
             self.screentime_policy_status = "web_api_backoff"
-            self.screentime_policy_source = None
             self.web_api_state = "backoff"
             _LOGGER.debug(
                 "Skipping Family web screen-time policy request during backoff "
@@ -581,6 +516,40 @@ def _patch_combined_client_data_sources() -> bool:
             )
             return None
 
+        st_url = f"{self.WEB_API_BASE}/family/api/st"
+        result = await self._web_request(
+            "GET", st_url, params={"childId": str(child_id)}
+        )
+        policy = self._normalize_screentime_policy(result, child_id)
+        if policy is not None:
+            self.screentime_policy_status = "ok"
+            self.screentime_policy_source = "st_har"
+            self._family_web_backoff_until = 0.0
+            _LOGGER.info(
+                "Loaded screen-time weekday policy from HAR-confirmed Family /st endpoint "
+                "for child=%s",
+                child_id,
+            )
+            return policy
+
+        st_error = self.last_web_error_code
+        if st_error == "LOGIN_REDIRECT":
+            self.screentime_policy_status = "session_expired"
+            return None
+        if st_error in {"TIMEOUT", "NETWORK_ERROR"}:
+            self.screentime_policy_status = (
+                "web_api_timeout" if st_error == "TIMEOUT" else "web_api_network_error"
+            )
+            self._family_web_backoff_until = time.monotonic() + _WEB_BACKOFF_SECONDS
+            _LOGGER.debug(
+                "Backing off Family web policy requests for %d seconds after %s on /st",
+                _WEB_BACKOFF_SECONDS,
+                st_error,
+            )
+            return None
+
+        # Only non-transport failures fall back to the older tolerant reader,
+        # which can extract the same policy from landing-page-feeds.
         policy = await original_screentime_policy(self, child_id, platform)
         if policy is not None:
             self._family_web_backoff_until = 0.0
@@ -631,9 +600,7 @@ def _patch_connection_state_diagnostics() -> bool:
                 "screentime_policy_source": getattr(
                     api, "screentime_policy_source", None
                 ),
-                "mobile_schedule_get_supported": getattr(
-                    api, "_mobile_schedule_get_supported", None
-                ),
+                "screentime_policy_endpoint": "/family/api/st",
                 "web_probe_backoff_active": bool(
                     api
                     and float(getattr(api, "_web_probe_backoff_until", 0.0) or 0.0)
@@ -680,7 +647,7 @@ def apply_patches(hass: HomeAssistant) -> None:
         applied.append("web transport backoff")
 
     if _patch_combined_client_data_sources():
-        applied.append("mobile-first policy data sources")
+        applied.append("mobile-first + HAR screen-time data sources")
 
     if _patch_connection_state_diagnostics():
         applied.append("connection source diagnostics")
