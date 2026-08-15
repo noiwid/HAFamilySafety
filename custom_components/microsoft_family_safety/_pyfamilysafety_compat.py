@@ -36,6 +36,12 @@ that surface on Home Assistant, especially on Python 3.14:
    compatibility code guessed that the mobile PATCH schedule resource might
    also support GET, which Microsoft rejects with HTTP 400.
 
+7. Runtime logs show intermittent ``Timeout while contacting DNS servers``
+   errors from aiohttp's resolver path, including for both account.microsoft.com
+   and the mobile aggregator. The Family web client therefore uses an explicit
+   threaded system resolver with IPv4, matching the successful browser HAR's
+   IPv4 transport while leaving the rest of Home Assistant untouched.
+
 This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
@@ -43,6 +49,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import inspect
 import logging
+import socket
 import time
 from typing import Any
 
@@ -69,6 +76,7 @@ _API_PATCH_MARKER = "_hafs_unauthorized_retry_patch"
 _WEB_API_HEADER_PATCH_MARKER = "_hafs_mobile_authorization_header_patch"
 _DATA_SOURCE_PATCH_MARKER = "_hafs_mobile_first_data_sources_patch"
 _WEB_PROBE_PATCH_MARKER = "_hafs_web_probe_backoff_patch"
+_WEB_TRANSPORT_PATCH_MARKER = "_hafs_ipv4_threaded_web_transport_patch"
 _CONNECTION_STATE_PATCH_MARKER = "_hafs_connection_state_diagnostics_patch"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
@@ -102,10 +110,6 @@ async def _patched_request_handler(
 
     session = _shared_session
     if session is None or session.closed:
-        # Fallback: behave like the original but without depending on the
-        # module-level ClientSession symbol being a class. This still avoids
-        # the "object is not callable" failure mode because we hold a real
-        # class reference here.
         _LOGGER.debug("Shared session unavailable, using a temporary session")
         session_cm = aiohttp.ClientSession()
     else:
@@ -134,8 +138,6 @@ async def _patched_request_handler(
             try:
                 response["json"] = await resp.json(content_type=None)
             except (aiohttp.ContentTypeError, ValueError):
-                # Non-JSON body (e.g. Microsoft HTML error page). Keep the
-                # status/text so callers can react instead of crashing.
                 _LOGGER.debug(
                     "Auth response from %s was not JSON (status %s)",
                     url, resp.status,
@@ -157,12 +159,7 @@ def _set_access_token(authenticator: Authenticator, token: str) -> None:
 
 
 def authenticator_authorization_header(authenticator: Authenticator) -> str:
-    """Return the mobile API Authorization value across library versions.
-
-    pyfamilysafety 1.1.2 stores the raw access token in ``access_token`` and
-    constructs the MSAuth wrapper inside FamilySafetyAPI. Newer releases expose
-    the already wrapped value through the property itself. Never log the value.
-    """
+    """Return the mobile API Authorization value across library versions."""
     value = str(getattr(authenticator, "access_token", "") or "")
     if not value:
         return value
@@ -341,11 +338,7 @@ async def _patched_send_request(
 
 
 def _patch_combined_client_mobile_header() -> bool:
-    """Normalize the combined client's mobile Authorization header.
-
-    Import lazily to avoid a module import cycle: api_client imports this compat
-    module, while this patch is only applied later during coordinator setup.
-    """
+    """Normalize the combined client's mobile Authorization header."""
     try:
         from .api_client import FamilySafetyWebAPI
     except (ImportError, AttributeError):
@@ -372,6 +365,47 @@ def _patch_combined_client_mobile_header() -> bool:
 
     setattr(_patched_build_headers, _WEB_API_HEADER_PATCH_MARKER, True)
     FamilySafetyWebAPI._build_headers = _patched_build_headers
+    return True
+
+
+def _patch_web_transport() -> bool:
+    """Use a stable IPv4/threaded resolver for private Family web traffic.
+
+    This patch is intentionally scoped to the integration's dedicated browser
+    session. It does not change Home Assistant's global resolver or the mobile
+    Family Safety client.
+    """
+    try:
+        from .api_client import FamilySafetyWebAPI
+    except (ImportError, AttributeError):
+        return False
+
+    original = FamilySafetyWebAPI._get_web_session
+    if getattr(original, _WEB_TRANSPORT_PATCH_MARKER, False):
+        return False
+
+    def _patched_get_web_session(self):
+        if self._web_session is None or self._web_session.closed:
+            connector = aiohttp.TCPConnector(
+                resolver=aiohttp.ThreadedResolver(),
+                family=socket.AF_INET,
+                ttl_dns_cache=300,
+            )
+            self._web_session = aiohttp.ClientSession(
+                connector=connector,
+                cookie_jar=self._build_cookie_jar(),
+                timeout=aiohttp.ClientTimeout(
+                    total=20, connect=8, sock_connect=8, sock_read=15
+                ),
+            )
+            self._hafs_web_transport = "ipv4_threaded_resolver"
+            _LOGGER.debug(
+                "Created Microsoft Family web session with IPv4 threaded DNS resolver"
+            )
+        return self._web_session
+
+    setattr(_patched_get_web_session, _WEB_TRANSPORT_PATCH_MARKER, True)
+    FamilySafetyWebAPI._get_web_session = _patched_get_web_session
     return True
 
 
@@ -474,9 +508,9 @@ def _patch_combined_client_data_sources() -> bool:
         if isinstance(result, dict):
             self.web_browsing_status = "ok"
             return result
-        self.web_browsing_status = (
-            str(self.last_web_error_code or "web_no_data").lower()
-        )
+        self.web_browsing_status = str(
+            self.last_web_error_code or "web_no_data"
+        ).lower()
         return None
 
     async def _patched_get_content_settings(self, child_id: str):
@@ -493,14 +527,7 @@ def _patch_combined_client_data_sources() -> bool:
     async def _patched_get_screentime_policy(
         self, child_id: str, platform: str = "Windows"
     ):
-        """Read the active Windows/per-device policy exactly as seen in the HAR.
-
-        The capture first reports ``time-allowance-policy`` as ``perDeviceType``
-        and then GETs ``/family/api/st?childId=...``. The /st response is enabled
-        and its allowance/interval values match the child's ``timeRestrictions``
-        object from landing-page-feeds. Therefore /st is the authoritative first
-        read for the Windows schedule; landing-page-feeds remains fallback only.
-        """
+        """Read the active Windows/per-device policy exactly as seen in the HAR."""
         self.screentime_policy_status = "checking"
         self.screentime_policy_source = None
 
@@ -548,8 +575,6 @@ def _patch_combined_client_data_sources() -> bool:
             )
             return None
 
-        # Only non-transport failures fall back to the older tolerant reader,
-        # which can extract the same policy from landing-page-feeds.
         policy = await original_screentime_policy(self, child_id, platform)
         if policy is not None:
             self._family_web_backoff_until = 0.0
@@ -601,6 +626,7 @@ def _patch_connection_state_diagnostics() -> bool:
                     api, "screentime_policy_source", None
                 ),
                 "screentime_policy_endpoint": "/family/api/st",
+                "web_transport": getattr(api, "_hafs_web_transport", "default"),
                 "web_probe_backoff_active": bool(
                     api
                     and float(getattr(api, "_web_probe_backoff_until", 0.0) or 0.0)
@@ -643,6 +669,9 @@ def apply_patches(hass: HomeAssistant) -> None:
     if _patch_combined_client_mobile_header():
         applied.append("legacy mobile Authorization header normalization")
 
+    if _patch_web_transport():
+        applied.append("IPv4 threaded Family web transport")
+
     if _patch_web_probe_backoff():
         applied.append("web transport backoff")
 
@@ -660,12 +689,7 @@ def apply_patches(hass: HomeAssistant) -> None:
 
 
 def authenticator_access_token_expired(authenticator: Authenticator) -> bool:
-    """Return token-expiry state across pyfamilysafety API versions.
-
-    pyfamilysafety 1.1.2 has ``expires`` but no ``access_token_expired``
-    property. Newer releases expose the property. A small safety margin avoids
-    starting a request with a token that is about to expire.
-    """
+    """Return token-expiry state across pyfamilysafety API versions."""
     try:
         value = getattr(authenticator, "access_token_expired")
     except AttributeError:
@@ -678,7 +702,11 @@ def authenticator_access_token_expired(authenticator: Authenticator) -> bool:
     expires = getattr(authenticator, "expires", None)
     if expires is None:
         return True
-    now = datetime.now(tz=expires.tzinfo) if getattr(expires, "tzinfo", None) else datetime.now()
+    now = (
+        datetime.now(tz=expires.tzinfo)
+        if getattr(expires, "tzinfo", None)
+        else datetime.now()
+    )
     return expires <= now + timedelta(seconds=60)
 
 
@@ -688,14 +716,7 @@ async def create_authenticator(
     *,
     use_refresh_token: bool,
 ) -> Authenticator:
-    """Create an Authenticator across pyfamilysafety API versions.
-
-    pyfamilysafety 1.1.2 exposes ``Authenticator.create(token,
-    use_refresh_token=False)`` and creates its own aiohttp session inside the
-    request handler. Newer releases accept ``client_session``. Our request
-    handler patch always uses Home Assistant's shared session, so on 1.1.2 we
-    intentionally omit the unsupported constructor argument.
-    """
+    """Create an Authenticator across pyfamilysafety API versions."""
     apply_patches(hass)
     create = Authenticator.create
     parameters = inspect.signature(create).parameters
