@@ -34,6 +34,7 @@ from .const import (
     SERVICE_UNLOCK_ACCOUNT,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
+from ._httpx_web_adapter import apply_httpx_web_transport_patch
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,6 +153,7 @@ def _get_coordinator(hass: HomeAssistant) -> FamilySafetyDataUpdateCoordinator |
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Microsoft Family Safety from a config entry."""
+    apply_httpx_web_transport_patch(hass)
     coordinator = FamilySafetyDataUpdateCoordinator(hass, entry)
 
     # Load persisted screentime policies (for lock/unlock survival across restarts)
