@@ -525,7 +525,8 @@ def _patch_combined_client_data_sources() -> bool:
         return result
 
     async def _patched_get_screentime_policy(
-        self, child_id: str, platform: str = "Windows"
+        self, child_id: str, platform: str = "Windows",
+        *, require_child_match: bool = False,
     ):
         """Read the active Windows/per-device policy exactly as seen in the HAR."""
         self.screentime_policy_status = "checking"
@@ -547,7 +548,9 @@ def _patch_combined_client_data_sources() -> bool:
         result = await self._web_request(
             "GET", st_url, params={"childId": str(child_id)}
         )
-        policy = self._normalize_screentime_policy(result, child_id)
+        policy = self._normalize_screentime_policy(
+            result, child_id, require_child_match=require_child_match
+        )
         if policy is not None:
             self.screentime_policy_status = "ok"
             self.screentime_policy_source = "st_har"
@@ -575,7 +578,9 @@ def _patch_combined_client_data_sources() -> bool:
             )
             return None
 
-        policy = await original_screentime_policy(self, child_id, platform)
+        policy = await original_screentime_policy(
+            self, child_id, platform, require_child_match=require_child_match
+        )
         if policy is not None:
             self._family_web_backoff_until = 0.0
             return policy
