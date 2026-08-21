@@ -1,4 +1,4 @@
-# <img src="custom_components/microsoft_family_safety/brand/icon.png" alt="Google Family Safety" width="30" > Microsoft Family Safety for Home Assistant
+# <img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/custom_components/microsoft_family_safety/brand/icon.png" alt="Microsoft Family Safety" width="30" > Microsoft Family Safety for Home Assistant
 
 [![GitHub Release][releases-shield]][releases]
 [![HACS][hacs-shield]][hacs]
@@ -13,7 +13,7 @@ Authentication is **native**: you sign in to Microsoft from Home Assistant itsel
 
 > **Domain:** `microsoft_family_safety` | **IoT Class:** Cloud Polling | **Languages:** English, French, German
 
-![Dashboard Example](examples/dashboard.png)
+![Dashboard Example](https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/dashboard.png)
 
 ---
 

@@ -3,379 +3,379 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety",
-        "description": "Configure the integration. After Submit, Home Assistant opens Microsoft sign-in through a temporary authentication proxy and captures the OAuth redirect automatically. If Home Assistant is not reachable over HTTPS, local HTTP can be explicitly enabled for testing; Microsoft credentials are then not transport-encrypted on the local network.",
+        "description": "Configurez l'intégration. Après validation, Home Assistant ouvre la connexion Microsoft via un proxy d'authentification temporaire et capture automatiquement la redirection OAuth. Si Home Assistant n'est pas joignable en HTTPS, vous pouvez activer explicitement le HTTP local pour des tests ; les identifiants Microsoft ne sont alors pas chiffrés sur le réseau local.",
         "data": {
-          "update_interval": "Update interval (seconds)",
-          "platforms": "Monitored platforms",
-          "auth_url": "Legacy auth add-on URL (optional)",
-          "api_key": "Legacy add-on API key (optional)",
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "update_interval": "Intervalle de mise à jour (secondes)",
+          "platforms": "Plateformes surveillées",
+          "auth_url": "URL de l'add-on d'authentification (optionnel, mode legacy)",
+          "api_key": "Clé API de l'add-on (optionnel, mode legacy)",
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
         }
       },
       "auth": {
-        "title": "Manual Microsoft Family Safety authentication",
-        "description": "Home Assistant could not use the secure browser-assisted login because no HTTPS Home Assistant URL is configured. Open this Microsoft URL, sign in, and paste the complete resulting redirect URL here:\n\n{auth_url}",
+        "title": "Authentification Microsoft Family Safety manuelle",
+        "description": "Home Assistant n'a pas pu utiliser la connexion assistée par navigateur car aucune URL HTTPS n'est configurée. Ouvrez cette URL Microsoft, connectez-vous, puis collez ici l'URL de redirection complète obtenue :\n\n{auth_url}",
         "data": {
-          "redirect_url": "Redirect URL"
+          "redirect_url": "URL de redirection"
         }
       },
       "reauth_confirm": {
-        "title": "Reauthenticate Microsoft Family Safety",
-        "description": "The stored Microsoft sign-in is incomplete, expired, or revoked. Continue to run the complete sign-in again and renew both the mobile refresh token and the Family web session."
+        "title": "Ré-authentifier Microsoft Family Safety",
+        "description": "La connexion Microsoft enregistrée est incomplète, expirée ou révoquée. Continuez pour relancer la connexion complète et renouveler à la fois le jeton de rafraîchissement mobile et la session web Family."
       },
       "reauth_full_confirm": {
-        "title": "Reauthenticate Microsoft Family Safety",
-        "description": "The stored Microsoft authentication is incomplete, expired, or revoked. Continue to renew both the mobile OAuth refresh token and the Family web session. If this Home Assistant instance is only reachable over a private local HTTP URL, enable the local HTTP test option below.",
+        "title": "Ré-authentifier Microsoft Family Safety",
+        "description": "L'authentification Microsoft enregistrée est incomplète, expirée ou révoquée. Continuez pour renouveler le jeton de rafraîchissement OAuth mobile et la session web Family. Si cette instance Home Assistant n'est joignable que par une URL HTTP locale privée, activez l'option de test HTTP local ci-dessous.",
         "data": {
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
         }
       },
       "reauth_success": {
-        "title": "Microsoft Family Safety sign-in completed",
-        "description": "Microsoft authentication completed successfully and the new credentials are ready to be saved. Select Submit to finish the reauthentication."
+        "title": "Connexion Microsoft Family Safety terminée",
+        "description": "L'authentification Microsoft s'est terminée avec succès et les nouveaux identifiants sont prêts à être enregistrés. Cliquez sur Valider pour terminer la ré-authentification."
       },
       "check_mobile_proxy": {
-        "title": "Microsoft sign-in",
-        "description": "Sign in with the Microsoft account that manages the family. Keep the opened authentication window open. After the visible sign-in completes, Home Assistant will automatically switch to a waiting screen while Microsoft Family SSO finishes."
+        "title": "Connexion Microsoft",
+        "description": "Connectez-vous avec le compte Microsoft qui gère la famille. Laissez ouverte la fenêtre d'authentification. Une fois la connexion visible terminée, Home Assistant basculera automatiquement sur un écran d'attente pendant que l'authentification unique (SSO) Microsoft Family se termine."
       },
       "check_proxy": {
-        "title": "Microsoft Family web session"
+        "title": "Session web Microsoft Family"
       },
       "auth_success": {
-        "title": "Microsoft Family Safety sign-in completed",
-        "description": "Both Microsoft authentication phases completed successfully. Select Continue to create the integration.",
-        "submit": "Continue"
+        "title": "Connexion Microsoft Family Safety terminée",
+        "description": "Les deux phases d'authentification Microsoft se sont terminées avec succès. Cliquez sur Continuer pour créer l'intégration.",
+        "submit": "Continuer"
       },
       "wait_family_proxy": {
-        "title": "Completing Microsoft Family Safety sign-in"
+        "title": "Finalisation de la connexion Microsoft Family Safety"
       }
     },
     "error": {
-      "auth_failed": "Authentication failed.",
-      "token_expired": "Authentication expired.",
-      "no_redirect_url": "Please enter a valid redirect URL.",
-      "native_https_required": "Automatic browser authentication normally requires HTTPS. For local testing you can explicitly enable insecure local HTTP authentication.",
-      "unknown": "Unexpected authentication error.",
-      "native_http_not_local": "Insecure HTTP authentication is allowed only through localhost, .local, or a private/local IP address."
+      "auth_failed": "Échec de l'authentification.",
+      "token_expired": "Authentification expirée.",
+      "no_redirect_url": "Veuillez saisir une URL de redirection valide.",
+      "native_https_required": "L'authentification automatique par navigateur nécessite normalement HTTPS. Pour des tests locaux, vous pouvez activer explicitement l'authentification HTTP locale non sécurisée.",
+      "unknown": "Erreur d'authentification inattendue.",
+      "native_http_not_local": "L'authentification HTTP non sécurisée n'est autorisée que via localhost, .local ou une adresse IP privée/locale."
     },
     "abort": {
-      "already_configured": "This account is already configured.",
-      "reauth_successful": "Reauthentication successful!",
-      "native_auth_failed": "The Microsoft web authentication did not complete successfully.",
-      "native_auth_state_lost": "The browser authentication flow expired. Please start again.",
-      "native_auth_unavailable": "Native web authentication could not be loaded: {error}",
-      "native_oauth_failed": "The Microsoft Family Safety OAuth login did not complete successfully.",
-      "wrong_account": "A different Microsoft account was used. Please reauthenticate the same Family Safety account."
+      "already_configured": "Ce compte est déjà configuré.",
+      "reauth_successful": "Ré-authentification réussie !",
+      "native_auth_failed": "L'authentification web Microsoft ne s'est pas terminée correctement.",
+      "native_auth_state_lost": "Le processus d'authentification par navigateur a expiré. Veuillez recommencer.",
+      "native_auth_unavailable": "L'authentification web native n'a pas pu être chargée : {error}",
+      "native_oauth_failed": "La connexion OAuth Microsoft Family Safety ne s'est pas terminée correctement.",
+      "wrong_account": "Un compte Microsoft différent a été utilisé. Veuillez ré-authentifier le même compte Family Safety."
     },
     "check_mobile_proxy": {
-      "description": "Sign in with the Microsoft account that manages the family. After mobile OAuth succeeds, the same browser tab is redirected automatically into the Family web-session phase. After the visible Microsoft sign-in has finished, Home Assistant may need up to about 60 seconds to complete Microsoft's silent Family SSO and capture the Family session. Keep the browser window open and do not press Open website again while this is in progress."
+      "description": "Connectez-vous avec le compte Microsoft qui gère la famille. Une fois l'OAuth mobile réussi, le même onglet est redirigé automatiquement vers la phase de session web Family. Après la connexion Microsoft visible, Home Assistant peut avoir besoin d'environ 60 secondes pour terminer le SSO Family silencieux de Microsoft et capturer la session Family. Laissez la fenêtre du navigateur ouverte et ne cliquez pas à nouveau sur Ouvrir le site web pendant l'opération."
     },
     "check_proxy": {
-      "description": "Home Assistant is establishing the authenticated account.microsoft.com Family session. If Microsoft silent SSO needs to recover, the proxy retries the top-level account navigation automatically."
+      "description": "Home Assistant établit la session Family authentifiée sur account.microsoft.com. Si le SSO silencieux de Microsoft doit être relancé, le proxy réessaie automatiquement la navigation principale vers le compte."
     },
     "progress": {
-      "family_sso": "Microsoft sign-in is complete. Home Assistant is waiting for Microsoft Family SSO to finish in the open authentication window. This can take up to about 60 seconds. Keep the Microsoft window open; no action is required."
+      "family_sso": "La connexion Microsoft est terminée. Home Assistant attend la fin du SSO Microsoft Family dans la fenêtre d'authentification ouverte. Cela peut prendre environ 60 secondes. Laissez la fenêtre Microsoft ouverte ; aucune action n'est requise."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Microsoft Family Safety Options",
-        "description": "Configure polling, platforms, and optional legacy add-on fallback.",
+        "title": "Options Microsoft Family Safety",
+        "description": "Configurez l'interrogation, les plateformes et le repli optionnel vers l'add-on legacy.",
         "data": {
-          "update_interval": "Update interval (seconds)",
-          "platforms": "Monitored platforms",
-          "auth_url": "Legacy auth add-on URL (optional)",
-          "api_key": "Legacy add-on API key (optional)",
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "update_interval": "Intervalle de mise à jour (secondes)",
+          "platforms": "Plateformes surveillées",
+          "auth_url": "URL de l'add-on d'authentification (optionnel, mode legacy)",
+          "api_key": "Clé API de l'add-on (optionnel, mode legacy)",
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
         }
       }
     }
   },
   "services": {
     "block_app": {
-      "name": "Block Application",
-      "description": "Block an application for a child account.",
+      "name": "Bloquer une application",
+      "description": "Bloque une application pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "app_id": {
-          "name": "Application ID",
-          "description": "The application ID to block."
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application à bloquer."
         }
       }
     },
     "unblock_app": {
-      "name": "Unblock Application",
-      "description": "Unblock an application for a child account.",
+      "name": "Débloquer une application",
+      "description": "Débloque une application pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "app_id": {
-          "name": "Application ID",
-          "description": "The application ID to unblock."
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application à débloquer."
         }
       }
     },
     "lock_platform": {
-      "name": "Lock Platform",
-      "description": "Lock a platform (Windows/Xbox/Mobile) for a child account.",
+      "name": "Verrouiller une plateforme",
+      "description": "Verrouille une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "platform": {
-          "name": "Platform",
-          "description": "The platform to lock (Windows, Xbox, or Mobile)."
+          "name": "Plateforme",
+          "description": "La plateforme à verrouiller (Windows, Xbox ou Mobile)."
         },
         "duration_hours": {
-          "name": "Duration (hours)",
-          "description": "Duration of the lock in hours."
+          "name": "Durée (heures)",
+          "description": "Durée du verrouillage en heures."
         }
       }
     },
     "unlock_platform": {
-      "name": "Unlock Platform",
-      "description": "Unlock a platform (Windows/Xbox/Mobile) for a child account.",
+      "name": "Déverrouiller une plateforme",
+      "description": "Déverrouille une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "platform": {
-          "name": "Platform",
-          "description": "The platform to unlock (Windows, Xbox, or Mobile)."
+          "name": "Plateforme",
+          "description": "La plateforme à déverrouiller (Windows, Xbox ou Mobile)."
         }
       }
     },
     "approve_request": {
-      "name": "Approve Pending Request",
-      "description": "Approve a pending screen time extension request.",
+      "name": "Approuver une demande en attente",
+      "description": "Approuve une demande d'extension de temps d'écran en attente.",
       "fields": {
         "request_id": {
-          "name": "Request ID",
-          "description": "The ID of the pending request to approve."
+          "name": "ID de la demande",
+          "description": "L'identifiant de la demande en attente à approuver."
         },
         "extension_minutes": {
           "name": "Extension (minutes)",
-          "description": "Time extension to grant in minutes."
+          "description": "Durée d'extension à accorder, en minutes."
         }
       }
     },
     "deny_request": {
-      "name": "Deny Pending Request",
-      "description": "Deny a pending screen time extension request.",
+      "name": "Refuser une demande en attente",
+      "description": "Refuse une demande d'extension de temps d'écran en attente.",
       "fields": {
         "request_id": {
-          "name": "Request ID",
-          "description": "The ID of the pending request to deny."
+          "name": "ID de la demande",
+          "description": "L'identifiant de la demande en attente à refuser."
         }
       }
     },
     "set_screentime_limit": {
-      "name": "Set Screen Time Limit",
-      "description": "Set the daily screen time allowance for a specific day of the week.",
+      "name": "Définir la limite de temps d'écran",
+      "description": "Définit l'allocation quotidienne de temps d'écran pour un jour de la semaine.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "day_of_week": {
-          "name": "Day of Week",
-          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)."
+          "name": "Jour de la semaine",
+          "description": "Jour de la semaine (0 = dimanche, 1 = lundi, ..., 6 = samedi)."
         },
         "hours": {
-          "name": "Hours",
-          "description": "Allowed hours of screen time."
+          "name": "Heures",
+          "description": "Heures de temps d'écran autorisées."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Additional minutes of screen time."
+          "description": "Minutes de temps d'écran supplémentaires."
         }
       }
     },
     "set_screentime_intervals": {
-      "name": "Set Screen Time Intervals",
-      "description": "Set the allowed time window for screen time on a specific day.",
+      "name": "Définir les plages de temps d'écran",
+      "description": "Définit la plage horaire autorisée pour le temps d'écran un jour donné.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "day_of_week": {
-          "name": "Day of Week",
-          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)."
+          "name": "Jour de la semaine",
+          "description": "Jour de la semaine (0 = dimanche, 1 = lundi, ..., 6 = samedi)."
         },
         "start_hour": {
-          "name": "Start Hour",
-          "description": "Start of allowed window (0-23)."
+          "name": "Heure de début",
+          "description": "Début de la plage autorisée (0-23)."
         },
         "start_minute": {
-          "name": "Start Minute",
-          "description": "Start minute (0 or 30)."
+          "name": "Minute de début",
+          "description": "Minute de début (0 ou 30)."
         },
         "end_hour": {
-          "name": "End Hour",
-          "description": "End of allowed window (0-23)."
+          "name": "Heure de fin",
+          "description": "Fin de la plage autorisée (0-23)."
         },
         "end_minute": {
-          "name": "End Minute",
-          "description": "End minute (0 or 30)."
+          "name": "Minute de fin",
+          "description": "Minute de fin (0 ou 30)."
         }
       }
     },
     "set_app_time_limit": {
-      "name": "Set App Time Limit",
-      "description": "Set a daily time limit for a specific application.",
+      "name": "Définir une limite de temps par application",
+      "description": "Définit une limite de temps quotidienne pour une application donnée.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "app_id": {
-          "name": "Application ID",
-          "description": "The application ID."
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application."
         },
         "app_name": {
-          "name": "Application Name",
-          "description": "The display name of the application."
+          "name": "Nom de l'application",
+          "description": "Le nom affiché de l'application."
         },
         "platform": {
-          "name": "Platform",
-          "description": "The platform (windows, xbox, or mobile)."
+          "name": "Plateforme",
+          "description": "La plateforme (windows, xbox ou mobile)."
         },
         "hours": {
-          "name": "Hours",
-          "description": "Allowed hours per day."
+          "name": "Heures",
+          "description": "Heures autorisées par jour."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Additional minutes per day."
+          "description": "Minutes supplémentaires par jour."
         },
         "start_time": {
-          "name": "Start Time",
-          "description": "Start of allowed window (HH:MM:SS)."
+          "name": "Heure de début",
+          "description": "Début de la plage autorisée (HH:MM:SS)."
         },
         "end_time": {
-          "name": "End Time",
-          "description": "End of allowed window (HH:MM:SS)."
+          "name": "Heure de fin",
+          "description": "Fin de la plage autorisée (HH:MM:SS)."
         }
       }
     },
     "remove_app_time_limit": {
-      "name": "Remove App Time Limit",
-      "description": "Remove the time limit for a specific application.",
+      "name": "Supprimer une limite de temps d'application",
+      "description": "Supprime la limite de temps d'une application donnée.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "app_id": {
-          "name": "Application ID",
-          "description": "The application ID."
+          "name": "ID de l'application",
+          "description": "L'identifiant de l'application."
         },
         "app_name": {
-          "name": "Application Name",
-          "description": "The display name of the application."
+          "name": "Nom de l'application",
+          "description": "Le nom affiché de l'application."
         },
         "platform": {
-          "name": "Platform",
-          "description": "The platform (windows, xbox, or mobile)."
+          "name": "Plateforme",
+          "description": "La plateforme (windows, xbox ou mobile)."
         }
       }
     },
     "block_website": {
-      "name": "Block Website",
-      "description": "Block a website for a child account.",
+      "name": "Bloquer un site web",
+      "description": "Bloque un site web pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "website": {
-          "name": "Website",
-          "description": "The domain to block."
+          "name": "Site web",
+          "description": "Le domaine à bloquer."
         }
       }
     },
     "remove_website": {
-      "name": "Remove Website",
-      "description": "Remove a website from blocked/allowed list.",
+      "name": "Retirer un site web",
+      "description": "Retire un site web de la liste des sites bloqués/autorisés.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "website": {
-          "name": "Website",
-          "description": "The domain to remove."
+          "name": "Site web",
+          "description": "Le domaine à retirer."
         }
       }
     },
     "toggle_web_filter": {
-      "name": "Toggle Web Filter",
-      "description": "Enable or disable web filtering for a child account.",
+      "name": "Activer/désactiver le filtrage web",
+      "description": "Active ou désactive le filtrage web pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "enabled": {
-          "name": "Enabled",
-          "description": "True to enable, false to disable."
+          "name": "Activé",
+          "description": "Vrai pour activer, faux pour désactiver."
         }
       }
     },
     "set_age_rating": {
-      "name": "Set Age Rating",
-      "description": "Set the content age rating restriction.",
+      "name": "Définir la limite d'âge",
+      "description": "Définit la restriction de contenu par limite d'âge.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "age": {
-          "name": "Age Rating",
-          "description": "Age limit (3-20, or 21 for no restriction)."
+          "name": "Limite d'âge",
+          "description": "Limite d'âge (3-20, ou 21 pour aucune restriction)."
         }
       }
     },
     "set_acquisition_policy": {
-      "name": "Set Ask-to-Buy Policy",
-      "description": "Enable or disable purchase approval for a child account.",
+      "name": "Définir la règle « Demander avant d'acheter »",
+      "description": "Active ou désactive l'approbation des achats pour un compte enfant.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         },
         "require_approval": {
-          "name": "Require Approval",
-          "description": "True to require approval, false for unrestricted."
+          "name": "Approbation requise",
+          "description": "Vrai pour exiger une approbation, faux pour aucune restriction."
         }
       }
     },
     "lock_account": {
-      "name": "Lock Account",
-      "description": "Lock a child account by setting all screen time to zero. Saves current policy for later restoration.",
+      "name": "Verrouiller le compte",
+      "description": "Verrouille un compte enfant en mettant tout le temps d'écran à zéro. La politique en cours est sauvegardée pour pouvoir être restaurée.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account to lock."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant à verrouiller."
         }
       }
     },
     "unlock_account": {
-      "name": "Unlock Account",
-      "description": "Unlock a child account by restoring previously saved screen time policy.",
+      "name": "Déverrouiller le compte",
+      "description": "Déverrouille un compte enfant en restaurant la politique de temps d'écran précédemment sauvegardée.",
       "fields": {
         "account_id": {
-          "name": "Account ID",
-          "description": "The user ID of the child account to unlock."
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant à déverrouiller."
         }
       }
     }
