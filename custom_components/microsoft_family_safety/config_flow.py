@@ -562,12 +562,104 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return await self.async_step_start_web_auth()
 
+    async def _try_server_side_family_bootstrap(
+        self, cookies: list[dict[str, Any]]
+    ) -> tuple[str | None, str | None, list[dict[str, Any]]] | None:
+        """Establish the Family web context server-side, without the browser.
+
+        The mobile OAuth phase already yields the Microsoft SSO cookies. The
+        Family request-verification token can then be obtained by loading
+        /family/home directly from Home Assistant (httpx), exactly like the
+        regular polling path does (FamilySafetyWebAPI._warm_family_context).
+
+        Doing this here avoids re-driving the browser through the HA HTTP proxy
+        for the silent Family SSO — which Microsoft implements with OAuth URLs
+        (``epctrc=/w/...``) that Home Assistant's http.security_filter middleware
+        rejects with 400 before the integration ever sees them.
+
+        Returns ``(family_token, family_referer, refreshed_cookies)`` on success,
+        or ``None`` if the token could not be captured server-side (the caller
+        then falls back to the browser proxy).
+        """
+        if not cookies:
+            return None
+        try:
+            from .api_client import FamilySafetyWebAPI
+        except Exception as err:  # pragma: no cover - defensive import guard
+            _LOGGER.debug("Server-side Family bootstrap unavailable: %s", err)
+            return None
+
+        web_api = FamilySafetyWebAPI(None)
+        web_api.set_web_cookies(cookies)
+        try:
+            token = await web_api._warm_family_context()
+            refreshed = web_api.export_web_cookies() or cookies
+            referer = web_api._family_referer if token else None
+        except Exception as err:  # pragma: no cover - network defensive guard
+            _LOGGER.debug("Server-side Family bootstrap raised: %r", err)
+            token = None
+            refreshed = cookies
+            referer = None
+        finally:
+            session = getattr(web_api, "_web_session", None)
+            if session is not None and not session.closed:
+                try:
+                    await session.close()
+                except Exception:  # pragma: no cover
+                    pass
+        if not token:
+            _LOGGER.debug(
+                "Server-side Family bootstrap did not yield a token "
+                "(state=%s); will fall back to browser proxy",
+                getattr(web_api, "family_context_state", None),
+            )
+            return None
+        _LOGGER.info(
+            "Native Microsoft Family web session captured server-side "
+            "(no browser proxy needed): cookies=%d token_length=%d",
+            len(refreshed),
+            len(token),
+        )
+        return token, referer, refreshed
+
     async def async_step_start_web_auth(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Capture the account.microsoft.com Family web session."""
         if self._pending_data is None:
             return self.async_abort(reason="native_auth_state_lost")
+
+        # Preferred path: complete the Family web session entirely server-side
+        # using the SSO cookies from the mobile OAuth phase. This bypasses the
+        # browser silent-SSO redirect that HA's security_filter blocks (400).
+        server_side = await self._try_server_side_family_bootstrap(
+            self._mobile_sso_cookies
+        )
+        if server_side is not None:
+            family_token, family_referer, cookies = server_side
+            data = dict(self._pending_data)
+            data[CONF_WEB_COOKIES] = cookies
+            if family_token:
+                data[CONF_WEB_FAMILY_TOKEN] = family_token
+            else:
+                data.pop(CONF_WEB_FAMILY_TOKEN, None)
+            if family_referer:
+                data[CONF_WEB_FAMILY_REFERER] = family_referer
+            else:
+                data.pop(CONF_WEB_FAMILY_REFERER, None)
+            self._pending_data = data
+            if self._is_existing_entry_auth_flow():
+                return self.async_show_form(
+                    step_id="reauth_success",
+                    data_schema=vol.Schema({}),
+                )
+            return self.async_show_form(
+                step_id="auth_success",
+                data_schema=vol.Schema({}),
+                last_step=True,
+            )
+
+        # Fallback: drive the browser through the proxy (legacy behaviour).
         hass_url = URL(self._browser_hass_url())
         try:
             from .auth.native_proxy import (
