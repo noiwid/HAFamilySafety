@@ -9,9 +9,14 @@ INTEGRATION_NAME: Final = "Microsoft Family Safety"
 CONF_TOKEN: Final = "token"
 CONF_REDIRECT_URL: Final = "redirect_url"
 CONF_REFRESH_TOKEN: Final = "refresh_token"
+CONF_AUTH_USER_ID: Final = "auth_user_id"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 CONF_AUTH_URL: Final = "auth_url"
 CONF_API_KEY: Final = "api_key"
+CONF_WEB_COOKIES: Final = "web_cookies"
+CONF_WEB_FAMILY_TOKEN: Final = "web_family_token"
+CONF_WEB_FAMILY_REFERER: Final = "web_family_referer"
+CONF_ALLOW_INSECURE_HTTP_AUTH: Final = "allow_insecure_http_auth"
 
 # Defaults
 DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes in seconds

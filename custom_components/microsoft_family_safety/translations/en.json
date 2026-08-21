@@ -2,50 +2,93 @@
   "config": {
     "step": {
       "user": {
-        "title": "Microsoft Family Safety Authentication",
-        "description": "To authenticate with Microsoft Family Safety, you need to obtain an authorization code.\n\n**IMPORTANT: Copy this URL and open it in your browser:**\n\n{auth_url}\n\n**Addon status:** {addon_status}\n\nAfter logging in, you will be redirected to a blank page. The URL of that page will contain a 'code' parameter.\n\nClick Next when ready to enter the redirect URL."
-      },
-      "auth": {
-        "title": "Enter Redirect URL",
-        "description": "Paste the complete URL from your browser's address bar after logging in.\n\nThe URL should look like:\nhttps://login.live.com/oauth20_desktop.srf?code=M.C123...\n\nYou can paste the entire URL - the code will be extracted automatically.\n\n**Authentication URL (if needed again):**\n{auth_url}",
+        "title": "Microsoft Family Safety",
+        "description": "Configure the integration. After Submit, Home Assistant opens Microsoft sign-in through a temporary authentication proxy and captures the OAuth redirect automatically. If Home Assistant is not reachable over HTTPS, local HTTP can be explicitly enabled for testing; Microsoft credentials are then not transport-encrypted on the local network.",
         "data": {
-          "redirect_url": "Redirect URL",
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "auth_url": "Auth addon URL (optional, for Docker standalone)",
-          "api_key": "API key (optional, only if HA can't read the add-on's shared file)"
+          "auth_url": "Legacy auth add-on URL (optional)",
+          "api_key": "Legacy add-on API key (optional)",
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+        }
+      },
+      "auth": {
+        "title": "Manual Microsoft Family Safety authentication",
+        "description": "Home Assistant could not use the secure browser-assisted login because no HTTPS Home Assistant URL is configured. Open this Microsoft URL, sign in, and paste the complete resulting redirect URL here:\n\n{auth_url}",
+        "data": {
+          "redirect_url": "Redirect URL"
         }
       },
       "reauth_confirm": {
         "title": "Reauthenticate Microsoft Family Safety",
-        "description": "Your authentication has expired. Please obtain a new authorization code:\n\n1. Open this URL: {auth_url}\n2. Log in with your Microsoft account\n3. Copy the URL from the blank page that appears\n4. Paste it below",
+        "description": "The stored Microsoft sign-in is incomplete, expired, or revoked. Continue to run the complete sign-in again and renew both the mobile refresh token and the Family web session."
+      },
+      "reauth_full_confirm": {
+        "title": "Reauthenticate Microsoft Family Safety",
+        "description": "The stored Microsoft authentication is incomplete, expired, or revoked. Continue to renew both the mobile OAuth refresh token and the Family web session. If this Home Assistant instance is only reachable over a private local HTTP URL, enable the local HTTP test option below.",
         "data": {
-          "redirect_url": "Redirect URL"
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
         }
+      },
+      "reauth_success": {
+        "title": "Microsoft Family Safety sign-in completed",
+        "description": "Microsoft authentication completed successfully and the new credentials are ready to be saved. Select Submit to finish the reauthentication."
+      },
+      "check_mobile_proxy": {
+        "title": "Microsoft sign-in",
+        "description": "Sign in with the Microsoft account that manages the family. Keep the opened authentication window open. After the visible sign-in completes, Home Assistant will automatically switch to a waiting screen while Microsoft Family SSO finishes."
+      },
+      "check_proxy": {
+        "title": "Microsoft Family web session"
+      },
+      "auth_success": {
+        "title": "Microsoft Family Safety sign-in completed",
+        "description": "Both Microsoft authentication phases completed successfully. Select Continue to create the integration.",
+        "submit": "Continue"
+      },
+      "wait_family_proxy": {
+        "title": "Completing Microsoft Family Safety sign-in"
       }
     },
     "error": {
-      "auth_failed": "Authentication failed. Please check the URL and try again.",
-      "token_expired": "Your authentication has expired. Please reauthenticate.",
+      "auth_failed": "Authentication failed.",
+      "token_expired": "Authentication expired.",
       "no_redirect_url": "Please enter a valid redirect URL.",
-      "unknown": "An unexpected error occurred. Please try again."
+      "native_https_required": "Automatic browser authentication normally requires HTTPS. For local testing you can explicitly enable insecure local HTTP authentication.",
+      "unknown": "Unexpected authentication error.",
+      "native_http_not_local": "Insecure HTTP authentication is allowed only through localhost, .local, or a private/local IP address."
     },
     "abort": {
       "already_configured": "This account is already configured.",
-      "reauth_successful": "Reauthentication successful!"
+      "reauth_successful": "Reauthentication successful!",
+      "native_auth_failed": "The Microsoft web authentication did not complete successfully.",
+      "native_auth_state_lost": "The browser authentication flow expired. Please start again.",
+      "native_auth_unavailable": "Native web authentication could not be loaded: {error}",
+      "native_oauth_failed": "The Microsoft Family Safety OAuth login did not complete successfully.",
+      "wrong_account": "A different Microsoft account was used. Please reauthenticate the same Family Safety account."
+    },
+    "check_mobile_proxy": {
+      "description": "Sign in with the Microsoft account that manages the family. After mobile OAuth succeeds, the same browser tab is redirected automatically into the Family web-session phase. After the visible Microsoft sign-in has finished, Home Assistant may need up to about 60 seconds to complete Microsoft's silent Family SSO and capture the Family session. Keep the browser window open and do not press Open website again while this is in progress."
+    },
+    "check_proxy": {
+      "description": "Home Assistant is establishing the authenticated account.microsoft.com Family session. If Microsoft silent SSO needs to recover, the proxy retries the top-level account navigation automatically."
+    },
+    "progress": {
+      "family_sso": "Microsoft sign-in is complete. Home Assistant is waiting for Microsoft Family SSO to finish in the open authentication window. This can take up to about 60 seconds. Keep the Microsoft window open; no action is required."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Microsoft Family Safety Options",
+        "description": "Configure polling, platforms, and optional legacy add-on fallback.",
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "auth_url": "Auth addon URL (optional, for Docker standalone)",
-          "api_key": "API key (optional, only if HA can't read the add-on's shared file)"
-        },
-        "description": "Configure the polling interval, monitored platforms, auth addon URL, and API key."
+          "auth_url": "Legacy auth add-on URL (optional)",
+          "api_key": "Legacy add-on API key (optional)",
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+        }
       }
     }
   },
