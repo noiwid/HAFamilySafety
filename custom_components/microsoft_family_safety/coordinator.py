@@ -461,12 +461,27 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return await self.api.deny_pending_request(request_id)
 
-    async def _fetch_screentime_policy(self, account_id: str) -> dict | None:
+    async def _fetch_screentime_policy(
+        self, account_id: str, *, require_child_match: bool = False
+    ) -> dict | None:
+        """Read a child's screen-time policy.
+
+        Pass ``require_child_match`` when the result becomes a restore point or
+        decides a destructive rewrite: the web payload may contain exactly one
+        policy belonging to a different child, and silently accepting it would
+        save the wrong schedule (issue #23).
+        """
         if self._native_web_auth:
-            return await self.web_api.get_screentime_policy(account_id) if self.web_api else None
+            if self.web_api is None:
+                return None
+            return await self.web_api.get_screentime_policy(
+                account_id, require_child_match=require_child_match
+            )
         screentime = await self._addon_client.fetch_screentime(account_id)
         if screentime is None and self.web_api is not None:
-            screentime = await self.web_api.get_screentime_policy(account_id)
+            screentime = await self.web_api.get_screentime_policy(
+                account_id, require_child_match=require_child_match
+            )
         return screentime
 
     async def _set_screentime_allowance(
@@ -604,13 +619,30 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def async_lock_account(self, account_id: str) -> None:
-        current_policy = await self._fetch_screentime_policy(account_id)
+        """Lock an account by zeroing every day's allowance.
+
+        Microsoft exposes no real "lock" endpoint, so a lock is a destructive
+        rewrite of the whole weekly schedule. The restore point saved here is
+        the only way back, which is why this refuses to proceed when the
+        current schedule cannot be read and nothing was saved earlier: zeroing
+        blind would wipe a child's real schedule unrecoverably (issue #23).
+        """
+        current_policy = await self._fetch_screentime_policy(
+            account_id, require_child_match=True
+        )
         has_saved = account_id in self._saved_screentime
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
+            # Use `or` chains rather than dict.get defaults: Microsoft may send
+            # an explicit {"allowance": None}, and dict.get would then return
+            # None instead of the default, making an unusable policy look
+            # non-zero and saving it as the restore point.
             has_nonzero = any(
-                (daily.get(key) or daily.get(key.capitalize()) or {}).get("allowance",
-                    (daily.get(key) or daily.get(key.capitalize()) or {}).get("Allowance", "00:00:00"))
+                (
+                    (daily.get(key) or daily.get(key.capitalize()) or {}).get("allowance")
+                    or (daily.get(key) or daily.get(key.capitalize()) or {}).get("Allowance")
+                    or "00:00:00"
+                )
                 != "00:00:00"
                 for key in DAY_KEYS
             )
@@ -621,6 +653,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(
                 f"Cannot lock account {account_id}: current schedule unreadable and no saved "
                 "policy exists. Reauthenticate the Microsoft Family web session."
+            )
+        else:
+            _LOGGER.warning(
+                "Locking account %s from a previously saved schedule: the current "
+                "schedule could not be read, so the restore point may be stale",
+                account_id,
             )
 
         failures = 0
@@ -726,7 +764,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Re-enable limits: restore the saved schedule (same path as unlock).
             await self.async_unlock_account(account_id)
             return
-        current_policy = await self._fetch_screentime_policy(account_id)
+        current_policy = await self._fetch_screentime_policy(
+            account_id, require_child_match=True
+        )
         has_saved = account_id in self._saved_screentime
         if current_policy and not has_saved:
             self._saved_screentime[account_id] = current_policy

@@ -874,7 +874,9 @@ class FamilySafetyWebAPI:
             return None
 
     @staticmethod
-    def _normalize_screentime_policy(payload: object, child_id: str) -> dict | None:
+    def _normalize_screentime_policy(
+        payload: object, child_id: str, *, require_child_match: bool = False
+    ) -> dict | None:
         """Normalize current Family web screen-time payloads.
 
         Microsoft exposes the schedule in several response shapes.  Prefer a
@@ -883,6 +885,11 @@ class FamilySafetyWebAPI:
         tolerant because landing-page-feeds has changed its member wrapper
         fields over time while the actual timeRestrictions/dailyRestrictions
         object has remained stable.
+
+        Set ``require_child_match`` when the result will be used to overwrite
+        the schedule (lock/unlock).  In a multi-child family a response holding
+        exactly one policy could belong to a *different* child; accepting it
+        there would store the wrong schedule as this child's restore point.
         """
         if not isinstance(payload, (dict, list)):
             return None
@@ -964,6 +971,19 @@ class FamilySafetyWebAPI:
         walk(payload)
         if matched:
             return matched[0]
+
+        if require_child_match:
+            # Callers that are about to overwrite the schedule (lock/unlock)
+            # ask for this. Guessing there would mean saving another child's
+            # policy as this child's restore point, so refuse instead.
+            _LOGGER.debug(
+                "No screen-time policy explicitly matched child %s and "
+                "child matching was required; ignoring %d unmatched candidate(s)",
+                child,
+                len(candidates),
+            )
+            return None
+
         if len(candidates) == 1:
             return candidates[0]
 
@@ -983,7 +1003,8 @@ class FamilySafetyWebAPI:
         return None
 
     async def get_screentime_policy(
-        self, child_id: str, platform: str = "Windows"
+        self, child_id: str, platform: str = "Windows",
+        *, require_child_match: bool = False,
     ) -> dict | None:
         """Get and normalize a child's screen-time policy via the Family web API.
 
@@ -1003,7 +1024,9 @@ class FamilySafetyWebAPI:
             f"{self.WEB_API_BASE}/family/api/landing-page-feeds",
             params={"memberIdList": str(child_id)},
         )
-        policy = self._normalize_screentime_policy(feed, child_id)
+        policy = self._normalize_screentime_policy(
+            feed, child_id, require_child_match=require_child_match
+        )
         if policy is not None:
             self.screentime_policy_status = "ok"
             self.screentime_policy_source = "landing_page_feeds"
@@ -1026,7 +1049,9 @@ class FamilySafetyWebAPI:
         # that only multiplies coordinator latency without adding information.
         st_url = f"{self.WEB_API_BASE}/family/api/st"
         result = await self._web_request("GET", st_url, params={"childId": child_id})
-        policy = self._normalize_screentime_policy(result, child_id)
+        policy = self._normalize_screentime_policy(
+            result, child_id, require_child_match=require_child_match
+        )
         if policy is not None:
             self.screentime_policy_status = "ok"
             self.screentime_policy_source = "st"
