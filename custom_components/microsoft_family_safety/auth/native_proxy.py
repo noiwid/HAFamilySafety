@@ -34,6 +34,7 @@ AUTH_PROXY_PATH = "/auth/microsoft_family_safety/proxy"
 AUTH_CALLBACK_PATH = "/auth/microsoft_family_safety/callback"
 _PROXY_REGISTRY = f"{DOMAIN}_native_auth_proxies"
 _VIEWS_REGISTERED = f"{DOMAIN}_native_auth_views_registered"
+_FILTER_BYPASS_INSTALLED = f"{DOMAIN}_native_auth_filter_bypass"
 _HOST_MARKER = "__ms_host__"
 
 # Authentication hosts are discovered dynamically, but only inside these
@@ -406,11 +407,20 @@ class MicrosoftFamilyAuthProxy:
                     )
                 )
 
-        if request.query:
+        # The security-filter bypass middleware may have hidden the real query
+        # string from Home Assistant's middleware chain; prefer the stashed
+        # original when present so proxied OAuth parameters survive intact.
+        stashed_query = request.get(_ORIGINAL_QUERY_KEY)
+        if stashed_query:
+            query_items = list(parse_qsl(stashed_query, keep_blank_values=True))
+        else:
+            query_items = list(request.query.items())
+
+        if query_items:
             proxy_origin = f"{request.scheme}://{request.host}"
             restored_query = [
                 (key, self._deproxy_value(value, proxy_origin))
-                for key, value in request.query.items()
+                for key, value in query_items
             ]
             target = target.with_query(restored_query)
         return target
@@ -1727,10 +1737,70 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
         )
 
 
+#: Request key holding the original query string of a proxied request, stashed
+#: by :func:`_install_security_filter_bypass` before the query is hidden from
+#: Home Assistant's security filter.
+_ORIGINAL_QUERY_KEY = f"{DOMAIN}_native_auth_original_query"
+
+
+def _install_security_filter_bypass(hass: HomeAssistant) -> None:
+    """Exempt only this integration's proxy routes from HA's security filter.
+
+    Home Assistant installs ``http.security_filter`` as the outermost aiohttp
+    middleware. It rejects any request whose *query string* matches a
+    file-injection heuristic ``[a-zA-Z0-9_]=/([a-z0-9_.]//?)+``. Microsoft's
+    silent Family SSO redirects carry OAuth parameters such as
+    ``epctrc=/w/V6cI...`` which match that heuristic, so the browser gets a bare
+    ``400 Bad Request`` before the proxy view is ever reached.
+
+    Percent-encoding the value does not help: ``request.query_string`` is the
+    already-decoded form, so the filter sees the decoded slashes either way.
+
+    Instead, this middleware runs *before* the security filter and, for proxy
+    routes only, hands the downstream chain a request clone whose query string
+    is empty. The real query is preserved on the request under
+    ``_ORIGINAL_QUERY_KEY`` and read back by :meth:`_target_from_request`.
+
+    Scope is deliberately narrow:
+      * only ``AUTH_PROXY_PATH`` requests are affected — never the callback
+        (whose ``flow_id`` query is required and never matches the filter), and
+        never any other Home Assistant endpoint;
+      * the security filter itself is left registered and fully active for the
+        rest of the instance.
+    """
+    if hass.data.get(_FILTER_BYPASS_INSTALLED):
+        return
+    app = hass.http.app
+
+    @web.middleware
+    async def _native_auth_query_bypass(request: web.Request, handler):
+        path = request.path
+        if not path.startswith(f"{AUTH_PROXY_PATH}/"):
+            return await handler(request)
+        if not request.query_string:
+            return await handler(request)
+        original_query = request.query_string
+        # Clone with an empty query so the security filter has nothing to match,
+        # then carry the real query forward out-of-band.
+        stripped = request.clone(rel_url=request.rel_url.with_query(None))
+        stripped[_ORIGINAL_QUERY_KEY] = original_query
+        return await handler(stripped)
+
+    # Index 0 keeps this outside HA's security filter, which is appended first.
+    app.middlewares.insert(0, _native_auth_query_bypass)
+    hass.data[_FILTER_BYPASS_INSTALLED] = True
+    _LOGGER.debug(
+        "Installed Microsoft Family auth proxy security-filter bypass "
+        "(scoped to %s/*)",
+        AUTH_PROXY_PATH,
+    )
+
+
 def ensure_native_auth_views(hass: HomeAssistant) -> None:
     """Register the shared proxy/callback views once."""
     if hass.data.get(_VIEWS_REGISTERED):
         return
+    _install_security_filter_bypass(hass)
     hass.http.register_view(MicrosoftFamilyAuthorizationProxyView())
     hass.http.register_view(MicrosoftFamilyAuthorizationCallbackView())
     hass.data[_VIEWS_REGISTERED] = True
