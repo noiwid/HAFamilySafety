@@ -1,13 +1,27 @@
 # Standalone Docker deployment
 
+> **This service is a legacy fallback.** The Microsoft Family Safety integration
+> now authenticates **natively** inside Home Assistant and calls Microsoft's
+> private web API directly — no browser automation, no add-on and no container
+> are needed in the normal case. See the
+> [main README](../README.md#legacy-add-on-mode).
+>
+> Use this deployment only if you already run it and prefer not to migrate, if
+> your Home Assistant instance is not reachable over HTTPS and you do not want
+> to enable the local-HTTP authentication option, or if native authentication
+> fails on your account.
+>
+> Note that migrating to native authentication changes entity IDs — see
+> [Breaking changes](../README.md#breaking-changes).
+
 Run the Microsoft Family Safety Auth service on a plain Docker host (for example
 a Debian server) instead of as a Home Assistant add-on. This is useful when disk
 space is tight on the Home Assistant device (Green / Yellow) and you prefer to
 offload the browser based auth service to a separate machine.
 
 The Home Assistant integration talks to this service over HTTP. The only change
-on the Home Assistant side is setting the integration's **auth URL** option to
-point at this container.
+on the Home Assistant side is setting the integration's **Legacy auth add-on
+URL** option to point at this container.
 
 ## Requirements
 
@@ -56,7 +70,7 @@ volume, so they persist across restarts and image upgrades.
 ## Connect Home Assistant
 
 In Home Assistant, go to **Settings > Devices & Services > Microsoft Family
-Safety > Configure** and set the auth URL to:
+Safety > Configure** and set **Legacy auth add-on URL** to:
 
 ```
 http://YOUR_SERVER_IP:8098
@@ -64,6 +78,10 @@ http://YOUR_SERVER_IP:8098
 
 The integration will load cookies and read/write screen time through this
 container exactly as it does with the add-on.
+
+An integration entry uses this container only when it has no natively captured
+web session. Setting this URL during initial setup makes the config flow skip
+the native Family web-session phase and create a legacy-mode entry.
 
 ## Migrating from the Home Assistant add-on
 
@@ -85,6 +103,21 @@ standalone container, follow these steps:
 
 Thanks to @laurentlbm for testing this path and reporting the exact steps in
 issue #25.
+
+## Migrating away from this container (to native authentication)
+
+Preferred for new setups. Native authentication removes this container entirely.
+
+1. **Delete** the existing Microsoft Family Safety integration entry
+   (Settings > Devices & Services). An entry stays in legacy mode as long as it
+   has no natively captured web session, so it must be recreated.
+2. **Re-add** the integration, leaving **Legacy auth add-on URL** and **Legacy
+   add-on API key** empty, and complete the browser sign-in. Home Assistant must
+   be reachable over HTTPS (or you must enable the local-HTTP testing option).
+3. **Fix your entity IDs** — they change. See
+   [Breaking changes](../README.md#breaking-changes).
+4. **Stop and remove** this container and its `familysafety_data` volume once
+   everything works.
 
 ## Configuration
 

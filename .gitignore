@@ -129,3 +129,11 @@ dmypy.json
 .DS_Store
 Thumbs.db
 .claude/
+
+# Network captures / manual debug artifacts
+*.har
+*.enc
+*.key
+
+# Ad-hoc debug scripts at repo root (keep dev scripts out)
+/*.py
