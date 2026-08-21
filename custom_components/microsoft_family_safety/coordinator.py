@@ -269,14 +269,47 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_persist_current_auth()
         except HttpException as err:
             text = str(err).lower()
+            # A roster resolution 404 is NOT an auth problem. Microsoft returns
+            # Family.UnableToFindTargetResource / RosterError when a device still
+            # listed in the family roster can no longer be resolved on their side
+            # (typically a reset or decommissioned machine). Surfacing this as an
+            # auth failure sends the user into a pointless reauth/reinstall loop
+            # (issue #38); point them at the real fix instead.
+            if self._is_stale_roster_error(text):
+                raise UpdateFailed(
+                    "Microsoft cannot resolve a device still listed in your "
+                    "family roster. Remove the old or reset device at "
+                    "https://account.microsoft.com/family, then reload the "
+                    "integration."
+                ) from err
             if "401" in text or "403" in text or "authentication" in text:
                 raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
             raise UpdateFailed(f"Transient API error: {err}") from err
         except Exception as err:
             text = str(err).lower()
+            if self._is_stale_roster_error(text):
+                raise UpdateFailed(
+                    "Microsoft cannot resolve a device still listed in your "
+                    "family roster. Remove the old or reset device at "
+                    "https://account.microsoft.com/family, then reload the "
+                    "integration."
+                ) from err
             if "auth" in text or "token" in text or "401" in text or "403" in text:
                 raise ConfigEntryAuthFailed(ERROR_AUTH_FAILED) from err
             raise UpdateFailed(f"API setup error: {err}") from err
+
+    @staticmethod
+    def _is_stale_roster_error(text: str) -> bool:
+        """Return True for Microsoft's "device not found in roster" 404.
+
+        This is distinct from an authentication failure: the token is valid,
+        but the roster references a device Microsoft can no longer resolve.
+        """
+        return (
+            "unabletofindtargetresource" in text
+            or "rostererror" in text
+            or "unable to find the node" in text
+        )
 
     async def _async_load_web_cookies(self) -> None:
         """Prefer cookies captured natively; retain the Playwright add-on fallback."""

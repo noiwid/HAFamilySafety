@@ -125,12 +125,23 @@ All settings are environment variables (see `docker-compose.yml`):
 
 | Variable           | Default          | Description                                   |
 |--------------------|------------------|-----------------------------------------------|
+| `API_KEY`          | auto-generated   | Key protecting the cookie and screentime endpoints. See the note below. |
 | `LOG_LEVEL`        | `info`           | `trace`, `debug`, `info`, `warning`, `error`  |
 | `AUTH_TIMEOUT`     | `300`            | Seconds to wait for sign-in (60-600)          |
 | `SESSION_DURATION` | `86400`          | Session validity in seconds (3600-604800)     |
 | `LANGUAGE`         | `en-US`          | Browser locale, e.g. `fr-FR`                  |
 | `TIMEZONE`         | `Europe/Paris`   | Browser timezone                              |
 | `VNC_PASSWORD`     | `familysafety`   | Password for the noVNC interface              |
+
+> **`API_KEY` is required when Home Assistant runs on a different host or in a
+> different container than this add-on.** The image protects its `/api/cookies`
+> and `/api/screentime*` endpoints with an API key. On Home Assistant OS the
+> integration and the add-on share `/share/familysafety/.api_key` and the key is
+> picked up automatically. In a standalone Docker deployment that file lives
+> inside this container and Home Assistant cannot read it, so requests are
+> rejected with `403 Invalid or missing API key`. Set `API_KEY` to a value of
+> your choice on this container, then paste the exact same value into the
+> integration's **Legacy add-on API key** option so both sides match.
 
 ## Health and logs
 
