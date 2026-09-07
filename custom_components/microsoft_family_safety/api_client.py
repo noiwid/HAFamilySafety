@@ -82,6 +82,51 @@ def _extract_request_verification_token(page: str) -> str | None:
     return None
 
 
+_MSA_CONTINUE_FORM_RE = re.compile(
+    r'<form[^>]*\bname=["\']fmHF["\'][^>]*\baction=["\']([^"\']+)["\'][^>]*>(.*?)</form>',
+    re.IGNORECASE | re.DOTALL,
+)
+_HIDDEN_INPUT_RE = re.compile(
+    r'<input[^>]*\bname=["\']([^"\']+)["\'][^>]*\bvalue=["\']([^"\']*)["\']',
+    re.IGNORECASE,
+)
+
+
+def _extract_msa_continue_form(page: str) -> tuple[str, dict[str, str]] | None:
+    """Return the auto-submit form login.live.com serves while the MSA session is alive.
+
+    account.microsoft.com keeps its own session (``AMCSecAuth``) for about a day.
+    When it lapses, the site bounces to ``login.live.com/login.srf``; with valid
+    Microsoft-account cookies that page is not a sign-in form but a tiny
+    "Continue" document whose ``fmHF`` form a browser posts back to
+    ``/auth/complete-signin`` on its own.  Submitting it re-establishes the
+    account.microsoft.com session without any user interaction, which is what
+    kept the Playwright add-on alive for weeks.  Returns ``None`` for a real
+    sign-in page (email/password fields present) or any form posting elsewhere.
+    """
+    lowered = page.lower()
+    if 'name="loginfmt"' in lowered or 'name="ppft"' in lowered or 'name="passwd"' in lowered:
+        return None
+    match = _MSA_CONTINUE_FORM_RE.search(page)
+    if not match:
+        return None
+    action = unescape(match.group(1))
+    try:
+        target = URL(action)
+    except ValueError:
+        return None
+    if (target.host or "").lower() != "account.microsoft.com" or not target.path.startswith(
+        "/auth/complete-signin"
+    ):
+        return None
+    fields = {
+        unescape(name): unescape(value) for name, value in _HIDDEN_INPUT_RE.findall(match.group(2))
+    }
+    if not fields:
+        return None
+    return action, fields
+
+
 class FamilySafetyWebAPI:
     """Combined Microsoft Family mobile and private web API client."""
 
@@ -430,7 +475,7 @@ class FamilySafetyWebAPI:
 
         return authenticated
 
-    async def _warm_web_session(self) -> str | None:
+    async def _warm_web_session(self, *, allow_renewal: bool = True) -> str | None:
         """Verify the Microsoft account login without sourcing a Family API token.
 
         The /account page can contain an antiforgery value, but the supplied
@@ -455,60 +500,70 @@ class FamilySafetyWebAPI:
                 headers=headers,
                 allow_redirects=True,
             ) as resp:
+                status = resp.status
                 final_url = URL(str(resp.url))
                 page = await resp.text()
                 rotated = self.sync_web_cookies_from_session()
 
-                if resp.status in (401, 403) or self._is_authentication_url(final_url):
-                    self.last_web_error_code = "LOGIN_REDIRECT"
-                    self._mark_web_session("expired", resp.status)
-                    _LOGGER.warning(
-                        "Microsoft account session probe requires authentication: "
-                        "final_host=%s final_path=%s status=%s cookies=%d rotated=%s",
-                        final_url.host,
-                        final_url.path,
-                        resp.status,
-                        len(self._web_cookies or []),
-                        rotated,
-                    )
-                    return None
-
-                if (
-                    resp.status != 200
-                    or final_url.host != "account.microsoft.com"
-                    or not final_url.path.startswith("/account")
+            if status in (401, 403) or self._is_authentication_url(final_url):
+                # account.microsoft.com drops its own session after about a
+                # day even though the Microsoft-account cookies stay valid;
+                # a browser re-establishes it by posting the "Continue" form
+                # login.live.com answers with.  Do the same before declaring
+                # the login lost, once per probe.
+                if allow_renewal and await self._async_renew_account_session(
+                    session, page, final_url
                 ):
-                    self.last_web_error_code = "UNEXPECTED_SESSION_DESTINATION"
-                    self._mark_web_session("error", resp.status)
-                    _LOGGER.warning(
-                        "Microsoft account session probe ended at an unexpected "
-                        "destination: final_host=%s final_path=%s status=%s "
-                        "cookies=%d rotated=%s",
-                        final_url.host,
-                        final_url.path,
-                        resp.status,
-                        len(self._web_cookies or []),
-                        rotated,
-                    )
-                    return None
-
-                # Diagnostic only.  Do NOT use a token from /account for Family
-                # API calls; it is a different antiforgery context.
-                account_token_present = bool(_extract_request_verification_token(page))
-                self.last_web_error_code = None
-                self._mark_web_session("authenticated", resp.status)
-                _LOGGER.debug(
-                    "Microsoft account session verified: final_host=%s "
-                    "final_path=%s status=%s cookies=%d rotated=%s "
-                    "account_antiforgery_present=%s",
+                    return await self._warm_web_session(allow_renewal=False)
+                self.last_web_error_code = "LOGIN_REDIRECT"
+                self._mark_web_session("expired", status)
+                _LOGGER.warning(
+                    "Microsoft account session probe requires authentication: "
+                    "final_host=%s final_path=%s status=%s cookies=%d rotated=%s",
                     final_url.host,
                     final_url.path,
-                    resp.status,
+                    status,
                     len(self._web_cookies or []),
                     rotated,
-                    account_token_present,
                 )
                 return None
+
+            if (
+                status != 200
+                or final_url.host != "account.microsoft.com"
+                or not final_url.path.startswith("/account")
+            ):
+                self.last_web_error_code = "UNEXPECTED_SESSION_DESTINATION"
+                self._mark_web_session("error", status)
+                _LOGGER.warning(
+                    "Microsoft account session probe ended at an unexpected "
+                    "destination: final_host=%s final_path=%s status=%s "
+                    "cookies=%d rotated=%s",
+                    final_url.host,
+                    final_url.path,
+                    status,
+                    len(self._web_cookies or []),
+                    rotated,
+                )
+                return None
+
+            # Diagnostic only.  Do NOT use a token from /account for Family
+            # API calls; it is a different antiforgery context.
+            account_token_present = bool(_extract_request_verification_token(page))
+            self.last_web_error_code = None
+            self._mark_web_session("authenticated", status)
+            _LOGGER.debug(
+                "Microsoft account session verified: final_host=%s "
+                "final_path=%s status=%s cookies=%d rotated=%s "
+                "account_antiforgery_present=%s",
+                final_url.host,
+                final_url.path,
+                status,
+                len(self._web_cookies or []),
+                rotated,
+                account_token_present,
+            )
+            return None
         except asyncio.TimeoutError:
             self.last_web_error_code = "TIMEOUT"
             self._mark_web_session("error")
@@ -519,6 +574,89 @@ class FamilySafetyWebAPI:
             self._mark_web_session("error")
             _LOGGER.debug("Microsoft account session check failed: %r", err)
             return None
+
+    async def _async_renew_account_session(
+        self, session: Any, page: str | None, final_url: URL | None
+    ) -> bool:
+        """Re-establish the account.microsoft.com session from live MSA cookies.
+
+        ``page``/``final_url`` describe a response that ended on a login host.
+        When it already is the login.live.com "Continue" form it is submitted
+        directly; otherwise ``/account`` is loaded first, which is where
+        Microsoft serves that form.  Returns True once account.microsoft.com
+        answered 200 to the completed sign-in.  A real sign-in page (email or
+        password fields) is never submitted; the caller then reports the
+        session as expired as before.  Network errors propagate to the caller.
+        """
+        headers = {
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "de,de-DE;q=0.9,en;q=0.8,en-US;q=0.6",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "User-Agent": _BROWSER_USER_AGENT,
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Upgrade-Insecure-Requests": "1",
+        }
+        form: tuple[str, dict[str, str]] | None = None
+        if page and final_url is not None and (final_url.host or "").lower() == "login.live.com":
+            form = _extract_msa_continue_form(page)
+        if form is None:
+            async with session.get(
+                f"{self.WEB_API_BASE}/account", headers=headers, allow_redirects=True
+            ) as resp:
+                probe_status = resp.status
+                probe_url = URL(str(resp.url))
+                probe_page = await resp.text()
+                self.sync_web_cookies_from_session()
+            if (probe_url.host or "").lower() == "login.live.com":
+                form = _extract_msa_continue_form(probe_page)
+            if form is None:
+                _LOGGER.debug(
+                    "Microsoft account session cannot be renewed silently: "
+                    "final_host=%s final_path=%s status=%s length=%d",
+                    probe_url.host,
+                    probe_url.path,
+                    probe_status,
+                    len(probe_page),
+                )
+                return False
+
+        action, fields = form
+        post_headers = {
+            **headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://login.live.com",
+            "Referer": "https://login.live.com/",
+            "Sec-Fetch-Site": "cross-site",
+        }
+        async with session.request(
+            "POST", action, data=fields, headers=post_headers, allow_redirects=True
+        ) as resp:
+            status = resp.status
+            end_url = URL(str(resp.url))
+            await resp.text()
+            rotated = self.sync_web_cookies_from_session()
+
+        renewed = status == 200 and (end_url.host or "").lower() == "account.microsoft.com"
+        if renewed:
+            _LOGGER.info(
+                "Microsoft account session renewed silently: final_path=%s "
+                "rotated=%s cookies=%d",
+                end_url.path,
+                rotated,
+                len(self._web_cookies or []),
+            )
+        else:
+            _LOGGER.warning(
+                "Microsoft account session silent renewal failed: final_host=%s "
+                "final_path=%s status=%s",
+                end_url.host,
+                end_url.path,
+                status,
+            )
+        return renewed
 
     async def _warm_family_context(self) -> str | None:
         """Load the Family SPA and obtain its request-verification token.
@@ -560,8 +698,13 @@ class FamilySafetyWebAPI:
         session = self._get_web_session()
         last_destination: URL | None = None
         last_status: int | None = None
+        pending = list(candidates)
+        attempt = 0
+        renewal_attempted = False
         try:
-            for attempt, candidate in enumerate(candidates, 1):
+            while pending:
+                candidate = pending.pop(0)
+                attempt += 1
                 async with session.get(candidate, headers=headers, allow_redirects=True) as resp:
                     final_url = URL(str(resp.url))
                     last_destination = final_url
@@ -573,6 +716,14 @@ class FamilySafetyWebAPI:
                     self.family_context_last_path = final_url.path
 
                     if resp.status in (401, 403) or self._is_authentication_url(final_url):
+                        # The Family SPA bounces through the same expired
+                        # account.microsoft.com session; renew it once and
+                        # retry the same landing page before giving up.
+                        if not renewal_attempted:
+                            renewal_attempted = True
+                            if await self._async_renew_account_session(session, page, final_url):
+                                pending.insert(0, candidate)
+                                continue
                         self.family_context_state = "auth_required"
                         self.family_token_source = None
                         self.last_web_error_code = "FAMILY_CONTEXT_AUTH_REQUIRED"

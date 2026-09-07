@@ -207,7 +207,7 @@ Fixed in 2.0.4: Microsoft's sign-in page links some pages with an explicit port 
 
 ### Session Expired / Reauthentication Required
 
-The integration cannot renew the Family web session on its own. When it expires, Home Assistant raises a reauthentication prompt and a persistent notification. This also happens when Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state, the **Connection** sensor reports `degraded` with `reauth_recommended: true` and the flow is started automatically.
+The account page session lapses about once a day; since 2.0.6 the integration completes Microsoft's silent sign-in by itself, so no action is needed while the "Stay signed in?" cookies are valid. When the Microsoft login itself is gone, Home Assistant raises a reauthentication prompt and a persistent notification. This also happens when Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state, the **Connection** sensor reports `degraded` with `reauth_recommended: true` and the flow is started automatically.
 
 1. Go to **Settings > Devices & Services**.
 2. Find **Microsoft Family Safety** -- it shows a **Reauthenticate** button. You can also call the `microsoft_family_safety.request_reauth` service to start the flow without waiting, for example from a dashboard button.
@@ -215,7 +215,7 @@ The integration cannot renew the Family web session on its own. When it expires,
 
 ### Dashboard card
 
-A ready-made per-child card ships in [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) (decluttering template) with a full example view in [`examples/dashboard.yaml`](examples/dashboard.yaml). It needs the HACS frontend cards `decluttering-card`, `button-card`, `stack-in-card`, `vertical-stack-in-card`, `card-mod` and `mushroom`. See the README section *Dashboard card* for the variables to fill in.
+A ready-made per-child card ships in [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) (decluttering template) with a full example view in [`examples/dashboard.yaml`](examples/dashboard.yaml). It needs the HACS frontend cards `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod` and `mushroom`. See the README section *Dashboard card* for the variables to fill in.
 
 ### Debug Logging
 

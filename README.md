@@ -198,7 +198,7 @@ Use it for testing, or on a network you fully trust. Setting up HTTPS is the bet
 
 ### Re-authenticating
 
-Microsoft sessions expire. The integration cannot renew the web session on its own, so when it expires Home Assistant raises a **repair / reauthentication** prompt and a persistent notification. That also covers the case where Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state the connection sensor reports `degraded` with `reauth_recommended: true` and the reauthentication flow is started for you. You can also start it yourself at any time with the `microsoft_family_safety.request_reauth` service (handy from a dashboard button). Re-authenticating runs the same sign-in and renews **both** the Family web session and the mobile refresh token.
+Microsoft sessions expire. The account page session lapses about once a day; since 2.0.6 the integration completes Microsoft's silent sign-in on its own (the same "Continue" step a browser performs), so you should not be asked to sign in again as long as the "Stay signed in?" cookies are valid. When the login itself is gone, Home Assistant raises a **repair / reauthentication** prompt and a persistent notification. That also covers the case where Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state the connection sensor reports `degraded` with `reauth_recommended: true` and the reauthentication flow is started for you. You can also start it yourself at any time with the `microsoft_family_safety.request_reauth` service (handy from a dashboard button). Re-authenticating runs the same sign-in and renews **both** the Family web session and the mobile refresh token.
 
 Reauthentication must use the **same Microsoft account** — signing in with a different one aborts with *"A different Microsoft account was used"*.
 
@@ -586,10 +586,10 @@ automation:
 
 A clean per-child panel is available as a [decluttering-card](https://github.com/custom-cards/decluttering-card) template, so you drop one card per child and only change a few variables. It includes:
 
-- A clickable connection-health pill (opens the integration to re-authenticate)
+- A header with the day's progress bar and allowed window, plus a clickable connection-health pill (opens the integration to re-authenticate)
 - Screen time used, blocked-app count, pending-request count
+- Approve/deny buttons that appear when a request is pending
 - Lock, Windows-lock and screen-time-limits switches
-- A device row with progress bar and the day's allowed window
 - Today's top apps, and the weekly limits grid (tap to edit the limit, hold to edit the window)
 
 Two files:
@@ -597,9 +597,9 @@ Two files:
 - [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) — the `fs_child` template only.
 - [`examples/dashboard.yaml`](examples/dashboard.yaml) — a full example view instantiating it with placeholder entities.
 
-**Required HACS frontend cards:** `decluttering-card`, `button-card`, `stack-in-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
+**Required HACS frontend cards:** `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
 
-Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock`, `title` and `device_label`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
+Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock` and `title`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
 
 To add more children, add one `custom:decluttering-card` block per child in the same view; the shared template updates every card at once.
 
@@ -685,7 +685,7 @@ Native authentication trades some of the add-on's isolation for simplicity. Be a
 ### Limitations
 
 - **Unofficial API** — Microsoft provides no public API for Family Safety. This integration relies on reverse-engineered endpoints that may change or break at any time.
-- **No autonomous session renewal.** The integration captures Microsoft's cookie rotations and re-fetches the antiforgery token when it goes stale, but it cannot renew an expired login. Manual re-authentication is required when it happens; Home Assistant will prompt you. With "Stay signed in?" answered Yes, the captured cookies are valid for about a year.
+- **Renewal depends on the Microsoft-account cookies.** The integration captures Microsoft's cookie rotations, re-fetches the antiforgery token when it goes stale and, since 2.0.6, completes the daily silent sign-in of the account page by itself. It cannot recover from a revoked or expired Microsoft login (password change, security review, cookies past their date); Home Assistant will prompt you then. With "Stay signed in?" answered Yes, the captured cookies are valid for about a year.
 - **Akamai bot-manager cookies are deliberately discarded.** Microsoft fronts `account.microsoft.com` with Akamai, whose `bm_sv` / `ak_bmsc` cookies are tied to the browser that obtained them. Replaying them from Home Assistant made Microsoft stop answering entirely (the request hung until the timeout, then the connection was reset), which hid an expired session behind timeouts and backoffs. They are dropped wherever cookies are captured, loaded or saved.
 - **A browser is still required to sign in.** The Family web session can only be established interactively, because Microsoft gates the Family dashboard behind an interactive OAuth hop. The mobile token is then fetched server-side, and only falls back to the browser if Microsoft demands another interactive step. There is no fully headless sign-in.
 - **Entity IDs changed** — see [Breaking changes](#breaking-changes).
@@ -837,7 +837,6 @@ Contributions are welcome!
 
 Areas where help is especially appreciated:
 - Microsoft API endpoint documentation and analysis
-- Renewing the Family web session without a manual sign-in
 - Encrypting the stored Microsoft cookies and tokens at rest
 - Additional language translations
 - Testing native authentication across different Family Safety account configurations and Home Assistant setups
