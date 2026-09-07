@@ -1,12 +1,13 @@
 # Microsoft Family Safety - Lovelace card (decluttering template)
 #
 # One clean panel per child. Required HACS frontend cards:
-#   decluttering-card, button-card, stack-in-card, vertical-stack-in-card, card-mod, mushroom
+#   decluttering-card, button-card, vertical-stack-in-card, card-mod, mushroom
 # Paste this decluttering_templates: block into your dashboard (one such key per
 # dashboard - merge, do not duplicate), then add one custom:decluttering-card per child.
 # Variables: child (sensor/number/time entity prefix), lock (switch/button entity
-# prefix), title and device_label (free text). The connection pill at the top right
-# is clickable and opens the integration page to reauthenticate.
+# prefix) and title (free text, shown in the header). The connection pill next to
+# the title is clickable and opens the integration page to reauthenticate; tapping
+# the header itself toggles the account lock.
 # See examples/dashboard.yaml and README 'Dashboard card'.
 
 decluttering_templates:
@@ -17,11 +18,90 @@ decluttering_templates:
       - type: custom:vertical-stack-in-card
         cards:
         - type: custom:button-card
+          entity: switch.[[lock]]_lock
           name: '[[title]]'
+          icon: mdi:laptop
+          show_state: false
           tap_action:
-            action: none
-          show_icon: false
+            action: toggle
+          hold_action:
+            action: more-info
+          state:
+          - value: 'on'
+            styles:
+              icon:
+              - color: '#F44336'
+          - value: 'off'
+            styles:
+              icon:
+              - color: '#4CAF50'
+          triggers_update:
+          - sensor.[[child]]_screen_time
+          - switch.[[lock]]_lock
+          - number.[[child]]_monday_limit
+          - number.[[child]]_tuesday_limit
+          - number.[[child]]_wednesday_limit
+          - number.[[child]]_thursday_limit
+          - number.[[child]]_friday_limit
+          - number.[[child]]_saturday_limit
+          - number.[[child]]_sunday_limit
+          - time.[[child]]_monday_start
+          - time.[[child]]_monday_end
+          variables:
+            screen_data: '[[[ const days = [''sunday'',''monday'',''tuesday'',''wednesday'',''thursday'',''friday'',''saturday'']; const today = days[new Date().getDay()]; const lim = states[''number.[[child]]_''
+              + today + ''_limit'']; let limit = lim ? parseFloat(lim.state) : NaN; if (isNaN(limit)) limit = 0; const used = parseFloat(states[''sensor.[[child]]_screen_time''] ? states[''sensor.[[child]]_screen_time''].state
+              : 0) || 0; const percent = (limit > 0) ? Math.min(Math.round((used / limit) * 100), 100) : 0; const se = states[''time.[[child]]_'' + today + ''_start'']; const ee = states[''time.[[child]]_''
+              + today + ''_end'']; const ok = (e) => e && e.state !== ''unknown'' && e.state !== ''unavailable''; return { limit: Math.round(limit), used: Math.round(used), percent: percent, start: ok(se)
+              ? se.state.substring(0,5) : ''--:--'', end: ok(ee) ? ee.state.substring(0,5) : ''--:--'' }; ]]]'
+          styles:
+            grid:
+            - grid-template-areas: '"i n health stat" "bar bar bar bar" "sched sched sched sched"'
+            - grid-template-columns: 40px auto 1fr auto
+            - grid-template-rows: auto auto auto
+            - grid-gap: 8px
+            card:
+            - padding: 12px
+            - box-shadow: none
+            - overflow: hidden
+            - border-top-left-radius: var(--ha-card-border-radius, 12px)
+            - border-top-right-radius: var(--ha-card-border-radius, 12px)
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
+            icon:
+            - grid-area: i
+            - width: 30px
+            - justify-self: start
+            name:
+            - grid-area: n
+            - justify-self: start
+            - align-self: center
+            - font-weight: bold
+            - font-size: 14px
+            custom_fields:
+              stat:
+              - grid-area: stat
+              - align-self: center
+              - justify-self: end
+              - font-size: 14px
+              - font-weight: '500'
+              - opacity: '0.8'
+              bar:
+              - grid-area: bar
+              sched:
+              - grid-area: sched
+              - font-size: 13px
+              - opacity: '0.7'
+              - text-align: center
+              health:
+              - grid-area: health
+              - align-self: center
+              - justify-self: start
+              - padding-left: 10px
           custom_fields:
+            stat: '[[[ const d = variables.screen_data; return d.limit > 0 ? d.used + ''m / '' + d.limit + ''m'' : d.used + '' min''; ]]]'
+            bar: '[[[ const pct = variables.screen_data.percent; let color = ''var(--primary-color)''; if (pct >= 90) color = ''#db4437''; else if (pct >= 75) color = ''#f4b400''; return `<div style="background-color:
+              rgba(127,127,127,0.2); border-radius: 6px; width: 100%; height: 12px; overflow: hidden;"><div style="background-color: ${color}; width: ${pct}%; height: 100%;"></div></div>`; ]]]'
+            sched: '[[[ const d = variables.screen_data; return `Allowed window: ${d.start} — ${d.end}`; ]]]'
             health:
               card:
                 type: custom:button-card
@@ -35,8 +115,8 @@ decluttering_templates:
                   action: more-info
                 custom_fields:
                   h: '[[[ const c = states[''sensor.microsoft_family_safety_connection'']; if (!c) return ''''; const a = c.attributes || {}; const fam = a.family_context; const reauth = a.reauth_required;
-                    let color = ''#4CAF50''; let label = ''OK''; if (reauth) { color = ''#F44336''; label = ''Reauthentication required''; } else if (c.state !== ''connected'' || (fam && fam !== ''ready''))
-                    { color = ''#FF9800''; label = ''Session needs renewal''; } return `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span><span
+                    let color = ''#4CAF50''; let label = ''OK''; if (reauth) { color = ''#F44336''; label = ''Reauthentication required''; } else if (c.state !== ''connected'' || (fam && fam !== ''ready'')) {
+                    color = ''#FF9800''; label = ''Session needs renewal''; } return `<span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span><span
                     style="font-size:11px;opacity:0.7">${label}</span></span>`; ]]]'
                 styles:
                   card:
@@ -50,31 +130,6 @@ decluttering_templates:
                   custom_fields:
                     h:
                     - justify-self: end
-          styles:
-            grid:
-            - grid-template-areas: '"n health"'
-            - grid-template-columns: 1fr auto
-            card:
-            - height: 40px
-            - border: none
-            - padding: 0 16px 0 16px
-            - margin: '0'
-            - box-shadow: none
-            - overflow: hidden
-            - border-top-left-radius: var(--ha-card-border-radius, 12px)
-            - border-top-right-radius: var(--ha-card-border-radius, 12px)
-            - border-bottom-left-radius: '0'
-            - border-bottom-right-radius: '0'
-            name:
-            - font-size: 15px
-            - font-weight: bold
-            - justify-self: start
-            - grid-area: n
-            custom_fields:
-              health:
-              - grid-area: health
-              - align-self: center
-              - justify-self: end
         - type: custom:mod-card
           card_mod:
             style: 'ha-card { height: 1px; background: rgba(152, 152, 157, 0.3); box-shadow: none; border: none; } ha-card { border-radius: 0 !important; }'
@@ -87,17 +142,17 @@ decluttering_templates:
             - border-top-right-radius: '0'
             - border-bottom-left-radius: '0'
             - border-bottom-right-radius: '0'
-        - type: custom:stack-in-card
-          mode: horizontal
+        - type: horizontal-stack
           card_mod:
-            style: |-
-              :host { --stack-card-gap: 0 !important; }
-              ha-card { padding: 0 !important; background: inherit !important; }
-              ha-card { border-radius: 0 !important; box-shadow: none !important; }
+            style: '#root { gap: 0 !important; }
+
+              #root > * { margin: 0 !important; flex: 1 1 0 !important; min-width: 0 !important; }
+
+              '
           cards:
           - type: custom:button-card
             entity: sensor.[[child]]_screen_time
-            name: Screen time
+            name: Total time
             icon: mdi:clock-outline
             show_state: true
             state_display: '[[[ const f = entity.attributes.formatted_time; if (f) { const p = f.split('':''); return p[0] + ''h'' + p[1]; } return entity.state + '' min''; ]]]'
@@ -174,12 +229,6 @@ decluttering_templates:
               state:
               - font-size: 16px
               - font-weight: bold
-          styles:
-            card:
-            - border-top-left-radius: '0'
-            - border-top-right-radius: '0'
-            - border-bottom-left-radius: '0'
-            - border-bottom-right-radius: '0'
         - type: conditional
           conditions:
           - entity: sensor.[[child]]_pending_requests
@@ -193,13 +242,13 @@ decluttering_templates:
               card:
                 type: custom:mushroom-title-card
                 title: ''
-            - type: custom:stack-in-card
-              mode: horizontal
+            - type: horizontal-stack
               card_mod:
-                style: |-
-                  :host { --stack-card-gap: 0 !important; }
-                  ha-card { padding: 0 !important; background: inherit !important; }
-                  ha-card { border-radius: 0 !important; box-shadow: none !important; }
+                style: '#root { gap: 0 !important; }
+
+                  #root > * { margin: 0 !important; flex: 1 1 0 !important; min-width: 0 !important; }
+
+                  '
               cards:
               - type: custom:button-card
                 entity: button.[[lock]]_approve_request
@@ -262,13 +311,13 @@ decluttering_templates:
             - border-top-right-radius: '0'
             - border-bottom-left-radius: '0'
             - border-bottom-right-radius: '0'
-        - type: custom:stack-in-card
-          mode: horizontal
+        - type: horizontal-stack
           card_mod:
-            style: |-
-              :host { --stack-card-gap: 0 !important; }
-              ha-card { padding: 0 !important; background: inherit !important; }
-              ha-card { border-radius: 0 !important; box-shadow: none !important; }
+            style: '#root { gap: 0 !important; }
+
+              #root > * { margin: 0 !important; flex: 1 1 0 !important; min-width: 0 !important; }
+
+              '
           cards:
           - type: custom:button-card
             entity: switch.[[lock]]_lock
@@ -372,97 +421,6 @@ decluttering_templates:
               name:
               - font-size: 13px
               - font-weight: '500'
-          styles:
-            card:
-            - overflow: hidden
-            - border-top-left-radius: '0'
-            - border-top-right-radius: '0'
-            - border-bottom-left-radius: var(--ha-card-border-radius, 12px)
-            - border-bottom-right-radius: var(--ha-card-border-radius, 12px)
-        card_mod:
-          style: 'ha-card { overflow: hidden !important; border-radius: var(--ha-card-border-radius, 12px) !important; }'
-      - type: custom:vertical-stack-in-card
-        cards:
-        - type: custom:button-card
-          entity: switch.[[lock]]_lock
-          name: '[[device_label]]'
-          icon: mdi:desktop-tower-monitor
-          show_state: false
-          tap_action:
-            action: toggle
-          hold_action:
-            action: more-info
-          state:
-          - value: 'on'
-            styles:
-              icon:
-              - color: '#F44336'
-          - value: 'off'
-            styles:
-              icon:
-              - color: '#4CAF50'
-          triggers_update:
-          - sensor.[[child]]_screen_time
-          - switch.[[lock]]_lock
-          - number.[[child]]_monday_limit
-          - number.[[child]]_tuesday_limit
-          - number.[[child]]_wednesday_limit
-          - number.[[child]]_thursday_limit
-          - number.[[child]]_friday_limit
-          - number.[[child]]_saturday_limit
-          - number.[[child]]_sunday_limit
-          - time.[[child]]_monday_start
-          - time.[[child]]_monday_end
-          variables:
-            screen_data: '[[[ const days = [''sunday'',''monday'',''tuesday'',''wednesday'',''thursday'',''friday'',''saturday'']; const today = days[new Date().getDay()]; const lim = states[''number.[[child]]_''
-              + today + ''_limit'']; let limit = lim ? parseFloat(lim.state) : NaN; if (isNaN(limit)) limit = 0; const used = parseFloat(states[''sensor.[[child]]_screen_time''] ? states[''sensor.[[child]]_screen_time''].state
-              : 0) || 0; const percent = (limit > 0) ? Math.min(Math.round((used / limit) * 100), 100) : 0; const se = states[''time.[[child]]_'' + today + ''_start'']; const ee = states[''time.[[child]]_''
-              + today + ''_end'']; const ok = (e) => e && e.state !== ''unknown'' && e.state !== ''unavailable''; return { limit: Math.round(limit), used: Math.round(used), percent: percent, start: ok(se)
-              ? se.state.substring(0,5) : ''--:--'', end: ok(ee) ? ee.state.substring(0,5) : ''--:--'' }; ]]]'
-          styles:
-            grid:
-            - grid-template-areas: '"i n stat" "bar bar bar" "sched sched sched"'
-            - grid-template-columns: 40px 1fr auto
-            - grid-template-rows: auto auto auto
-            - grid-gap: 8px
-            card:
-            - padding: 12px
-            - box-shadow: none
-            - overflow: hidden
-            - border-top-left-radius: var(--ha-card-border-radius, 12px)
-            - border-top-right-radius: var(--ha-card-border-radius, 12px)
-            - border-bottom-left-radius: '0'
-            - border-bottom-right-radius: '0'
-            icon:
-            - grid-area: i
-            - width: 30px
-            - justify-self: start
-            name:
-            - grid-area: n
-            - justify-self: start
-            - align-self: center
-            - font-weight: bold
-            - font-size: 14px
-            custom_fields:
-              stat:
-              - grid-area: stat
-              - align-self: center
-              - justify-self: end
-              - font-size: 14px
-              - font-weight: '500'
-              - opacity: '0.8'
-              bar:
-              - grid-area: bar
-              sched:
-              - grid-area: sched
-              - font-size: 13px
-              - opacity: '0.7'
-              - text-align: center
-          custom_fields:
-            stat: '[[[ const d = variables.screen_data; return d.limit > 0 ? d.used + ''m / '' + d.limit + ''m'' : d.used + '' min''; ]]]'
-            bar: '[[[ const pct = variables.screen_data.percent; let color = ''var(--primary-color)''; if (pct >= 90) color = ''#db4437''; else if (pct >= 75) color = ''#f4b400''; return `<div style="background-color:
-              rgba(127,127,127,0.2); border-radius: 6px; width: 100%; height: 12px; overflow: hidden;"><div style="background-color: ${color}; width: ${pct}%; height: 100%;"></div></div>`; ]]]'
-            sched: '[[[ const d = variables.screen_data; return `Allowed window : ${d.start} — ${d.end}`; ]]]'
         - type: custom:mod-card
           card_mod:
             style: 'ha-card { height: 1px; background: rgba(152, 152, 157, 0.3); box-shadow: none; border: none; } ha-card { border-radius: 0 !important; }'
@@ -496,6 +454,10 @@ decluttering_templates:
             - font-weight: '600'
             - opacity: '0.7'
             - justify-self: start
+          card_mod:
+            style: ':host { background: none !important; }
+
+              ha-card { background: none !important; }'
         - type: custom:button-card
           entity: sensor.[[child]]_applications
           tap_action:
@@ -528,6 +490,10 @@ decluttering_templates:
               : `<span style="width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;opacity:0.4">▪</span>`; const blocked = a.blocked ? `<span style="color:#F44336;font-size:11px;margin-left:6px">blocked</span>`
               : ''''; return `<div style="display:flex;align-items:center;gap:10px">${ic}<span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.app_name}${blocked}</span><span
               style="font-size:13px;font-weight:500;opacity:0.8">${fmt(a.usage_minutes)}</span></div>`; }).join('''') + `</div>`; ]]]'
+          card_mod:
+            style: ':host { background: none !important; }
+
+              ha-card { background: none !important; }'
         - type: custom:mod-card
           card_mod:
             style: 'ha-card { height: 1px; background: rgba(152, 152, 157, 0.3); box-shadow: none; border: none; } ha-card { border-radius: 0 !important; }'
@@ -561,13 +527,17 @@ decluttering_templates:
             - font-weight: '600'
             - opacity: '0.7'
             - justify-self: start
-        - type: custom:stack-in-card
-          mode: horizontal
           card_mod:
-            style: |-
-              :host { --stack-card-gap: 0 !important; }
-              ha-card { padding: 0 4px !important; background: inherit !important; }
-              ha-card { border-radius: 0 !important; box-shadow: none !important; }
+            style: ':host { background: none !important; }
+
+              ha-card { background: none !important; }'
+        - type: horizontal-stack
+          card_mod:
+            style: '#root { gap: 0 !important; }
+
+              #root > * { margin: 0 !important; flex: 1 1 0 !important; min-width: 0 !important; }
+
+              '
           cards:
           - type: custom:button-card
             entity: number.[[child]]_monday_limit
@@ -580,10 +550,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_monday_start
+              entity: time.[[child]]_monday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_monday_start'']; const e = states[''time.[[child]]_monday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -592,12 +563,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 1 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 1 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 1 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 1 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 1 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -605,8 +579,17 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_monday_start
           - type: custom:button-card
             entity: number.[[child]]_tuesday_limit
             name: Tue
@@ -618,10 +601,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_tuesday_start
+              entity: time.[[child]]_tuesday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_tuesday_start'']; const e = states[''time.[[child]]_tuesday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -630,12 +614,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 2 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 2 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 2 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 2 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 2 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -643,8 +630,17 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_tuesday_start
           - type: custom:button-card
             entity: number.[[child]]_wednesday_limit
             name: Wed
@@ -656,10 +652,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_wednesday_start
+              entity: time.[[child]]_wednesday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_wednesday_start'']; const e = states[''time.[[child]]_wednesday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -668,12 +665,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 3 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 3 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 3 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 3 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 3 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -681,8 +681,17 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_wednesday_start
           - type: custom:button-card
             entity: number.[[child]]_thursday_limit
             name: Thu
@@ -694,10 +703,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_thursday_start
+              entity: time.[[child]]_thursday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_thursday_start'']; const e = states[''time.[[child]]_thursday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -706,12 +716,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 4 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 4 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 4 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 4 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 4 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -719,8 +732,17 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_thursday_start
           - type: custom:button-card
             entity: number.[[child]]_friday_limit
             name: Fri
@@ -732,10 +754,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_friday_start
+              entity: time.[[child]]_friday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_friday_start'']; const e = states[''time.[[child]]_friday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -744,12 +767,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 5 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 5 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 5 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 5 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 5 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -757,8 +783,17 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_friday_start
           - type: custom:button-card
             entity: number.[[child]]_saturday_limit
             name: Sat
@@ -770,10 +805,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_saturday_start
+              entity: time.[[child]]_saturday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_saturday_start'']; const e = states[''time.[[child]]_saturday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -782,12 +818,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 6 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 6 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 6 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 6 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 6 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -795,8 +834,17 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_saturday_start
           - type: custom:button-card
             entity: number.[[child]]_sunday_limit
             name: Sun
@@ -808,10 +856,11 @@ decluttering_templates:
               action: more-info
             hold_action:
               action: more-info
-              entity: time.[[child]]_sunday_start
+              entity: time.[[child]]_sunday_end
             custom_fields:
               win: '[[[ const s = states[''time.[[child]]_sunday_start'']; const e = states[''time.[[child]]_sunday_end'']; const ok = (x) => x && x.state !== ''unknown'' && x.state !== ''unavailable'';
-                return ok(s) && ok(e) ? s.state.substring(0,5) + ''-'' + e.state.substring(0,5) : ''''; ]]]'
+                const fmt = (x) => { const p = x.state.substring(0,5).split('':''); return parseInt(p[0]) + ''h'' + (p[1] !== ''00'' ? p[1] : ''''); }; return ok(s) && ok(e) ? fmt(s) + ''-'' + fmt(e) :
+                ''''; ]]]'
             styles:
               grid:
               - grid-template-areas: '"n" "s" "win"'
@@ -820,12 +869,15 @@ decluttering_templates:
               - border: none
               - border-radius: 8px
               - padding: 4px 0
-              - background: '[[[ return new Date().getDay() === 0 ? ''rgba(var(--rgb-primary-color), 0.15)'' : ''transparent''; ]]]'
+              - background: '[[[ return new Date().getDay() === 0 ? ''rgba(255,152,0,0.18)'' : ''transparent''; ]]]'
               - box-shadow: none
+              - overflow: visible
               name:
               - font-size: 11px
-              - opacity: '0.6'
               - grid-area: n
+              - color: '[[[ return new Date().getDay() === 0 ? ''#FF9800'' : ''var(--primary-text-color)''; ]]]'
+              - font-weight: '[[[ return new Date().getDay() === 0 ? ''700'' : ''400''; ]]]'
+              - opacity: '[[[ return new Date().getDay() === 0 ? ''1'' : ''0.6''; ]]]'
               state:
               - font-size: 14px
               - font-weight: bold
@@ -833,14 +885,16 @@ decluttering_templates:
               custom_fields:
                 win:
                 - grid-area: win
-                - font-size: 9px
-                - opacity: '0.45'
-          styles:
-            card:
-            - overflow: hidden
-            - border-top-left-radius: '0'
-            - border-top-right-radius: '0'
-            - border-bottom-left-radius: var(--ha-card-border-radius, 12px)
-            - border-bottom-right-radius: var(--ha-card-border-radius, 12px)
+                - font-size: 8px
+                - opacity: '0.5'
+                - white-space: nowrap
+                - letter-spacing: -0.3px
+                - overflow: visible
+                - text-overflow: clip
+                - justify-self: center
+                - padding: '0'
+            double_tap_action:
+              action: more-info
+              entity: time.[[child]]_sunday_start
         card_mod:
           style: 'ha-card { overflow: hidden !important; border-radius: var(--ha-card-border-radius, 12px) !important; }'
