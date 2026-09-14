@@ -22,7 +22,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from ._pyfamilysafety_compat import apply_patches
+from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .const import (
@@ -45,6 +45,7 @@ STORAGE_KEY = f"{DOMAIN}.saved_screentime"
 STORAGE_VERSION = 1
 AUTH_STORAGE_VERSION = 1
 AUTH_NOTIFICATION_ID = "familysafety_auth_expired"
+ROSTER_NOTIFICATION_ID = "familysafety_roster_error"
 #: Runtime-store flag set when Microsoft rejected the persisted Family token.
 _FAMILY_TOKEN_REJECTED = "web_family_token_rejected"
 #: Polls in a row ending in family_context_state == "auth_required" before the
@@ -171,6 +172,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._native_web_auth = bool(entry.data.get(CONF_WEB_COOKIES))
         self._web_cookies_loaded = False
         self._auth_notification_sent = False
+        self._roster_notification_sent = False
         self._platform_override_until: dict[tuple[str, str], datetime] = {}
 
     def _entry_auth_anchor(self) -> str:
@@ -362,12 +364,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         This is distinct from an authentication failure: the token is valid,
         but the roster references a device Microsoft can no longer resolve.
+        Since 2.0.7 the per-member requests tolerate it (see
+        _pyfamilysafety_compat._patch_account_roster_tolerance); this branch
+        only remains for the roster request itself.
         """
-        return (
-            "unabletofindtargetresource" in text
-            or "rostererror" in text
-            or "unable to find the node" in text
-        )
+        return is_stale_roster_error(text)
 
     async def _async_load_web_cookies(self) -> None:
         """Prefer cookies captured natively; retain the Playwright add-on fallback."""
@@ -1012,6 +1013,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return {
             "state": state,
             "mobile_api": "ok" if mobile_ok else "error",
+            "roster_errors": self._roster_errors_by_account(),
             "web_session": web_state,
             "web_session_authenticated": web_authenticated,
             "web_session_last_checked": (
@@ -1201,6 +1203,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "account_balance": account.account_balance,
             "account_currency": account.account_currency,
             "blocked_platforms": [str(p) for p in account.blocked_platforms] if account.blocked_platforms else [],
+            # Endpoints Microsoft could not resolve for this member on the
+            # last poll (see _pyfamilysafety_compat._patch_account_roster_tolerance).
+            "roster_errors": dict(getattr(account, "roster_errors", None) or {}),
             "devices": [],
             "applications": [
                 {
@@ -1286,6 +1291,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
             await self._async_track_family_context()
+            await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts
             self._devices = new_devices
             pending = getattr(self.api, "pending_requests", None) or []
@@ -1342,6 +1348,64 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             {"notification_id": AUTH_NOTIFICATION_ID},
         )
         self._auth_notification_sent = False
+
+    def _roster_errors_by_account(self) -> dict[str, list[str]]:
+        """Return {account_id: [endpoint, ...]} for members Microsoft cannot fully resolve."""
+        accounts = (self.data or {}).get("accounts", {}) if self.data else {}
+        return {
+            str(account_id): sorted((account.get("roster_errors") or {}).keys())
+            for account_id, account in accounts.items()
+            if account.get("roster_errors")
+        }
+
+    async def _async_sync_roster_notification(self, accounts_data: dict[str, Any]) -> None:
+        """Raise one persistent notification while a member is partially unresolvable.
+
+        The tolerance patch keeps the integration running with empty data for
+        the failing endpoint; the notification tells the user why some values
+        stay empty and what usually fixes it.  It is dismissed as soon as
+        Microsoft resolves the member again.
+        """
+        affected = [
+            (account.get("first_name") or str(account_id), sorted(account["roster_errors"]))
+            for account_id, account in accounts_data.items()
+            if account.get("roster_errors")
+        ]
+        if not affected:
+            if self._roster_notification_sent:
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": ROSTER_NOTIFICATION_ID},
+                )
+                self._roster_notification_sent = False
+            return
+        if self._roster_notification_sent:
+            return
+        lines = "\n".join(
+            f"- {name}: {', '.join(endpoints)}" for name, endpoints in affected
+        )
+        message = (
+            "Microsoft cannot resolve part of the family roster, so some values "
+            "stay empty for:\n\n"
+            f"{lines}\n\n"
+            "The integration keeps working with everything Microsoft still "
+            "returns. This usually happens when a reset or decommissioned device "
+            "is still listed at https://account.microsoft.com/family, or when a "
+            "school/work (Entra ID) account is enrolled on the child's device. "
+            "Removing the stale device from the family, when that is possible, "
+            "clears it."
+        )
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Microsoft Family Safety - Roster partially unavailable",
+                "message": message,
+                "notification_id": ROSTER_NOTIFICATION_ID,
+            },
+        )
+        self._roster_notification_sent = True
 
     async def async_cleanup(self) -> None:
         self._accounts.clear()

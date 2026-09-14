@@ -42,10 +42,19 @@ that surface on Home Assistant, especially on Python 3.14:
    threaded system resolver with IPv4, matching the successful browser HAR's
    IPv4 transport while leaving the rest of Home Assistant untouched.
 
+8. ``Account.update`` lets a single Microsoft 404
+   ``Family.UnableToFindTargetResource`` / ``RosterError`` abort the whole
+   roster load, so one child whose node Microsoft cannot resolve (a reset
+   device, or a school/work Entra ID account on the same machine, issue #42)
+   blocks every entity of every child. The tolerant replacement keeps that
+   child with empty data for the failing endpoint and records the failure in
+   ``Account.roster_errors`` for the coordinator to surface.
+
 This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import inspect
 import logging
@@ -53,6 +62,7 @@ import time
 from typing import Any
 
 import aiohttp
+from pyfamilysafety.account import Account
 from pyfamilysafety.api import FamilySafetyAPI
 from pyfamilysafety.authenticator import Authenticator
 from pyfamilysafety.authenticator.const import (
@@ -76,10 +86,42 @@ _WEB_API_HEADER_PATCH_MARKER = "_hafs_mobile_authorization_header_patch"
 _DATA_SOURCE_PATCH_MARKER = "_hafs_mobile_first_data_sources_patch"
 _WEB_PROBE_PATCH_MARKER = "_hafs_web_probe_backoff_patch"
 _CONNECTION_STATE_PATCH_MARKER = "_hafs_connection_state_diagnostics_patch"
+_ROSTER_TOLERANCE_PATCH_MARKER = "_hafs_roster_tolerance_patch"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
 # data continues to refresh normally during the backoff window.
 _WEB_BACKOFF_SECONDS = 30 * 60
+
+#: Fragments of Microsoft's "node not found" answer on the mobile aggregator.
+#: The token is valid; Microsoft simply cannot resolve one family member's
+#: resource (typically a reset or decommissioned device still listed in the
+#: roster, or a device enrolled in a school/work Entra ID tenant).
+_STALE_ROSTER_MARKERS = (
+    "unabletofindtargetresource",
+    "rostererror",
+    "unable to find the node",
+)
+
+#: (user_id, endpoint) pairs already reported at WARNING level, so a roster
+#: error that persists across polls is logged once and then only at DEBUG.
+_ROSTER_WARNED: set[tuple[str, str]] = set()
+
+
+def is_stale_roster_error(text: str) -> bool:
+    """Return True for Microsoft's "device/node not found in roster" 404."""
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _STALE_ROSTER_MARKERS)
+
+
+def _empty_screentime_report() -> dict[str, Any]:
+    """Shape ``Device.from_dict`` and the usage aggregates can consume safely."""
+    return {
+        "deviceUsageAggregates": {
+            "deviceAggregates": [],
+            "totalScreenTime": 0,
+            "dailyAverage": 0,
+        }
+    }
 
 # The HA-managed session, injected at setup time.
 _shared_session: aiohttp.ClientSession | None = None
@@ -608,6 +650,71 @@ def _patch_connection_state_diagnostics() -> bool:
     return True
 
 
+def _patch_account_roster_tolerance() -> bool:
+    """Keep loading a family member when Microsoft cannot resolve part of it.
+
+    ``Account.update`` (called by ``FamilySafety.create`` for every member and
+    again on every ``FamilySafety.update``) issues five per-member requests.
+    In 1.1.2 the first ``HttpException`` aborts the whole roster, so one
+    ``Family.UnableToFindTargetResource`` 404 blocks every child (issue #42).
+    The replacement runs each request on its own, swallows only that specific
+    404, leaves the member with empty data for the failing endpoint and lists
+    the failures in ``account.roster_errors`` ({endpoint: message}).  Any other
+    error still propagates unchanged.
+    """
+    current = Account.update
+    if getattr(current, _ROSTER_TOLERANCE_PATCH_MARKER, False):
+        return False
+
+    async def _guarded(account: Account, endpoint: str, coro) -> None:
+        try:
+            await coro
+        except HttpException as err:
+            text = str(err)
+            if not is_stale_roster_error(text):
+                raise
+            account.roster_errors[endpoint] = text[:200]
+            key = (str(account.user_id), endpoint)
+            _LOGGER.log(
+                logging.DEBUG if key in _ROSTER_WARNED else logging.WARNING,
+                "Microsoft cannot resolve the %s resource of family member %s "
+                "(%s); keeping the member with empty data for that endpoint. "
+                "This usually means a reset or decommissioned device still "
+                "listed in the family roster, or a device enrolled in a "
+                "school/work Entra ID tenant. Check "
+                "https://account.microsoft.com/family",
+                endpoint,
+                account.user_id,
+                text[:120],
+            )
+            _ROSTER_WARNED.add(key)
+
+    async def _patched_update(self: Account) -> None:
+        self.roster_errors = {}
+        await _guarded(self, "screentime_usage", self.get_screentime_usage())
+        # get_screentime_usage() assigns both reports only after its second
+        # request succeeded; without them Device.from_dict() and
+        # _get_applications() fail on None, so give them harmless shapes.
+        if self.screentime_usage is None:
+            self.screentime_usage = _empty_screentime_report()
+        if self.application_usage is None:
+            self.application_usage = {"appActivity": []}
+        await asyncio.gather(
+            _guarded(self, "devices", self._get_devices()),
+            _guarded(self, "overrides", self._get_overrides()),
+            _guarded(self, "applications", self._get_applications()),
+            _guarded(self, "spending", self._get_account_balance()),
+        )
+        if self.devices is None:
+            self.devices = []
+        if self.blocked_platforms is None:
+            self.blocked_platforms = []
+
+    setattr(_patched_update, _ROSTER_TOLERANCE_PATCH_MARKER, True)
+    Account.update = _patched_update
+    return True
+
+
 def apply_patches(hass: HomeAssistant) -> None:
     """Apply the pyfamilysafety compatibility patches (idempotent)."""
     set_shared_session(async_get_clientsession(hass))
@@ -640,6 +747,9 @@ def apply_patches(hass: HomeAssistant) -> None:
 
     if _patch_connection_state_diagnostics():
         applied.append("connection source diagnostics")
+
+    if _patch_account_roster_tolerance():
+        applied.append("per-member roster error tolerance")
 
     if applied:
         _LOGGER.debug(
