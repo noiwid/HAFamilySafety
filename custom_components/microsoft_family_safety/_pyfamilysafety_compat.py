@@ -48,7 +48,20 @@ that surface on Home Assistant, especially on Python 3.14:
    device, or a school/work Entra ID account on the same machine, issue #42)
    blocks every entity of every child. The tolerant replacement keeps that
    child with empty data for the failing endpoint and records the failure in
-   ``Account.roster_errors`` for the coordinator to surface.
+   ``Account.roster_errors`` ({endpoint: message}).  Any other
+   error still propagates unchanged.
+
+9. ``FamilySafety.create()`` calls ``FamilySafetyAPI.send_request`` during
+   initial setup before ``Account.update`` is reached. If Microsoft returns a
+   roster error at that stage (same ``Family.UnableToFindTargetResource`` 404
+   as issue #42, but on the initial setup path), the ``HttpException`` was not
+   caught by ``_patched_send_request`` and propagated all the way to
+   ``_async_setup_api``, which re-raised it as ``UpdateFailed`` → HA converted
+   that to ``ConfigEntryNotReady`` → endless setup_retry loop. The fix extends
+   ``_patched_send_request`` to catch these roster errors and return a valid
+   send_request() response dict so the caller proceeds with partial data,
+   consistent with the per-member tolerance in
+   ``_patch_account_roster_tolerance``.
 
 This module patches those paths while keeping token values out of the log.
 """
@@ -319,7 +332,15 @@ async def _patched_send_request(
     platform: str | None = None,
     **kwargs: Any,
 ):
-    """Retry one mobile API 401 after forcing a fresh access token."""
+    """Retry one mobile API 401 after forcing a fresh access token.
+
+    Also suppresses roster-resolution 404s during API initialisation so that
+    ``FamilySafety.create()`` can complete even when Microsoft cannot resolve a
+    device enrolled in a school/work Entra ID or MDM tenant (issue #42).
+    The ``_patch_account_roster_tolerance`` fix handles the same error class
+    during per-member polling via ``Account.update``; this patch closes the
+    gap for the initial setup path that runs before those calls are reached.
+    """
     try:
         return await _original_send_request(
             self,
@@ -375,6 +396,33 @@ async def _patched_send_request(
             endpoint,
         )
         return result
+    except HttpException as exc:
+        # Roster-resolution errors reach here when Microsoft cannot find a
+        # device referenced in the family roster (e.g. a machine enrolled in
+        # a school/work Entra ID or MDM tenant, or a reset/decommissioned
+        # device).  If this propagates during FamilySafety.create() the
+        # entire integration is blocked from loading (endless setup_retry loop
+        # via UpdateFailed → ConfigEntryNotReady).  Return a valid
+        # send_request() response dict so the caller proceeds with partial
+        # data — consistent with the per-member tolerance already applied by
+        # _patch_account_roster_tolerance() during polling.
+        text = str(exc).lower()
+        if any(marker in text for marker in _STALE_ROSTER_MARKERS):
+            _LOGGER.warning(
+                "Suppressed roster resolution error for endpoint %s "
+                "(device enrolled in Entra ID/MDM or decommissioned — "
+                "Microsoft cannot resolve it). Returning empty response so "
+                "the integration can load with partial data. Remove the "
+                "unresolvable device at https://account.microsoft.com/family",
+                endpoint,
+            )
+            return {
+                "status": 200,
+                "text": '{"members": []}',
+                "json": {"members": []},
+                "headers": {},
+            }
+        raise
 
 
 def _patch_combined_client_mobile_header() -> bool:
@@ -733,7 +781,7 @@ def apply_patches(hass: HomeAssistant) -> None:
     if not getattr(FamilySafetyAPI.send_request, _API_PATCH_MARKER, False):
         setattr(_patched_send_request, _API_PATCH_MARKER, True)
         FamilySafetyAPI.send_request = _patched_send_request
-        applied.append("single Unauthorized refresh retry")
+        applied.append("single Unauthorized refresh retry + roster error tolerance")
 
     if _patch_combined_client_mobile_header():
         applied.append("legacy mobile Authorization header normalization")
