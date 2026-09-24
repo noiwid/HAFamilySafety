@@ -104,7 +104,7 @@ Service call / entity write
 
 ### Legacy add-on mode
 
-The `familysafety-playwright/` add-on is still supported. An entry runs in legacy mode when it has **no natively captured web session** — that is, existing entries created before native auth, and new entries where an add-on was detected or an **auth URL** was configured.
+The `familysafety-playwright/` add-on is still supported. An entry runs in legacy mode when it has **no natively captured web session** — that is, existing entries created before native auth, and new entries where an **auth URL** was typed in. Since 2.0.8 an add-on that is merely installed no longer forces legacy mode, and reauthenticating a legacy entry (from the notification, Repairs or **Reconfigure**) moves it to the native sign-in for good: its add-on URL and key are cleared and the add-on is no longer used.
 
 In legacy mode, screen time reads and writes are routed through the add-on's authenticated Chromium session, exactly as before. The add-on remains useful when:
 
@@ -657,7 +657,7 @@ Microsoft's mobile API sometimes answers `Family.UnableToFindTargetResource` / `
 
 - Make sure the add-on is **started** (green icon in the Add-ons page).
 - The integration resolves the add-on hostname dynamically via the Supervisor API; on HA Core/Container set the **Legacy auth add-on URL** option manually.
-- If the session is dead (redirect to a marketing page), re-authenticate via the noVNC interface.
+- If the session is dead (redirect to a marketing page), the simplest fix since 2.0.8 is to reauthenticate the entry from Home Assistant: it switches the entry to the native sign-in (answer Yes to "Stay signed in?"). Re-authenticating via the noVNC interface still works if you want to stay on the add-on.
 - Add-on writes take ~20-30 s each because the browser must reach the family dashboard first.
 
 ### Debug logging

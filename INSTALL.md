@@ -156,7 +156,7 @@ While enabled, your Microsoft password and session data travel **unencrypted acr
 
 ### Legacy add-on mode
 
-If you already run the Playwright auth add-on (or the standalone Docker container) and prefer to keep it, set the **Legacy auth add-on URL** option -- or simply have the add-on running, in which case it is auto-detected during setup. Screen time reads and writes are then routed through the add-on's browser session, exactly as before.
+If you already run the Playwright auth add-on (or the standalone Docker container) and prefer to keep it, set the **Legacy auth add-on URL** field during setup. Screen time reads and writes are then routed through the add-on's browser session, exactly as before. Since 2.0.8 a running add-on is no longer auto-selected, and reauthenticating a legacy entry from Home Assistant moves it to the native sign-in for good.
 
 An entry runs in native mode as soon as it has a natively captured web session, and in legacy mode otherwise. The two modes are mutually exclusive per config entry.
 

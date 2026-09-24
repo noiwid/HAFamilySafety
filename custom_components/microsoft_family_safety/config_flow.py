@@ -119,6 +119,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ] | None = None
         self._pending_auth_url: str | None = None
         self._pending_api_key: str | None = None
+        #: Existing entry of the same Microsoft account found by a user flow;
+        #: the sign-in then updates it instead of aborting (#50).
+        self._update_entry: config_entries.ConfigEntry | None = None
         self._native_mobile_abort_reason: str | None = None
         self._allow_insecure_http_auth: bool = False
         self._family_wait_task: Any | None = None
@@ -339,13 +342,18 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_external_step(step_id="check_mobile_proxy", url=proxy_url)
 
     def _uses_legacy_addon(self) -> bool:
-        """Return whether this flow serves a Playwright add-on entry."""
+        """Return whether this flow serves a Playwright add-on entry.
+
+        Only a new entry whose user explicitly typed an add-on URL stays on the
+        legacy journey.  Reauth and reconfigure always run the native web-first
+        sign-in: an add-on entry used to keep the mobile-only reauth, which never
+        offers "Stay signed in?" and never renews the add-on's own web session,
+        so the entry asked for reauthentication again within minutes (#49).
+        Merely detecting an installed add-on no longer forces legacy mode either.
+        """
         if self._is_existing_entry_auth_flow():
-            entry = self._get_existing_entry()
-            return bool(entry.data.get(CONF_AUTH_URL)) and not entry.data.get(
-                CONF_WEB_COOKIES
-            )
-        return self._detected_source in ("api", "file") or bool(self._pending_auth_url)
+            return False
+        return bool(self._pending_auth_url)
 
     async def async_step_check_mobile_proxy(
         self, user_input: dict[str, Any] | None = None
@@ -418,16 +426,7 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Preserve the legacy add-on flow unchanged.  The native flow below is
         # deliberately restricted to entries that need a Family web session.
-        if self._is_existing_entry_auth_flow():
-            entry = self._get_existing_entry()
-            legacy_addon = bool(entry.data.get(CONF_AUTH_URL)) and not entry.data.get(
-                CONF_WEB_COOKIES
-            )
-            if legacy_addon:
-                return self.async_external_step_done(
-                    next_step_id="finish_mobile_proxy"
-                )
-        elif self._detected_source in ("api", "file") or self._pending_auth_url:
+        if self._uses_legacy_addon():
             return self.async_external_step_done(next_step_id="finish_mobile_proxy")
 
         redirect_url = proxy.oauth_redirect_url
@@ -483,40 +482,62 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if old_user_id and new_user_id and old_user_id != new_user_id:
                 return "wrong_account"
 
-            new_data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
-            if new_user_id:
-                new_data[CONF_AUTH_USER_ID] = new_user_id
-            if CONF_AUTH_URL in entry.data:
-                new_data[CONF_AUTH_URL] = entry.data[CONF_AUTH_URL]
-            if CONF_API_KEY in entry.data:
-                new_data[CONF_API_KEY] = entry.data[CONF_API_KEY]
-
-            self._pending_data = new_data
-            merged_options = dict(entry.options)
-            if self._pending_options:
-                merged_options.update(self._pending_options)
-            self._pending_options = merged_options
-            self._allow_insecure_http_auth = bool(
-                merged_options.get(CONF_ALLOW_INSECURE_HTTP_AUTH, False)
-            )
-            self._pending_title = entry.title
+            self._prepare_existing_entry_update(entry, refresh_token, new_user_id)
             return None
 
-        await self.async_set_unique_id(new_user_id or refresh_token[:20])
-        self._abort_if_unique_id_configured()
+        unique_id = new_user_id or refresh_token[:20]
+        # A flow left open for the same account (typically the reauth started
+        # by an existing entry) must not turn a successful sign-in into
+        # "already_in_progress" (#50): the existing entry is updated instead.
+        await self.async_set_unique_id(unique_id, raise_on_progress=False)
+        existing = self.hass.config_entries.async_entry_for_domain_unique_id(
+            DOMAIN, unique_id
+        )
+        if existing is not None:
+            _LOGGER.info(
+                "Microsoft account already configured; the new sign-in will "
+                "update the existing entry instead of creating a second one"
+            )
+            self._update_entry = existing
+            self._prepare_existing_entry_update(existing, refresh_token, new_user_id)
+            return None
 
         data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
         if new_user_id:
             data[CONF_AUTH_USER_ID] = new_user_id
-        effective_auth_url = self._pending_auth_url or self._detected_url
-        if effective_auth_url:
-            data[CONF_AUTH_URL] = effective_auth_url
-        if self._pending_api_key:
-            data[CONF_API_KEY] = self._pending_api_key
 
         self._pending_data = data
         self._pending_title = info["title"]
         return None
+
+    def _prepare_existing_entry_update(
+        self, entry: config_entries.ConfigEntry, refresh_token: str, user_id: str
+    ) -> None:
+        """Build pending data that renews ``entry`` with a native web session.
+
+        The add-on URL and key are cleared: once native cookies are stored the
+        entry runs natively for good, and keeping them would only resurrect
+        the legacy path if the cookies were ever lost (#49).
+        """
+        new_data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
+        if user_id:
+            new_data[CONF_AUTH_USER_ID] = user_id
+        if entry.data.get(CONF_AUTH_URL) is not None:
+            new_data[CONF_AUTH_URL] = None
+        if entry.data.get(CONF_API_KEY) is not None:
+            new_data[CONF_API_KEY] = None
+
+        self._pending_data = new_data
+        merged_options = dict(entry.options)
+        if self._pending_options:
+            merged_options.update(self._pending_options)
+        merged_options.pop(CONF_AUTH_URL, None)
+        merged_options.pop(CONF_API_KEY, None)
+        self._pending_options = merged_options
+        self._allow_insecure_http_auth = bool(
+            merged_options.get(CONF_ALLOW_INSECURE_HTTP_AUTH, False)
+        )
+        self._pending_title = entry.title
 
     async def _try_server_side_mobile_oauth(
         self, cookies: list[dict[str, Any]]
@@ -667,32 +688,8 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_user_id = str(info.get("user_id") or "")
             if old_user_id and new_user_id and old_user_id != new_user_id:
                 return self.async_abort(reason="wrong_account")
-            new_data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
-            if new_user_id:
-                new_data[CONF_AUTH_USER_ID] = new_user_id
-            if CONF_AUTH_URL in entry.data:
-                new_data[CONF_AUTH_URL] = entry.data[CONF_AUTH_URL]
-            if CONF_API_KEY in entry.data:
-                new_data[CONF_API_KEY] = entry.data[CONF_API_KEY]
-            self._pending_data = new_data
-            merged_options = dict(entry.options)
-            if self._pending_options:
-                merged_options.update(self._pending_options)
-            self._pending_options = merged_options
-            self._allow_insecure_http_auth = bool(
-                merged_options.get(CONF_ALLOW_INSECURE_HTTP_AUTH, False)
-            )
-            self._pending_title = entry.title
-
-            # Native/mobile-only entries always renew the web session too.
-            # Legacy add-on entries keep their independent add-on cookie source.
-            legacy_addon = bool(entry.data.get(CONF_AUTH_URL)) and not entry.data.get(CONF_WEB_COOKIES)
-            if legacy_addon:
-                return self.async_update_and_abort(
-                    entry,
-                    data_updates=new_data,
-                    options=self._pending_options or entry.options,
-                )
+            # Existing entries always renew the web session natively (#49).
+            self._prepare_existing_entry_update(entry, refresh_token, new_user_id)
             return await self.async_step_start_web_auth()
 
         user_id = str(info.get("user_id") or "")
@@ -702,17 +699,16 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
         if user_id:
             data[CONF_AUTH_USER_ID] = user_id
-        effective_auth_url = self._pending_auth_url or self._detected_url
-        if effective_auth_url:
-            data[CONF_AUTH_URL] = effective_auth_url
-        if self._pending_api_key:
-            data[CONF_API_KEY] = self._pending_api_key
+        if self._uses_legacy_addon():
+            data[CONF_AUTH_URL] = self._pending_auth_url
+            if self._pending_api_key:
+                data[CONF_API_KEY] = self._pending_api_key
 
         self._pending_data = data
         self._pending_title = info["title"]
 
-        # If an existing legacy add-on was deliberately configured, keep using it.
-        if self._detected_source in ("api", "file") or self._pending_auth_url:
+        # An add-on URL typed by the user keeps the legacy journey.
+        if self._uses_legacy_addon():
             return self.async_create_entry(
                 title=self._pending_title,
                 data=data,
@@ -1036,10 +1032,40 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         if self._pending_data is None:
             return self.async_abort(reason="native_auth_state_lost")
+        if self._update_entry is not None:
+            return self._async_finish_existing_account_update()
         return self.async_create_entry(
             title=self._pending_title,
             data=dict(self._pending_data),
             options=self._pending_options or {},
+        )
+
+    def _async_finish_existing_account_update(self) -> FlowResult:
+        """Store a user-flow sign-in into the account's existing entry (#50).
+
+        Other flows still open for the same account (usually the reauth the
+        entry started) are aborted: their purpose is fulfilled and leaving
+        them would keep a stale repair prompt around.
+        """
+        entry = self._update_entry
+        assert entry is not None and self._pending_data is not None
+        updates = dict(self._pending_data)
+        updates.setdefault(CONF_WEB_FAMILY_TOKEN, None)
+        updates.setdefault(CONF_WEB_FAMILY_REFERER, None)
+        for flow in self._async_in_progress(include_uninitialized=True):
+            if flow["flow_id"] != self.flow_id and flow["context"].get(
+                "unique_id"
+            ) == entry.unique_id:
+                self.hass.config_entries.flow.async_abort(flow["flow_id"])
+        _LOGGER.info(
+            "Microsoft Family Safety sign-in completed for an already configured "
+            "account; updating and reloading the existing entry"
+        )
+        return self.async_update_reload_and_abort(
+            entry,
+            data_updates=updates,
+            options=self._pending_options or entry.options,
+            reason="reauth_successful",
         )
 
     async def async_step_reauth_success(
@@ -1224,12 +1250,13 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         current_platforms = self._config_entry.options.get(
             CONF_PLATFORMS, DEFAULT_PLATFORMS
         )
+        # A migrated entry stores None for the add-on URL/key (#49).
         current_auth_url = self._config_entry.options.get(
-            CONF_AUTH_URL, self._config_entry.data.get(CONF_AUTH_URL, "")
-        )
+            CONF_AUTH_URL, self._config_entry.data.get(CONF_AUTH_URL)
+        ) or ""
         current_api_key = self._config_entry.options.get(
-            CONF_API_KEY, self._config_entry.data.get(CONF_API_KEY, "")
-        )
+            CONF_API_KEY, self._config_entry.data.get(CONF_API_KEY)
+        ) or ""
         current_allow_insecure_http_auth = self._config_entry.options.get(
             CONF_ALLOW_INSECURE_HTTP_AUTH, False
         )

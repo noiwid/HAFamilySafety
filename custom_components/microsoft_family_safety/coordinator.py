@@ -1329,7 +1329,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "mobile token and Family web session."
             if self._native_web_auth
             else
-            "Your Microsoft Family Safety web session has expired. Re-authenticate using the Family Safety Auth add-on."
+            "Your Microsoft Family Safety web session has expired.\n\n"
+            "Open the integration or the Repairs page and complete the Microsoft "
+            "sign-in. This also moves the entry from the auth add-on to the native "
+            "sign-in: answer Yes to \"Stay signed in?\" and the add-on is no longer "
+            "needed."
         )
         await self.hass.services.async_call(
             "persistent_notification",
