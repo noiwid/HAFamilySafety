@@ -61,6 +61,7 @@
     "abort": {
       "already_configured": "This account is already configured.",
       "reauth_successful": "Reauthentication successful!",
+      "reconfigure_successful": "Reconfiguration successful!",
       "native_auth_failed": "The Microsoft web authentication did not complete successfully.",
       "native_auth_state_lost": "The browser authentication flow expired. Please start again.",
       "native_auth_unavailable": "Native web authentication could not be loaded: {error}",

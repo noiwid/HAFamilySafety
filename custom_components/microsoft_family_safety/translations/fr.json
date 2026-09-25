@@ -61,6 +61,7 @@
     "abort": {
       "already_configured": "Ce compte est déjà configuré.",
       "reauth_successful": "Ré-authentification réussie !",
+      "reconfigure_successful": "Reconfiguration réussie !",
       "native_auth_failed": "L'authentification web Microsoft ne s'est pas terminée correctement.",
       "native_auth_state_lost": "Le processus d'authentification par navigateur a expiré. Veuillez recommencer.",
       "native_auth_unavailable": "L'authentification web native n'a pas pu être chargée : {error}",

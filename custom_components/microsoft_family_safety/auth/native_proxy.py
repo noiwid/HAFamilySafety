@@ -1581,19 +1581,54 @@ class MicrosoftFamilyAuthorizationProxyView(HomeAssistantView):
 #: the first 7 s were all missed, so returning to the app showed a dialog that
 #: never moved (#50). Pinging until the flow leaves the step reaches the
 #: frontend as soon as its websocket reconnects.
+#: Companion-app deep link that brings the Home Assistant app back to the
+#: front on the integration page, closing the in-app sign-in browser.
+_APP_RETURN_URL = (
+    "homeassistant://navigate/config/integrations/integration/" + DOMAIN
+)
+
 _RENOTIFY_MAX_SECONDS = 600.0
 _RENOTIFY_INTERVAL_SECONDS = 3.0
+#: Steps on which the flow waits for the frontend to fetch or configure it.
+#: Re-notification follows the flow through all of them: stopping as soon as
+#: the step changed (wait_family_proxy -> finish_proxy, observed on Android)
+#: left the dialog stuck on exactly the step that still needed a nudge.
+_FRONTEND_WAIT_STEPS = frozenset(
+    {
+        "check_mobile_proxy",
+        "wait_family_proxy",
+        "finish_proxy",
+        "finish_mobile_proxy",
+        "auth_success",
+        "reauth_success",
+    }
+)
+
+
+#: Steps the server may advance by itself once the frontend has left them alone
+#: for _AUTO_ADVANCE_AFTER_SECONDS. The Home Assistant Android app closes the
+#: setup dialog when it opens the sign-in in its in-app browser, so nobody is
+#: left to fetch the next step and the sign-in was lost (#50). The two success
+#: forms have no fields; submitting them is what the user's "Submit" would do.
+_AUTO_ADVANCE_STEPS = frozenset(
+    {"wait_family_proxy", "finish_proxy", "finish_mobile_proxy", "auth_success", "reauth_success"}
+)
+_AUTO_SUBMIT_STEPS = frozenset({"auth_success", "reauth_success"})
+_AUTO_ADVANCE_AFTER_SECONDS = 20.0
 
 
 async def _async_renotify_frontend(
     hass: HomeAssistant, flow_id: str, expected_step: str | None
 ) -> None:
-    """Re-send data_entry_flow_progressed while the flow waits on ``expected_step``.
+    """Nudge, then if needed drive, a flow the frontend no longer follows.
 
-    Only the notification is repeated; the flow is never configured from here,
-    so the frontend stays the sole consumer of the transition (a second
-    ``async_configure`` from the callback caused an UnknownFlow race before).
-    Stops as soon as the flow moves to another step or disappears.
+    First the data_entry_flow_progressed notification is repeated, which is
+    enough when the frontend merely missed an event (backgrounded app). If the
+    flow then sits on one of _AUTO_ADVANCE_STEPS for
+    _AUTO_ADVANCE_AFTER_SECONDS, nobody is following it any more and the
+    server advances it itself, up to the final (field-less) success form. The
+    grace period keeps the frontend the normal consumer: advancing right away
+    from the callback raced it and produced UnknownFlow before.
     """
     from homeassistant.data_entry_flow import (
         EVENT_DATA_ENTRY_FLOW_PROGRESSED,
@@ -1604,6 +1639,8 @@ async def _async_renotify_frontend(
     deadline = loop.time() + _RENOTIFY_MAX_SECONDS
     delays = iter((0.75, 2.0, 4.0))
     sent = 0
+    last_step: str | None = None
+    step_since = loop.time()
     while True:
         await asyncio.sleep(next(delays, _RENOTIFY_INTERVAL_SECONDS))
         if loop.time() > deadline:
@@ -1616,13 +1653,39 @@ async def _async_renotify_frontend(
             current = hass.config_entries.flow.async_get(flow_id)
         except UnknownFlow:
             return
-        if current.get("step_id") != expected_step:
-            if sent > 3:
-                _LOGGER.debug(
-                    "Microsoft Family flow %s left step %s after %d re-notifications",
-                    flow_id, expected_step, sent,
-                )
+        step = current.get("step_id")
+        if step != expected_step and step not in _FRONTEND_WAIT_STEPS:
+            _LOGGER.debug(
+                "Microsoft Family flow %s moved to step %s after %d re-notifications",
+                flow_id, step, sent,
+            )
             return
+        now = loop.time()
+        if step != last_step:
+            last_step, step_since = step, now
+        elif (
+            step in _AUTO_ADVANCE_STEPS
+            and now - step_since >= _AUTO_ADVANCE_AFTER_SECONDS
+        ):
+            _LOGGER.info(
+                "Home Assistant frontend is not following Microsoft Family flow %s "
+                "(step %s for %.0fs, typical of the Android app); advancing it "
+                "server-side", flow_id, step, now - step_since,
+            )
+            try:
+                await hass.config_entries.flow.async_configure(
+                    flow_id, {} if step in _AUTO_SUBMIT_STEPS else None
+                )
+            except UnknownFlow:
+                return
+            except Exception as err:  # noqa: BLE001 - never crash the helper
+                _LOGGER.warning(
+                    "Could not advance Microsoft Family flow %s from step %s: %r",
+                    flow_id, step, err,
+                )
+                return
+            step_since = loop.time()
+            continue
         hass.bus.async_fire_internal(
             EVENT_DATA_ENTRY_FLOW_PROGRESSED,
             {
@@ -1667,11 +1730,12 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
 
             _LOGGER.debug(
                 "Native auth callback entering HA flow: flow_id=%s current_step=%s "
-                "source=%s proxies=%s",
+                "source=%s proxies=%s user_agent=%s",
                 flow_id,
                 before_step,
                 before_source,
                 matching_proxy_summaries,
+                request.headers.get("User-Agent", "")[:160],
             )
 
             # After the external-step -> native-progress handoff, the progress task
@@ -1803,16 +1867,39 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
         return web.Response(
             text=(
                 "<!doctype html><html><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<meta name='color-scheme' content='light dark'>"
+                # Explicit colours: the Home Assistant Android app shows this page
+                # in its dark in-app browser, which darkened the background but
+                # kept the default black text, so the page looked blank.
+                "<style>body{font-family:system-ui,sans-serif;margin:24px;"
+                "background:#fff;color:#1c1c1c}"
+                "@media (prefers-color-scheme:dark){body{background:#111;color:#e8e8e8}}"
+                "</style>"
                 "<title>Microsoft Family Safety</title></head><body>"
                 "<h2>Authentication completed</h2>"
                 "<p>Home Assistant has received the authentication result. "
                 "This window can now be closed.</p>"
-                "<script>setTimeout(function(){try{window.close();}catch(e){}},300);"
+                # The Home Assistant companion apps open this page in an in-app
+                # browser that ignores window.close(); going back walks through
+                # every Microsoft page again. Their own URL scheme brings the app
+                # back to the front instead (#50).
+                "<p id='ha-back' style='display:none'><a href='" + _APP_RETURN_URL + "' "
+                "style='display:inline-block;padding:12px 18px;border-radius:8px;"
+                "background:#03a9f4;color:#fff;text-decoration:none'>"
+                "Back to Home Assistant</a></p>"
+                # The Android app's in-app browser reports a plain Android WebView
+                # ("; wv)"), not "Home Assistant/" (observed 2026-09-25).
+                "<script>(function(){var app=/Home ?Assistant\\/|; wv\\)/i.test(navigator.userAgent);"
+                "var mobile=app||/Android|iPhone|iPad/i.test(navigator.userAgent);"
+                "if(mobile){document.getElementById('ha-back').style.display='block';}"
+                "if(app){setTimeout(function(){window.location.replace('" + _APP_RETURN_URL + "');},1500);}"
+                "setTimeout(function(){try{window.close();}catch(e){}},300);"
                 "setTimeout(function(){var p=document.createElement('p');"
                 "p.textContent='If this window did not close automatically, close it "
-                "and switch back to Home Assistant: the setup dialog continues on "
-                "its own within a few seconds.';"
-                "document.body.appendChild(p);},1200);</script>"
+                "and switch back to Home Assistant: the setup finishes on its own "
+                "within about 20 seconds.';"
+                "document.body.appendChild(p);},1200);})();</script>"
                 "</body></html>"
             ),
             content_type="text/html",

@@ -1330,8 +1330,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "Family Safety session can be renewed.\n\n"
             "Home Assistant has started a reauthentication flow. Open the integration "
             "or the Repairs page, complete the Microsoft sign-in and accept the terms "
-            "when Microsoft shows them. This is a one-time step; the session then "
-            "renews on its own again."
+            "when Microsoft shows them. Accepting them directly at "
+            "https://account.microsoft.com works too: the integration then picks the "
+            "session up again on its own within a few minutes. This is a one-time "
+            "step."
             if self._native_web_auth
             and getattr(self.web_api, "account_interrupt", None) == "terms_of_use"
             else
