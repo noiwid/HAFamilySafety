@@ -1574,6 +1574,66 @@ class MicrosoftFamilyAuthorizationProxyView(HomeAssistantView):
     head = _handle
 
 
+#: How long the frontend keeps being re-notified after the browser callback,
+#: matching the proxy lifetime. On Android the Home Assistant app (or tab) is
+#: in the background while Chrome shows the sign-in; its websocket is paused or
+#: dropped and every flow event fired meanwhile is lost. The old three pings in
+#: the first 7 s were all missed, so returning to the app showed a dialog that
+#: never moved (#50). Pinging until the flow leaves the step reaches the
+#: frontend as soon as its websocket reconnects.
+_RENOTIFY_MAX_SECONDS = 600.0
+_RENOTIFY_INTERVAL_SECONDS = 3.0
+
+
+async def _async_renotify_frontend(
+    hass: HomeAssistant, flow_id: str, expected_step: str | None
+) -> None:
+    """Re-send data_entry_flow_progressed while the flow waits on ``expected_step``.
+
+    Only the notification is repeated; the flow is never configured from here,
+    so the frontend stays the sole consumer of the transition (a second
+    ``async_configure`` from the callback caused an UnknownFlow race before).
+    Stops as soon as the flow moves to another step or disappears.
+    """
+    from homeassistant.data_entry_flow import (
+        EVENT_DATA_ENTRY_FLOW_PROGRESSED,
+        UnknownFlow,
+    )
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _RENOTIFY_MAX_SECONDS
+    delays = iter((0.75, 2.0, 4.0))
+    sent = 0
+    while True:
+        await asyncio.sleep(next(delays, _RENOTIFY_INTERVAL_SECONDS))
+        if loop.time() > deadline:
+            _LOGGER.debug(
+                "Stopped re-notifying Microsoft Family flow %s after %d events: "
+                "still on step %s", flow_id, sent, expected_step,
+            )
+            return
+        try:
+            current = hass.config_entries.flow.async_get(flow_id)
+        except UnknownFlow:
+            return
+        if current.get("step_id") != expected_step:
+            if sent > 3:
+                _LOGGER.debug(
+                    "Microsoft Family flow %s left step %s after %d re-notifications",
+                    flow_id, expected_step, sent,
+                )
+            return
+        hass.bus.async_fire_internal(
+            EVENT_DATA_ENTRY_FLOW_PROGRESSED,
+            {
+                "handler": current.get("handler", DOMAIN),
+                "flow_id": flow_id,
+                "refresh": True,
+            },
+        )
+        sent += 1
+
+
 class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
     """Resume the config flow once Microsoft authentication is complete."""
 
@@ -1633,7 +1693,8 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
                     flow_id, before_step,
                 )
                 # Re-notify the frontend in case the original progress event was
-                # missed while focus was in the Microsoft window.
+                # missed while focus was in the Microsoft window, and keep doing
+                # so while the flow stays on this step (see _async_renotify_frontend).
                 hass.bus.async_fire_internal(
                     EVENT_DATA_ENTRY_FLOW_PROGRESSED,
                     {
@@ -1641,6 +1702,10 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
                         "flow_id": flow_id,
                         "refresh": True,
                     },
+                )
+                hass.async_create_task(
+                    _async_renotify_frontend(hass, flow_id, before_step),
+                    "Microsoft Family Safety auth flow frontend re-notify",
                 )
                 result = {
                     "type": "browser_complete",
@@ -1720,37 +1785,8 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
             # race).  Instead, re-send the *notification* only while the flow is
             # still parked on this exact EXTERNAL_STEP_DONE next-step id.  HA's
             # frontend GET then remains the sole consumer of the transition.
-            async def _renotify_external_done() -> None:
-                from homeassistant.data_entry_flow import (
-                    EVENT_DATA_ENTRY_FLOW_PROGRESSED,
-                    UnknownFlow,
-                )
-
-                expected_step = result.get("step_id")
-                for delay in (0.75, 2.0, 4.0):
-                    await asyncio.sleep(delay)
-                    try:
-                        current = hass.config_entries.flow.async_get(flow_id)
-                    except UnknownFlow:
-                        return
-                    if current.get("step_id") != expected_step:
-                        return
-                    _LOGGER.debug(
-                        "Re-notifying Home Assistant frontend for pending "
-                        "Microsoft Family external_done step %s",
-                        expected_step,
-                    )
-                    hass.bus.async_fire_internal(
-                        EVENT_DATA_ENTRY_FLOW_PROGRESSED,
-                        {
-                            "handler": current.get("handler", "microsoft_family_safety"),
-                            "flow_id": flow_id,
-                            "refresh": True,
-                        },
-                    )
-
             hass.async_create_task(
-                _renotify_external_done(),
+                _async_renotify_frontend(hass, flow_id, result.get("step_id")),
                 "Microsoft Family Safety auth flow frontend re-notify",
             )
         else:
@@ -1773,7 +1809,9 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
                 "This window can now be closed.</p>"
                 "<script>setTimeout(function(){try{window.close();}catch(e){}},300);"
                 "setTimeout(function(){var p=document.createElement('p');"
-                "p.textContent='If this window did not close automatically, you can close it now.';"
+                "p.textContent='If this window did not close automatically, close it "
+                "and switch back to Home Assistant: the setup dialog continues on "
+                "its own within a few seconds.';"
                 "document.body.appendChild(p);},1200);</script>"
                 "</body></html>"
             ),

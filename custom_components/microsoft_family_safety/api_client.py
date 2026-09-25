@@ -140,6 +140,10 @@ class FamilySafetyWebAPI:
         self._web_session: aiohttp.ClientSession | None = None
         self._relationship_tokens: dict[str, tuple[str, int]] = {}
         self.last_web_error_code: str | None = None
+        #: Interactive step Microsoft inserted into the silent sign-in, e.g.
+        #: "terms_of_use" when updated Terms of Use must be accepted. Such a
+        #: step is a user decision and is never submitted automatically.
+        self.account_interrupt: str | None = None
         # Keep authentication health separate from endpoint-specific failures.
         # A private endpoint may return 401/403 while the account.microsoft.com
         # Family browser session itself is still authenticated.
@@ -575,6 +579,26 @@ class FamilySafetyWebAPI:
             _LOGGER.debug("Microsoft account session check failed: %r", err)
             return None
 
+    def _note_account_interrupt(self, page: str) -> None:
+        """Record an interactive step Microsoft put in front of the silent sign-in.
+
+        login.live.com uses the same auto-submit "Continue" page for these, but
+        posts it elsewhere: ``account.live.com/tou/accrue`` asks the user to
+        accept updated Microsoft Terms of Use (observed 2026-09-24, every
+        silent renewal failed from then on). Accepting terms is the user's
+        decision, so the page is only reported here, never submitted; the
+        regular reauthentication shows it in the browser.
+        """
+        lowered = (page or "").lower()
+        interrupt = "terms_of_use" if "account.live.com/tou/" in lowered else None
+        if interrupt and interrupt != self.account_interrupt:
+            _LOGGER.warning(
+                "Microsoft asks the account to accept updated Terms of Use before "
+                "the session can be renewed; this needs one interactive sign-in "
+                "from Home Assistant (reauthentication)"
+            )
+        self.account_interrupt = interrupt
+
     async def _async_renew_account_session(
         self, session: Any, page: str | None, final_url: URL | None
     ) -> bool:
@@ -602,6 +626,7 @@ class FamilySafetyWebAPI:
         form: tuple[str, dict[str, str]] | None = None
         if page and final_url is not None and (final_url.host or "").lower() == "login.live.com":
             form = _extract_msa_continue_form(page)
+            self._note_account_interrupt(page)
         if form is None:
             async with session.get(
                 f"{self.WEB_API_BASE}/account", headers=headers, allow_redirects=True
@@ -612,6 +637,7 @@ class FamilySafetyWebAPI:
                 self.sync_web_cookies_from_session()
             if (probe_url.host or "").lower() == "login.live.com":
                 form = _extract_msa_continue_form(probe_page)
+                self._note_account_interrupt(probe_page)
             if form is None:
                 _LOGGER.debug(
                     "Microsoft account session cannot be renewed silently: "
@@ -641,6 +667,7 @@ class FamilySafetyWebAPI:
 
         renewed = status == 200 and (end_url.host or "").lower() == "account.microsoft.com"
         if renewed:
+            self.account_interrupt = None
             _LOGGER.info(
                 "Microsoft account session renewed silently: final_path=%s "
                 "rotated=%s cookies=%d",

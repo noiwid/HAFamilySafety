@@ -1023,6 +1023,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.web_api.web_session_last_http_status if self.web_api else None
             ),
             "web_last_error_code": web_error,
+            "account_interrupt": (
+                getattr(self.web_api, "account_interrupt", None) if self.web_api else None
+            ),
             "web_api": self.web_api.web_api_state if self.web_api else "unavailable",
             "web_api_last_checked": (
                 self.web_api.web_api_last_checked if self.web_api else None
@@ -1323,6 +1326,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._auth_notification_sent:
             return
         message = (
+            "Microsoft asks you to accept its updated Terms of Use before the "
+            "Family Safety session can be renewed.\n\n"
+            "Home Assistant has started a reauthentication flow. Open the integration "
+            "or the Repairs page, complete the Microsoft sign-in and accept the terms "
+            "when Microsoft shows them. This is a one-time step; the session then "
+            "renews on its own again."
+            if self._native_web_auth
+            and getattr(self.web_api, "account_interrupt", None) == "terms_of_use"
+            else
             "Your Microsoft Family Safety web session is missing or has expired.\n\n"
             "Home Assistant has started a reauthentication flow. Open the integration "
             "or the Repairs page and complete the Microsoft sign-in to renew both the "

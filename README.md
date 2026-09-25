@@ -623,6 +623,7 @@ Microsoft's sign-in page links some of its own pages with an explicit port (`log
 
 - The waiting screen after the visible sign-in can legitimately sit for up to about **a minute** without updating. Keep the Microsoft window open, do not click **Open website** again and do not close the dialog while it is running.
 - The authentication proxy expires **10 minutes** after it is created. If you took longer, start the flow again.
+- **On a phone** (Home Assistant app or mobile browser) the Microsoft page opens in a separate browser. Once it shows *Authentication completed*, close it and switch back to Home Assistant: since 2.0.9 the dialog picks up the result within a few seconds of coming back. Before 2.0.9 it could stay stuck because Android pauses the app while the sign-in runs; signing in from a desktop browser avoids that on older versions.
 - If Home Assistant aborts with *"Native web authentication could not be loaded"* or *"The browser authentication flow expired"*, simply restart the flow.
 
 ### "Automatic browser authentication normally requires HTTPS"
