@@ -1293,6 +1293,48 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if web_data.get(key) is None and previous.get(key) is not None:
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
+                # Xbox usage: since about 2026-08-20 the mobile aggregator
+                # reports 0 (or a stale figure) for Xbox play on some accounts,
+                # so read the Xbox activity report from the web API as well.
+                # Only attempt it in a cycle where the schedule read succeeded:
+                # if the web session is being throttled this cycle, don't pile
+                # another request onto it (Microsoft tar-pits this endpoint).
+                today_iso = dt_util.now().date().isoformat()
+                xbox_usage: int | None = None
+                if (
+                    self.web_api is not None
+                    and self.web_api.has_web_cookies
+                    and self.web_api.screentime_policy_status == "ok"
+                ):
+                    try:
+                        xbox_usage = await self.web_api.get_xbox_screentime_usage(
+                            account_id,
+                            self.hass.config.time_zone or "UTC",
+                            today_iso,
+                        )
+                    except Exception as err:
+                        _LOGGER.debug("Could not fetch Xbox activity usage: %r", err)
+                if xbox_usage is None:
+                    # Keep the last known Xbox figure across a transient miss,
+                    # but only within the same day (avoid carrying yesterday's
+                    # total past midnight before today's row appears).
+                    prev_xbox = previous.get("xbox_today_usage")
+                    if (
+                        isinstance(prev_xbox, int)
+                        and previous.get("screen_time_date") == today_iso
+                    ):
+                        xbox_usage = prev_xbox
+                accounts_data[account_id]["xbox_today_usage"] = xbox_usage
+                # The account figure covers every platform, the report only
+                # Xbox, so it replaces the account figure only when it is
+                # higher: a child who also uses Windows keeps the mobile total,
+                # and an account the aggregator now reports as 0 gets its Xbox
+                # time back. Never lower a reported usage figure.
+                mobile_usage = accounts_data[account_id].get("today_screentime_usage")
+                if xbox_usage is not None and xbox_usage > (mobile_usage or 0):
+                    accounts_data[account_id]["today_screentime_usage"] = xbox_usage
+                    accounts_data[account_id]["raw_today_screentime_usage"] = xbox_usage
+                    accounts_data[account_id]["raw_today_screentime_ms"] = xbox_usage * 60000
             await self._async_track_family_context()
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts

@@ -1494,6 +1494,76 @@ class FamilySafetyWebAPI:
         result = await self._request("GET", f"/v1/devices/{child_id}")
         return result if isinstance(result, dict) else None
 
+    async def get_xbox_screentime_usage(
+        self, child_id: str, time_zone: str, target_date: str
+    ) -> int | None:
+        """Return today's Xbox screen-time usage in minutes from the web report.
+
+        Reads /family/api/xbox/recent-activity/report-v3 (isPreviousWeek=false =
+        current week) and picks the day matching target_date (local YYYY-MM-DD).
+
+        Microsoft tar-pits this endpoint when it is polled often (the request is
+        accepted but the body never arrives, hanging ~120 s). Cap the wait at
+        20 s so a throttled call fails fast and cannot stall the coordinator poll
+        or hold the connection sensor in a long "degraded" window.
+        """
+        if not self._web_cookies:
+            return None
+        try:
+            result = await asyncio.wait_for(
+                self._web_request(
+                    "GET",
+                    f"{self.WEB_API_BASE}/family/api/xbox/recent-activity/report-v3",
+                    params={
+                        "childId": str(child_id),
+                        "isPreviousWeek": "false",
+                        "timeZone": time_zone or "UTC",
+                    },
+                ),
+                timeout=20,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.debug(
+                "Xbox activity report hit the 20s fast cap; keeping last value"
+            )
+            return None
+        except Exception as err:  # noqa: BLE001 - keep the poll healthy
+            _LOGGER.debug("Xbox activity report fetch failed: %r", err)
+            return None
+        return self._extract_daily_usage_minutes(result, target_date)
+
+    @staticmethod
+    def _extract_daily_usage_minutes(payload: object, target_date: str) -> int | None:
+        """Pull the target day's total from a recent-activity report payload."""
+        if not isinstance(payload, dict):
+            return None
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return None
+        events = data.get("dailyScreenTimeEvents")
+        if not isinstance(events, list):
+            return None
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            if str(event.get("date") or "")[:10] == target_date:
+                return FamilySafetyWebAPI._duration_to_minutes(event.get("timeUsed"))
+        return None
+
+    @staticmethod
+    def _duration_to_minutes(value: object) -> int | None:
+        """Convert Microsoft 'HH:MM:SS' duration to whole minutes."""
+        if not isinstance(value, str):
+            return None
+        parts = value.split(":")
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1]) if len(parts) > 1 else 0
+            seconds = int(parts[2]) if len(parts) > 2 else 0
+        except (ValueError, IndexError):
+            return None
+        return hours * 60 + minutes + (1 if seconds >= 30 else 0)
+
     async def set_screentime_daily_allowance(
         self,
         child_id: str,
