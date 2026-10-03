@@ -1593,11 +1593,14 @@ _RENOTIFY_INTERVAL_SECONDS = 3.0
 #: Re-notification follows the flow through all of them: stopping as soon as
 #: the step changed (wait_family_proxy -> finish_proxy, observed on Android)
 #: left the dialog stuck on exactly the step that still needed a nudge.
+#: finish_web_first_done is where finish_proxy's tracked web-first completion
+#: parks the flow (progress done); without it the helper stopped right there.
 _FRONTEND_WAIT_STEPS = frozenset(
     {
         "check_mobile_proxy",
         "wait_family_proxy",
         "finish_proxy",
+        "finish_web_first_done",
         "finish_mobile_proxy",
         "auth_success",
         "reauth_success",
@@ -1611,7 +1614,14 @@ _FRONTEND_WAIT_STEPS = frozenset(
 #: left to fetch the next step and the sign-in was lost (#50). The two success
 #: forms have no fields; submitting them is what the user's "Submit" would do.
 _AUTO_ADVANCE_STEPS = frozenset(
-    {"wait_family_proxy", "finish_proxy", "finish_mobile_proxy", "auth_success", "reauth_success"}
+    {
+        "wait_family_proxy",
+        "finish_proxy",
+        "finish_web_first_done",
+        "finish_mobile_proxy",
+        "auth_success",
+        "reauth_success",
+    }
 )
 _AUTO_SUBMIT_STEPS = frozenset({"auth_success", "reauth_success"})
 _AUTO_ADVANCE_AFTER_SECONDS = 20.0
