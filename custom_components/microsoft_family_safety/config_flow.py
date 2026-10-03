@@ -125,6 +125,11 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._native_mobile_abort_reason: str | None = None
         self._allow_insecure_http_auth: bool = False
         self._family_wait_task: Any | None = None
+        #: Tracks the web-first completion (mobile-token exchange) so a repeat
+        #: entry into async_step_finish_proxy attaches to the running completion
+        #: instead of aborting the flow. See async_step_finish_proxy.
+        self._finish_task: Any | None = None
+        self._finish_result: FlowResult | None = None
 
     def _is_existing_entry_auth_flow(self) -> bool:
         """Return whether this flow updates an existing config entry."""
@@ -924,6 +929,47 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         self._family_wait_task = None
+
+        # This step can be entered more than once for a single sign-in: it is
+        # reached both from async_step_wait_family_proxy's progress_done and
+        # from the browser callback, and HA's GET handler advances flows by
+        # calling async_configure(). The first entry clears self._native_proxy
+        # (below) before awaiting the mobile-token exchange, so an unguarded
+        # second entry lands in the "proxy is None" branch and aborts a flow
+        # that is actually succeeding. Attach repeat entries to the tracked
+        # completion instead. (Same class of race the existing-entry path guards
+        # against further down in this method.)
+        if self._finish_task is not None:
+            if not self._finish_task.done():
+                _LOGGER.debug(
+                    "Native auth flow %s: repeat finish_proxy entry while the "
+                    "web-first completion is still running; attaching to it",
+                    self.flow_id,
+                )
+                return self.async_show_progress(
+                    step_id="finish_proxy",
+                    progress_action="family_sso",
+                    progress_task=self._finish_task,
+                )
+            if self._finish_result is None:
+                try:
+                    self._finish_result = self._finish_task.result()
+                except Exception:  # noqa: BLE001 - surface as a flow abort
+                    _LOGGER.exception(
+                        "Native auth flow %s failed while completing the "
+                        "web-first sign-in",
+                        self.flow_id,
+                    )
+                    self._finish_result = self.async_abort(
+                        reason="native_auth_failed"
+                    )
+                return self.async_show_progress_done(
+                    next_step_id="finish_web_first_done"
+                )
+            # Defensive: the flow manager removes the flow once a terminal
+            # result is returned, so this should be unreachable.
+            return self._finish_result
+
         proxy = self._native_proxy
         _LOGGER.debug(
             "Native auth flow %s entering finish_proxy: proxy_present=%s "
@@ -974,8 +1020,20 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if self._pending_data is None:
             # Web-first flow: the mobile refresh token comes next, from the
-            # cookies the browser just established.
-            return await self._finish_web_first(cookies, family_token, family_referer)
+            # cookies the browser just established. Run it as a tracked task
+            # rather than awaiting inline: self._native_proxy has just been
+            # cleared, so if the browser callback re-enters this step while the
+            # exchange is in flight it would otherwise abort the flow. The
+            # guard at the top of this method attaches repeat entries here.
+            self._finish_task = self.hass.async_create_task(
+                self._finish_web_first(cookies, family_token, family_referer),
+                "Microsoft Family Safety web-first completion",
+            )
+            return self.async_show_progress(
+                step_id="finish_proxy",
+                progress_action="family_sso",
+                progress_task=self._finish_task,
+            )
 
         data = dict(self._pending_data)
         data[CONF_WEB_COOKIES] = cookies
@@ -1019,6 +1077,25 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({}),
             last_step=True,
         )
+
+    async def async_step_finish_web_first_done(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Return the result produced by the tracked web-first completion.
+
+        async_show_progress_done() cannot itself carry a terminal result, so the
+        result computed in async_step_finish_proxy is handed back here. It may be
+        a created entry, an abort, or the external step that asks the browser to
+        finish the mobile OAuth hop when it could not be done server-side.
+        """
+        result = self._finish_result
+        if result is None:
+            _LOGGER.warning(
+                "Native auth flow %s reached finish_web_first_done with no result",
+                self.flow_id,
+            )
+            return self.async_abort(reason="native_auth_failed")
+        return result
 
     async def async_step_auth_success(
         self, user_input: dict[str, Any] | None = None
