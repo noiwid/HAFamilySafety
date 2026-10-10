@@ -221,6 +221,11 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         account = self.coordinator.data.get("accounts", {}).get(self._account_id)
         if not account:
             return None
+        # The Xbox lock state comes from Microsoft's Xbox policy, not from the
+        # mobile aggregator. Until that has been read (or a lock/unlock from
+        # here succeeded), say "unknown" rather than "unlocked".
+        if self._platform == "Xbox" and not account.get("xbox_lock_known", False):
+            return None
         blocked_platforms = account.get("blocked_platforms", [])
         return self._platform in blocked_platforms
 
@@ -247,12 +252,12 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Lock the platform through a mobile-API device override."""
+        """Lock the platform (web override for Windows/Xbox, else mobile API)."""
         _LOGGER.debug("Locking platform %s for %s", self._platform, self._account_name)
         await self.coordinator.async_lock_platform(self._account_id, self._platform)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Unlock the platform through a mobile-API device override."""
+        """Unlock the platform (web override for Windows/Xbox, else mobile API)."""
         _LOGGER.debug("Unlocking platform %s for %s", self._platform, self._account_name)
         await self.coordinator.async_unlock_platform(self._account_id, self._platform)
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from datetime import datetime, timezone
 from html import unescape
 from http.cookies import SimpleCookie
 import json
@@ -65,6 +66,23 @@ _FAMILY_AUTH_REQUIRED_MEMO_SECONDS = 25.0
 _BOT_MANAGER_COOKIE_NAMES: frozenset[str] = frozenset(
     {"bm_sv", "bm_sz", "bm_mi", "bm_s", "bm_so", "bm_ss", "bm_lso", "ak_bmsc", "_abck", "akavpau_ppsd"}
 )
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    """Parse Microsoft's ISO-8601 timestamps to an aware UTC datetime.
+
+    They arrive as '2026-09-20T22:59:59.461Z'.  fromisoformat() accepts the
+    trailing 'Z' from Python 3.11, but this module is the one place a bad
+    timestamp would silently read as "not blocked", so be explicit and
+    forgiving rather than clever.
+    """
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def strip_bot_manager_cookies(cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -1006,6 +1024,7 @@ class FamilySafetyWebAPI:
         params: dict | None = None,
         json_data: dict | None = None,
         relationship_child_id: str | None = None,
+        referer_override: str | None = None,
         isolated: bool = False,
     ) -> dict | list | None:
         """Call the private Family web API using the captured browser session.
@@ -1051,8 +1070,8 @@ class FamilySafetyWebAPI:
         token = self._web_csrf
         # Match the successful browser requests more closely.  In particular,
         # GET calls do not send Origin/Content-Type, while writes do.
-        referer = self._family_referer or f"{self.WEB_API_BASE}/family/home"
-        if params and params.get("childId"):
+        referer = referer_override or self._family_referer or f"{self.WEB_API_BASE}/family/home"
+        if referer_override is None and params and params.get("childId"):
             child = str(params["childId"])
             endpoint_path = URL(url).path
             if "web-browsing" in endpoint_path or "app" in endpoint_path:
@@ -1533,26 +1552,157 @@ class FamilySafetyWebAPI:
         result = await self._request("GET", f"/v1/devicelimits/{child_id}/overrides")
         return result if isinstance(result, dict) else None
 
-    async def set_windows_time_override(
-        self, child_id: str, time_override: str, date_time: str
+    # Each platform has its OWN override endpoint.  They are not one endpoint
+    # parameterised by platformType -- Xbox lives under an /xbox/ path segment,
+    # and posting an Xbox override to the Windows path is accepted, stored, and
+    # never reaches the console.  Browser-captured 2026-09-20; both bodies were
+    # byte-for-byte verified against their Content-Length.
+    _PLATFORM_OVERRIDE_PATHS = {
+        "windows": "/family/api/device-limits/screentime-time-override",
+        "xbox": "/family/api/xbox/device-limits/screentime-time-override",
+    }
+
+    # The Windows routes authenticate child-scoped calls with
+    # X-JwtFamilyRelationshipToken.  The captured Xbox requests carry no such
+    # header, and _web_request ABORTS (returns None) when it is asked for a
+    # relationship token it cannot obtain -- so requesting one for Xbox would
+    # turn a working call into a silent no-op.
+    _PLATFORM_OVERRIDE_NEEDS_RELATIONSHIP_TOKEN = {"windows"}
+
+    @classmethod
+    def supports_platform_override(cls, platform: str) -> bool:
+        """True if this platform has a known, working web override endpoint."""
+        return platform.lower() in cls._PLATFORM_OVERRIDE_PATHS
+
+    async def set_platform_time_override(
+        self, child_id: str, platform: str, time_override: str, date_time: str
     ) -> bool:
-        """Set/cancel a Windows override using the HAR-confirmed web endpoint."""
+        """Set/cancel a screen-time override for one platform.
+
+        Browser-captured request body (Xbox, blockUntil), 117 bytes:
+            {"childId":"…","platformType":"xbox",
+             "timeOverride":"blockUntil","dateTime":"2026-09-20T22:59:59.461Z"}
+
+        Identical in shape to the Windows body -- only platformType and the URL
+        path differ.
+        """
         if time_override not in {"blockUntil", "cancel"}:
             raise ValueError("time_override must be 'blockUntil' or 'cancel'")
+        key = platform.lower()
+        path = self._PLATFORM_OVERRIDE_PATHS.get(key)
+        if path is None:
+            raise ValueError(
+                f"No screen-time override endpoint is known for platform {platform!r}. "
+                f"Known: {sorted(self._PLATFORM_OVERRIDE_PATHS)}"
+            )
         result = await self._web_request(
             "POST",
-            f"{self.WEB_API_BASE}/family/api/device-limits/screentime-time-override",
+            f"{self.WEB_API_BASE}{path}",
             json_data={
                 "childId": str(child_id),
-                "platformType": "windows",
+                "platformType": key,
                 "timeOverride": time_override,
                 "dateTime": date_time,
             },
-            relationship_child_id=str(child_id),
+            relationship_child_id=(
+                str(child_id)
+                if key in self._PLATFORM_OVERRIDE_NEEDS_RELATIONSHIP_TOKEN
+                else None
+            ),
+            # Windows keeps the Referer it has always sent; the Xbox one is the
+            # Xbox settings page the browser capture shows.
+            referer_override=(
+                None
+                if key == "windows"
+                else self._platform_settings_referer(key, child_id)
+            ),
+            # The Xbox routes answer 403 for a child without an Xbox; that must
+            # not be read as a Family authentication failure. Windows keeps its
+            # existing behaviour.
+            isolated=key != "windows",
         )
         if result is None:
-            raise FamilySafetyWebAPIError("Windows screen-time override web request failed")
+            detail = (
+                f" ({self.last_isolated_error_code})"
+                if key != "windows" and self.last_isolated_error_code
+                else ""
+            )
+            raise FamilySafetyWebAPIError(
+                f"{platform} screen-time override web request failed{detail}"
+            )
         return True
+
+    async def set_windows_time_override(
+        self, child_id: str, time_override: str, date_time: str
+    ) -> bool:
+        """Backwards-compatible wrapper -- prefer set_platform_time_override."""
+        return await self.set_platform_time_override(
+            child_id, "windows", time_override, date_time
+        )
+
+    def _platform_settings_referer(self, platform: str, child_id: str) -> str:
+        """Referer the Family web UI sends for this platform's settings page."""
+        return (
+            f"{self.WEB_API_BASE}/family/settings/{platform.lower()}"
+            f"/{child_id}/devices"
+        )
+
+    @staticmethod
+    def parse_block_until(payload: object) -> datetime | None:
+        """Pull an active blockUntil expiry out of an overrides payload.
+
+        Shape is from the captured POST *response*:
+            {"data":{"screenTimeOverrides":[
+                {"screenTimeOverrideType":"blockUntil","validUntil":"…Z"}]}}
+
+        Deliberately tolerant: returns None on anything unrecognised, which
+        callers read as "unknown", never as "not blocked".
+        """
+        if not isinstance(payload, dict):
+            return None
+        data = payload.get("data")
+        container = data if isinstance(data, dict) else payload
+        overrides = container.get("screenTimeOverrides")
+        if not isinstance(overrides, list):
+            return None
+        for entry in overrides:
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("screenTimeOverrideType", "")).lower() != "blockuntil":
+                continue
+            raw = entry.get("validUntil")
+            if not isinstance(raw, str):
+                continue
+            parsed = _parse_iso_utc(raw)
+            if parsed is not None:
+                return parsed
+        return None
+
+    async def get_xbox_screentime_policy(self, child_id: str) -> dict | None:
+        """Read the Xbox policy, which carries the current Xbox override.
+
+        GET /family/api/xbox/screen-time-xbox?childId=...  (browser-captured)
+            {"data":{"isEnabled":true,"isBlocked":false,
+                     "dailyRestrictions":[...],
+                     "screenTimeOverride":{"screenTimeOverrideType":"cancel",
+                         "validUntil":"...+00:00","lastModified":"..."}}}
+
+        Used for the lock state: it is what the console enforces, and it
+        survives a Home Assistant restart and reflects a block or release made
+        in the Family Safety app.
+        """
+        if not self._web_cookies:
+            return None
+        result = await self._web_request(
+            "GET",
+            f"{self.WEB_API_BASE}/family/api/xbox/screen-time-xbox",
+            params={"childId": str(child_id)},
+            referer_override=self._platform_settings_referer("xbox", child_id),
+            # Read every poll for every child: a 403 for a child without an
+            # Xbox must not count as a Family authentication failure.
+            isolated=True,
+        )
+        return result if isinstance(result, dict) else None
 
     async def get_content_settings(self, child_id: str) -> dict | None:
         result = await self._request("GET", f"/v1/ContentRestrictions/{child_id}")
