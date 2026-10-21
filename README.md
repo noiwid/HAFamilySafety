@@ -124,6 +124,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | **Account Lock** | Lock/unlock a child's entire account with a single switch |
 | **Screen time monitoring** | Track daily usage per child and per device |
 | **Screen time policies** | Adjust daily allowances and allowed time intervals per day — directly from the UI |
+| **Xbox screen time** | Read and set the Xbox daily allowance per day (`number.*_xbox_<day>_limit`) — the schedule the console actually enforces when Xbox has its own limits |
 | **App management** | Block/unblock apps, set per-app time limits and windows |
 | **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
 | **Purchase controls** | Enable/disable ask-to-buy via service call |

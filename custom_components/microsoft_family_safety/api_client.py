@@ -1640,6 +1640,70 @@ class FamilySafetyWebAPI:
             f"{seconds // 3600} h" if seconds >= 3600 else f"{seconds // 60} min",
         )
 
+    async def get_xbox_screentime_policy(self, child_id: str) -> dict | None:
+        """Return the child's Xbox screen-time schedule from the web API.
+
+        With the time-allowance policy set to ``perDeviceType`` (the default
+        since Microsoft moved Xbox controls to Xbox Family Settings) the console
+        enforces this schedule, not the Windows one at /family/api/st.  Same
+        endpoint the Family web app uses (GetXboxScreenTime):
+
+        GET /family/api/xbox/screen-time-xbox?childId=...
+        -> {"data": {"isEnabled": bool, "isBlocked": bool,
+                     "dailyRestrictions": [{"dayOfWeek": "monday",
+                                            "allowedTotalScreenTime": "00:30:00",
+                                            "allowedScreenTimeRanges": [{"begin": "08:00:00",
+                                                                         "end": "19:00:00"}]}, ...]}}
+
+        Isolated: a child without an Xbox may get 403/404, which says nothing
+        about the Family session.
+        """
+        if not self._web_cookies:
+            return None
+        result = await self._web_request(
+            "GET",
+            f"{self.WEB_API_BASE}/family/api/xbox/screen-time-xbox",
+            params={"childId": str(child_id)},
+            isolated=True,
+        )
+        if not isinstance(result, dict):
+            return None
+        data = result.get("data")
+        return data if isinstance(data, dict) else None
+
+    async def set_xbox_screentime_allowance(
+        self,
+        child_id: str,
+        day_key: str,
+        hours: int,
+        minutes: int,
+        allowed_ranges: list[dict[str, str]],
+    ) -> bool:
+        """Set one day's Xbox allowance, keeping its allowed time ranges.
+
+        POST /family/api/xbox/screen-time-xbox/set-custom-device-policy, the
+        call behind UpdateXboxScreenTimeAllowedIntervals in the Family web app.
+        Microsoft takes allowance and ranges together, so the caller passes the
+        day's current ``allowedScreenTimeRanges`` back unchanged.
+        """
+        result = await self._web_request(
+            "POST",
+            f"{self.WEB_API_BASE}/family/api/xbox/screen-time-xbox/set-custom-device-policy",
+            json_data={
+                "childId": str(child_id),
+                "screenTimeUpdateParams": {
+                    "allowance": f"{int(hours):02d}:{int(minutes):02d}:00",
+                    "daysOfWeek": [day_key],
+                    "allowedIntervals": [
+                        {"begin": r["begin"], "end": r["end"]} for r in allowed_ranges
+                    ],
+                },
+            },
+        )
+        if result is None:
+            raise FamilySafetyWebAPIError("Xbox screen-time allowance update failed")
+        return True
+
     @staticmethod
     def _extract_daily_usage_minutes(payload: object, target_date: str) -> int | None:
         """Pull the target day's total from a recent-activity report payload."""
