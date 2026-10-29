@@ -1575,6 +1575,27 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _family_context_dead_end(self) -> bool:
         return self._family_auth_required_polls >= _FAMILY_AUTH_REQUIRED_POLLS
 
+    async def _async_rewarm_dropped_family_context(self) -> None:
+        """Bootstrap again in the poll where an Xbox call found the session rejected.
+
+        Before #64 the /st read noticed the rejection and
+        bootstrapped in the same poll, so the +8 h / +16 h silent renewals
+        (which recover on the next bootstrap) counted as one auth_required
+        poll. Leaving the bootstrap to the next poll made them count twice and
+        raised a needless reauth prompt each time.
+        """
+        if (
+            not self._native_web_auth
+            or self.web_api is None
+            or not getattr(self.web_api, "family_context_dropped", False)
+        ):
+            return
+        self.web_api.family_context_dropped = False
+        try:
+            await self.web_api._warm_family_context()
+        except Exception as err:  # noqa: BLE001 - Xbox extras only
+            _LOGGER.debug("Could not re-warm the Family web context: %r", err)
+
     async def _async_track_family_context(self) -> None:
         """Escalate a Family bootstrap that keeps landing on a login page.
 
@@ -1816,6 +1837,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 accounts_data[account_id]["xbox_policy"] = (
                     xbox_policy if xbox_policy is not None else previous.get("xbox_policy")
                 )
+            await self._async_rewarm_dropped_family_context()
             await self._async_track_family_context()
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts

@@ -178,6 +178,9 @@ class FamilySafetyWebAPI:
         #: "terms_of_use" when updated Terms of Use must be accepted. Such a
         #: step is a user decision and is never submitted automatically.
         self.account_interrupt: str | None = None
+        #: Set when an isolated call found the Family session
+        #: rejected, so the coordinator bootstraps again in the same poll.
+        self.family_context_dropped = False
         #: Set once the mobile /v4 schedule API answered; schedules then no
         #: longer depend on the Family web context.
         self.mobile_schedule_ok = False
@@ -650,6 +653,8 @@ class FamilySafetyWebAPI:
             self.family_context_state = "auth_required"
             self.family_token_source = None
         self._web_csrf = None
+        # The coordinator bootstraps again in the same poll.
+        self.family_context_dropped = True
 
     def _note_account_interrupt(self, page: str) -> None:
         """Record an interactive step Microsoft put in front of the silent sign-in.
