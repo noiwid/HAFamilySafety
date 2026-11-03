@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_FIRST_NAME, ATTR_SURNAME, DAYS, DOMAIN
 from .coordinator import FamilySafetyDataUpdateCoordinator
+from .permissions import async_check_entity_action
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -168,6 +169,7 @@ class FamilySafetyDailyLimitNumber(CoordinatorEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the daily screen time limit (optimistic update)."""
+        await async_check_entity_action(self)
         total_minutes = int(value)
         hours = total_minutes // 60
         minutes = total_minutes % 60
@@ -241,6 +243,7 @@ class FamilySafetyXboxDailyLimitNumber(FamilySafetyDailyLimitNumber):
         return {"xbox_schedule_enabled": bool(isinstance(policy, dict) and policy.get("isEnabled"))}
 
     async def async_set_native_value(self, value: float) -> None:
+        await async_check_entity_action(self)
         total_minutes = int(value)
         hours, minutes = divmod(total_minutes, 60)
         _LOGGER.info(

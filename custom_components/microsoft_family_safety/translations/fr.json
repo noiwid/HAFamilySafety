@@ -87,10 +87,12 @@
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
-          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
+          "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)",
+          "allowed_users": "Utilisateurs autorisés à piloter Microsoft Family Safety"
         },
         "data_description": {
-          "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte."
+          "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte.",
+          "allowed_users": "Laisser vide pour que tous les utilisateurs puissent utiliser les boutons et réglages (par défaut). Dès que des utilisateurs sont cochés, seuls eux et les administrateurs le peuvent : le compte non administrateur d'un enfant est refusé sur chaque bouton, interrupteur, limite et horaire, et sur les actions microsoft_family_safety. Les automatisations et scripts lancés par Home Assistant ne sont pas concernés. Donnez à l'enfant un compte non administrateur : un administrateur peut modifier cette option."
         }
       }
     }

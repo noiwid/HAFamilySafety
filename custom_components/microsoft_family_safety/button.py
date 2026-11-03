@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
+from .permissions import async_check_entity_action
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ class FamilySafetyRequestButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Approve (1 hour extension) or deny the oldest pending request."""
+        await async_check_entity_action(self)
         request = self._get_oldest_request()
         action = "approve" if self._approve else "deny"
         if request is None:

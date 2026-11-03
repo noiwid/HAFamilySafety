@@ -87,10 +87,12 @@
         "data": {
           "update_interval": "Aktualisierungsintervall (Sekunden)",
           "platforms": "Überwachte Plattformen",
-          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)"
+          "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)",
+          "allowed_users": "Benutzer, die Microsoft Family Safety steuern dürfen"
         },
         "data_description": {
-          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung."
+          "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung.",
+          "allowed_users": "Leer lassen, damit alle Benutzer die Schalter und Einstellungen verwenden können (Standard). Sobald Benutzer ausgewählt sind, dürfen nur sie und die Administratoren das: Das Nicht-Administrator-Konto eines Kindes wird bei jeder Taste, jedem Schalter, jedem Limit und jedem Zeitfenster sowie bei den microsoft_family_safety-Aktionen abgewiesen. Automatisierungen und Skripte, die Home Assistant ausführt, sind nicht betroffen. Gib dem Kind ein Nicht-Administrator-Konto: Ein Administrator kann diese Option ändern."
         }
       }
     }

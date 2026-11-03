@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+testpaths = ["tests"]
+xfail_strict = true
