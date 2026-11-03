@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import asyncio
 import hashlib
 import json
 import logging
@@ -145,6 +146,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=update_interval),
+            config_entry=entry,
         )
         self.entry = entry
         self.api: FamilySafety | None = None
@@ -158,7 +160,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         #: on-disk store; anything else missing from the in-memory dict is
         #: simply not loaded yet and must be preserved.
         self._released_screentime: set[str] = set()
-        self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        # One lock per child: lock, unlock and the limits switch each read the
+        # schedule, write 14 times and update the restore point, and two of
+        # them interleaved can leave the child zeroed with no restore point.
+        self._account_locks: dict[str, asyncio.Lock] = {}
+        # One store per entry: two Microsoft accounts must not share a file.
+        self._store: Store = Store(
+            hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}"
+        )
+        #: Pre-2.0.25 shared file, read once when the per-entry store is empty.
+        self._legacy_store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._auth_store: Store = Store(
             hass, AUTH_STORAGE_VERSION, f"{DOMAIN}.auth.{entry.entry_id}"
         )
@@ -231,6 +242,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_load_saved_screentime(self) -> None:
         data = await self._store.async_load()
+        if data is None:
+            # First run on the per-entry store: take over the shared file.
+            # It is left in place (another entry may still need it); a
+            # restore point released later is removed from the new store only.
+            data = await self._legacy_store.async_load()
+            if isinstance(data, dict) and data:
+                await self._store.async_save(data)
         if isinstance(data, dict):
             self._saved_screentime = {
                 self._policy_key(key): value for key, value in data.items()
@@ -345,6 +363,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 experimental=True,
             )
             self.web_api = FamilySafetyWebAPI(self.api.api.authenticator)
+            # Match the browser that created the session: Microsoft answers
+            # (and names its pages) in this language.
+            lang = self.hass.config.language or "en"
+            base = lang.split("-")[0]
+            self.web_api.accept_language = (
+                f"{lang},{base};q=0.9,en;q=0.8" if base != "en" else f"{lang},en;q=0.9"
+            )
             # FamilySafety.create(use_refresh_token=True) itself performs a token
             # refresh. Persist a rotated token immediately so even a restart
             # during the first data poll can recover with the newest credential.
@@ -614,7 +639,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account = self._accounts.get(account_id)
         if account is None:
             raise ValueError(f"Account {account_id} not found")
-        until = valid_until or (datetime.now() + timedelta(hours=24))
+        until = valid_until or (dt_util.now() + timedelta(hours=24))
 
         # Windows AND Xbox both have a working web override endpoint; they are
         # separate paths, not one endpoint parameterised by platform (see
@@ -663,7 +688,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "web session, which is not available. Re-authenticate the integration."
             )
         target = OverrideTarget.from_pretty(platform)
-        await account.override_device(target, OverrideType.UNTIL, until)
+        # pyfamilysafety formats the value with a literal "Z": give it real UTC.
+        await account.override_device(
+            target, OverrideType.UNTIL, dt_util.as_utc(until).replace(tzinfo=None)
+        )
         await self.async_request_refresh()
 
     async def async_unlock_platform(self, account_id: str, platform: str) -> None:
@@ -1060,115 +1088,167 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         code = self.web_api.last_web_error_code if self.web_api else None
         return code in ("TIMEOUT", "NETWORK_ERROR", "FAMILY_CONTEXT_TIMEOUT", "FAMILY_CONTEXT_NETWORK_ERROR")
 
-    async def async_lock_account(self, account_id: str) -> None:
-        """Lock an account by zeroing every day's allowance.
+    def _account_lock(self, account_id: str) -> asyncio.Lock:
+        return self._account_locks.setdefault(self._policy_key(account_id), asyncio.Lock())
 
-        Microsoft exposes no real "lock" endpoint, so a lock is a destructive
-        rewrite of the whole weekly schedule. The restore point saved here is
-        the only way back, which is why this refuses to proceed when the
-        current schedule cannot be read and nothing was saved earlier: zeroing
-        blind would wipe a child's real schedule unrecoverably (issue #23).
+    @staticmethod
+    def _has_nonzero_allowance(policy: dict[str, Any]) -> bool:
+        """True when at least one day of the policy grants time.
+
+        Use `or` chains rather than dict.get defaults: Microsoft may send an
+        explicit {"allowance": None}, and dict.get would then return None
+        instead of the default, making an unusable policy look non-zero and
+        saving it as the restore point.
         """
+        daily = policy.get("dailyRestrictions") or policy.get("DailyRestrictions") or {}
+        return any(
+            (
+                (daily.get(key) or daily.get(key.capitalize()) or {}).get("allowance")
+                or (daily.get(key) or daily.get(key.capitalize()) or {}).get("Allowance")
+                or "00:00:00"
+            )
+            != "00:00:00"
+            for key in DAY_KEYS
+        )
+
+    async def _save_restore_point(self, account_id: str, operation: str) -> None:
+        """Read the current schedule and keep it as the restore point.
+
+        Refuses, before any write, when the schedule cannot be read and
+        nothing was saved earlier, or when it is already all zeros: the
+        restore point is the only way back from the rewrite that follows, and
+        an invented or zeroed one would wipe the child's real schedule
+        unrecoverably (issue #23).
+        """
+        key = self._policy_key(account_id)
         current_policy = await self._fetch_screentime_policy(
             account_id, require_child_match=True
         )
-        has_saved = self._policy_key(account_id) in self._saved_screentime
+        # A restore point is only worth something if `_saved_week` can read
+        # it back; otherwise the unlock would refuse and the child stay at 0.
+        saved_ok = self._saved_week(self._saved_screentime.get(key) or {}) is not None
         if current_policy:
-            daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
-            # Use `or` chains rather than dict.get defaults: Microsoft may send
-            # an explicit {"allowance": None}, and dict.get would then return
-            # None instead of the default, making an unusable policy look
-            # non-zero and saving it as the restore point.
-            has_nonzero = any(
-                (
-                    (daily.get(key) or daily.get(key.capitalize()) or {}).get("allowance")
-                    or (daily.get(key) or daily.get(key.capitalize()) or {}).get("Allowance")
-                    or "00:00:00"
-                )
-                != "00:00:00"
-                for key in DAY_KEYS
-            )
-            if has_nonzero:
-                self._saved_screentime[self._policy_key(account_id)] = current_policy
+            if self._has_nonzero_allowance(current_policy):
+                if self._saved_week(current_policy) is None:
+                    raise UpdateFailed(
+                        f"Cannot {operation} account {account_id}: the current schedule "
+                        "has a day this integration cannot read back, so it could not "
+                        "be restored afterwards."
+                    )
+                self._saved_screentime[key] = current_policy
                 # A new restore point supersedes any earlier release.
-                self._released_screentime.discard(self._policy_key(account_id))
+                self._released_screentime.discard(key)
                 await self._async_save_screentime()
-            elif not has_saved:
-                # The schedule read back is already all zeros and nothing was
-                # saved earlier, so there is nothing to restore from later.
-                # Zeroing it again would change nothing and would leave the
-                # account locked with no way back through the integration.
+            elif not saved_ok:
                 raise UpdateFailed(
-                    f"Account {account_id} already has every day set to zero and no saved "
-                    "schedule exists, so unlocking it later would have nothing to restore. "
-                    "Set the daily limits first, from Home Assistant or at "
-                    "account.microsoft.com/family."
+                    f"Account {account_id} already has every day set to zero and no "
+                    "readable saved schedule exists, so there would be nothing to "
+                    "restore later. Set the daily limits first, from Home Assistant "
+                    "or at account.microsoft.com/family."
                 )
-        elif not has_saved:
+        elif not saved_ok:
             raise UpdateFailed(
-                f"Cannot lock account {account_id}: current schedule unreadable and no saved "
-                f"policy exists. {self._web_failure_hint()}"
+                f"Cannot {operation} account {account_id}: current schedule unreadable "
+                f"and no readable saved policy exists. {self._web_failure_hint()}"
             )
         else:
             _LOGGER.warning(
-                "Locking account %s from a previously saved schedule: the current "
+                "%s account %s from a previously saved schedule: the current "
                 "schedule could not be read, so the restore point may be stale",
-                account_id,
+                operation.capitalize(), account_id,
             )
 
+    async def _write_week(
+        self,
+        account_id: str,
+        days: list[tuple[int, int, list[bool]]],
+        operation: str,
+    ) -> None:
+        """Write (hours, minutes, slots) for the 7 days, Sunday first.
+
+        Each day is two web writes that can each wait out the full read
+        timeout. When a failure is a network one, Microsoft is not answering
+        at all: the remaining days would only burn minutes, so stop there.
+        The caller keeps its restore point on failure so it can retry.
+        """
         failures = 0
-        for day_index in range(7):
+        for day_index, (hours, minutes, slots) in enumerate(days):
             try:
-                await self._set_screentime_allowance(account_id, day_index, 0, 0)
-                await self._set_screentime_intervals(account_id, day_index, [False] * 48)
+                await self._set_screentime_allowance(account_id, day_index, hours, minutes)
+                await self._set_screentime_intervals(account_id, day_index, slots)
             except Exception as err:
                 failures += 1
-                _LOGGER.warning("Could not lock day %d: %s", day_index, err)
-                # Same reasoning as the unlock restore: once Microsoft stops
-                # answering, the remaining days only wait out timeouts.
+                _LOGGER.warning("Could not %s day %d: %s", operation, day_index, err)
                 if self._is_transient_web_failure():
-                    failures = 7 - day_index  # day_index days succeeded before this one; the rest is skipped
+                    failures = 7 - day_index
                     _LOGGER.warning(
-                        "Stopping account lock for %s after day %d: Microsoft is not "
-                        "answering; the saved schedule is kept so the lock can be retried",
-                        account_id, day_index,
+                        "Stopping %s for account %s after day %d: Microsoft is not "
+                        "answering; the saved schedule is kept for retry",
+                        operation, account_id, day_index,
                     )
                     break
         if failures:
             raise UpdateFailed(
-                f"Screen-time account lock updated {7 - failures}/7 weekdays; "
-                "the saved policy was kept so the operation can be retried safely"
+                f"Screen-time {operation} updated {7 - failures}/7 weekdays; "
+                "saved policy retained for retry"
             )
+
+    async def _set_schedule_flag(self, account_id: str, enabled: bool) -> None:
+        """Set the weekly schedule's own "enabled" flag when it differs.
+
+        Microsoft only enforces the days while that flag is on, so a lock
+        written while it is off would show as applied and do nothing; a
+        restore puts the flag back as it was before the lock.
+        """
+        account = (self.data or {}).get("accounts", {}).get(account_id) or {}
+        policy = account.get("screentime_policy")
+        current = policy.get("isEnabled") if isinstance(policy, dict) else None
+        if current is enabled or self.web_api is None:
+            return
+        try:
+            await self.web_api.set_mobile_schedule_enabled(account_id, enabled)
+        except Exception as err:  # noqa: BLE001 - the week was written already
+            _LOGGER.warning(
+                "Schedule written for %s but its enabled flag could not be set to %s: %s",
+                account_id, enabled, err,
+            )
+
+    async def async_lock_account(self, account_id: str) -> None:
+        """Lock an account by zeroing every day's allowance.
+
+        Microsoft exposes no real "lock" endpoint, so a lock is a destructive
+        rewrite of the whole weekly schedule; see `_save_restore_point`.
+        """
+        async with self._account_lock(account_id):
+            await self._save_restore_point(account_id, "lock")
+            await self._write_week(account_id, [(0, 0, [False] * 48)] * 7, "account lock")
+            await self._set_schedule_flag(account_id, True)
         await self.async_request_refresh()
 
     @staticmethod
-    def _default_intervals() -> list[bool]:
-        """Return default allowed intervals: 07:00-22:00 (slots 14-44)."""
-        intervals = [False] * 48
-        for i in range(14, 44):
-            intervals[i] = True
-        return intervals
-
-    async def _restore_day(
-        self,
-        account_id: str,
-        day_index: int,
-        hours: int,
-        minutes: int,
-        intervals: list[bool] | None,
-    ) -> bool:
-        try:
-            await self._set_screentime_allowance(account_id, day_index, hours, minutes)
-            await self._set_screentime_intervals(
-                account_id,
-                day_index,
-                intervals if intervals and len(intervals) == 48
-                else self._default_intervals(),
-            )
-            return True
-        except Exception as err:
-            _LOGGER.warning("Failed to restore day %d: %s", day_index, err)
-            return False
+    def _saved_week(saved: dict[str, Any]) -> list[tuple[int, int, list[bool]]] | None:
+        """Parse a restore point into 7 (hours, minutes, slots); None if any day is unreadable."""
+        daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
+        days = []
+        for day_key in DAY_KEYS:
+            day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
+            if not isinstance(day_data, dict):
+                return None
+            allowance = day_data.get("allowance") or day_data.get("Allowance")
+            slots = _policy_intervals_to_slots(day_data)
+            if not isinstance(allowance, str) or slots is None:
+                return None
+            # "HH:MM:SS", or the .NET TimeSpan "D.HH:MM:SS" ("1.00:00:00" = 24 h).
+            days_part = "0"
+            if "." in allowance.split(":")[0]:
+                days_part, _, allowance = allowance.partition(".")
+            try:
+                hours, minutes = (int(part) for part in allowance.split(":")[:2])
+                hours += 24 * int(days_part)
+            except ValueError:
+                return None
+            days.append((hours, minutes, slots))
+        return days
 
     async def async_unlock_account(
         self, account_id: str, *, operation: str = "unlock"
@@ -1180,60 +1260,37 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         limits switch ("re-enable screen time limits for"), and telling a
         user they cannot "unlock" a toggle they never locked is confusing.
         """
-        saved = self._saved_screentime.get(self._policy_key(account_id))
-        if saved:
-            daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
-            failures = 0
-            for day_index, day_key in enumerate(DAY_KEYS):
-                day_data = daily.get(day_key) or daily.get(day_key.capitalize()) or {}
-                allowance = day_data.get("allowance") or day_data.get("Allowance") or "02:00:00"
-                try:
-                    parts = allowance.split(":")
-                    hours, minutes = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
-                except (ValueError, IndexError):
-                    hours, minutes = 2, 0
-                intervals = _policy_intervals_to_slots(day_data)
-                if not await self._restore_day(
-                    account_id, day_index, hours, minutes, intervals
-                ):
-                    failures += 1
-                    # Each day is two web writes that can each wait out the
-                    # full read timeout. When the first failure is a network
-                    # one, Microsoft is not answering at all: the remaining days
-                    # would only burn minutes, so stop here and keep the saved
-                    # schedule for a later retry.
-                    if self._is_transient_web_failure():
-                        failures = 7 - day_index  # day_index days succeeded before this one; the rest is skipped
-                        _LOGGER.warning(
-                            "Stopping screen-time restore for account %s after day %d: "
-                            "Microsoft is not answering; the saved schedule is kept for retry",
-                            account_id, day_index,
-                        )
-                        break
-            if failures:
-                # Do not discard the only copy of the pre-lock schedule after a
-                # partial restore. A later retry can safely finish the remaining
-                # weekdays.
-                raise UpdateFailed(
-                    f"Screen-time restore updated {7 - failures}/7 weekdays; "
-                    "saved policy retained for retry"
-                )
-            self._saved_screentime.pop(self._policy_key(account_id), None)
-            self._released_screentime.add(self._policy_key(account_id))
-            await self._async_save_screentime()
-        else:
-            # No restore point. Writing the 2h/day, 07:00-22:00 default here
-            # would silently replace a schedule nobody asked to change, and the
-            # real one would be gone for good. That is the same destructive
-            # write the lock guard refuses (issue #23), so refuse it too and
-            # tell the user where their schedule can be set again.
+        async with self._account_lock(account_id):
+            await self._restore_saved(account_id, operation)
+        await self.async_request_refresh()
+
+    async def _restore_saved(
+        self, account_id: str, operation: str, *, enabled: bool | None = None
+    ) -> None:
+        """Write the restore point back; ``enabled`` forces the flag, else the saved one."""
+        key = self._policy_key(account_id)
+        saved = self._saved_screentime.get(key)
+        # No restore point, or one with a day this build cannot read: writing
+        # a default in its place would silently replace a schedule nobody
+        # asked to change, and the real one would be gone for good. That is
+        # the same destructive write the lock guard refuses (issue #23).
+        days = self._saved_week(saved) if saved else None
+        if days is None:
             raise UpdateFailed(
-                f"Cannot {operation} account {account_id}: no saved schedule to restore. "
-                "Set the daily limits again from Home Assistant or at "
+                f"Cannot {operation} account {account_id}: "
+                + ("the saved schedule is unreadable" if saved else "no saved schedule to restore")
+                + ". Set the daily limits again from Home Assistant or at "
                 "account.microsoft.com/family; the integration will not guess a "
                 "schedule for you."
             )
-        await self.async_request_refresh()
+        # Keeps the only copy of the pre-lock schedule after a partial restore.
+        await self._write_week(account_id, days, "restore")
+        self._saved_screentime.pop(key, None)
+        self._released_screentime.add(key)
+        await self._async_save_screentime()
+        if enabled is None:
+            enabled = saved.get("isEnabled") is not False
+        await self._set_schedule_flag(account_id, enabled)
 
     def is_policy_enabled(self, account_id: str) -> bool | None:
         locked = self.is_account_locked(account_id)
@@ -1262,47 +1319,33 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The app's weekly switch is the schedule's own "enabled" flag: Microsoft
         # keeps every day as it is. The 24 h rewrite below is the web fallback,
         # and a restore point it left behind is still restored on enable.
-        has_saved = self._policy_key(account_id) in self._saved_screentime
-        if self.web_api is not None and not (enabled and has_saved):
-            try:
-                await self.web_api.set_mobile_schedule_enabled(account_id, enabled)
-                await self.async_request_refresh()
-                return
-            except Exception as err:  # noqa: BLE001 - fall back to the web path
-                _LOGGER.warning("Mobile schedule on/off failed, trying web: %s", err)
-        if enabled:
-            # Re-enable limits: restore the saved schedule (same path as unlock).
-            await self.async_unlock_account(
-                account_id, operation="re-enable screen time limits for"
-            )
-            return
-        current_policy = await self._fetch_screentime_policy(
-            account_id, require_child_match=True
-        )
-        has_saved = self._policy_key(account_id) in self._saved_screentime
-        if current_policy and not has_saved:
-            self._saved_screentime[self._policy_key(account_id)] = current_policy
-            self._released_screentime.discard(self._policy_key(account_id))
-            await self._async_save_screentime()
-        elif current_policy is None and not has_saved:
-            raise UpdateFailed(
-                "Cannot disable screen-time limits because the current schedule "
-                "could not be read and no saved policy exists"
-            )
-
-        failures = 0
-        for day_index in range(7):
-            try:
-                await self._set_screentime_allowance(account_id, day_index, 24, 0)
-                await self._set_screentime_intervals(account_id, day_index, [True] * 48)
-            except Exception as err:
-                failures += 1
-                _LOGGER.warning("Could not disable screen-time limits for day %d: %s", day_index, err)
-        if failures:
-            raise UpdateFailed(
-                f"Screen-time policy disable updated {7 - failures}/7 weekdays; "
-                "saved policy retained for retry"
-            )
+        async with self._account_lock(account_id):
+            mobile_ok = False
+            if self.web_api is not None:
+                try:
+                    await self.web_api.set_mobile_schedule_enabled(account_id, enabled)
+                    mobile_ok = True
+                except Exception as err:  # noqa: BLE001 - fall back to the web path
+                    _LOGGER.warning("Mobile schedule on/off failed, trying web: %s", err)
+            has_saved = self._policy_key(account_id) in self._saved_screentime
+            if enabled:
+                # The flag is on; a restore point left by the web fallback
+                # (or a lock) is restored too. Without one, the flag alone
+                # was the whole job.
+                if has_saved:
+                    await self._restore_saved(
+                        account_id, "re-enable screen time limits for", enabled=True
+                    )
+                elif not mobile_ok:
+                    raise UpdateFailed(
+                        f"Cannot re-enable screen time limits for account {account_id}: "
+                        "Microsoft refused the mobile request and no saved schedule exists"
+                    )
+            elif not mobile_ok:
+                await self._save_restore_point(account_id, "disable screen-time limits for")
+                await self._write_week(
+                    account_id, [(24, 0, [True] * 48)] * 7, "policy disable"
+                )
         await self.async_request_refresh()
 
     def connection_state(self) -> dict[str, Any]:
@@ -1493,10 +1536,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reauth_requested = True
         self._reauth_reason = reason
         self.entry.async_start_reauth(self.hass, data={"reason": reason})
-
-    def request_reauth(self, reason: str = "manual") -> None:
-        """Start the normal Home Assistant reauthentication flow on demand."""
-        self._request_reauth(reason)
 
     async def async_request_reauth(self) -> None:
         """Service entry point: open the Microsoft sign-in flow without waiting

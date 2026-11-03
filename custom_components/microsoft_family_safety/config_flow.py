@@ -23,6 +23,8 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
+from ._httpx_web_adapter import apply_httpx_web_transport_patch
+from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 from .const import (
     CONF_ALLOWED_USERS,
     CONF_XBOX_FEATURES,
@@ -863,6 +865,11 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug("Server-side Family bootstrap unavailable: %s", err)
             return None
 
+        # On a first install no entry is loaded yet, so the transport patches
+        # of async_setup_entry have not run: without them this bootstrap would
+        # go through plain aiohttp with a 15 s timeout and no browser hints.
+        apply_httpx_web_transport_patch(self.hass)
+        apply_httpx_web_tuning_patch()
         web_api = FamilySafetyWebAPI(None)
         web_api.set_web_cookies(cookies)
         try:

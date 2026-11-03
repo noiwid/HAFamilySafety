@@ -21,6 +21,8 @@ from typing import Any
 import aiohttp
 from yarl import URL
 
+from homeassistant.util import dt as dt_util
+
 from ._pyfamilysafety_compat import authenticator_access_token_expired
 from .const import DAY_KEYS
 
@@ -179,6 +181,8 @@ class FamilySafetyWebAPI:
         #: Set once the mobile /v4 schedule API answered; schedules then no
         #: longer depend on the Family web context.
         self.mobile_schedule_ok = False
+        #: Browser-like Accept-Language; the coordinator sets it from HA's language.
+        self.accept_language = "en-US,en;q=0.9"
         #: child id -> (time.monotonic(), payload) of the last schedules GET.
         self._mobile_schedule_cache: dict[str, tuple[float, dict]] = {}
         # Keep authentication health separate from endpoint-specific failures.
@@ -282,24 +286,30 @@ class FamilySafetyWebAPI:
         """
         if self._web_session is None or self._web_session.closed:
             return strip_bot_manager_cookies(self._web_cookies)
-        exported: list[dict[str, Any]] = []
+        # Microsoft sets the same cookie for "host" and ".host"; aiohttp keeps
+        # both and the store grew by a pair per poll. One per (name, host,
+        # path), the ".host" form preferred since it also covers subdomains.
+        exported: dict[tuple[str, str, str], dict[str, Any]] = {}
         for morsel in self._web_session.cookie_jar:
             domain = str(morsel["domain"] or "")
             if not domain or morsel.key in _BOT_MANAGER_COOKIE_NAMES:
+                continue
+            path = str(morsel["path"] or "/")
+            key = (morsel.key, domain.lstrip("."), path)
+            if key in exported and not domain.startswith("."):
                 continue
             item: dict[str, Any] = {
                 "name": morsel.key,
                 "value": morsel.value,
                 "domain": domain,
-                "path": str(morsel["path"] or "/"),
+                "path": path,
                 "secure": bool(morsel["secure"]),
                 "httpOnly": bool(morsel["httponly"]),
             }
             if morsel["expires"]:
                 item["expires"] = str(morsel["expires"])
-            exported.append(item)
-        exported.sort(key=lambda item: (item["domain"], item["path"], item["name"]))
-        return exported
+            exported[key] = item
+        return sorted(exported.values(), key=lambda item: (item["domain"], item["path"], item["name"]))
 
     def export_family_context(self) -> tuple[str | None, str | None]:
         """Return captured Family antiforgery context for persistence."""
@@ -539,7 +549,7 @@ class FamilySafetyWebAPI:
             return None
         headers = {
             "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "de,de-DE;q=0.9,en;q=0.8,en-US;q=0.6",
+            "Accept-Language": self.accept_language,
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "User-Agent": _BROWSER_USER_AGENT,
@@ -686,7 +696,7 @@ class FamilySafetyWebAPI:
         """
         headers = {
             "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "de,de-DE;q=0.9,en;q=0.8,en-US;q=0.6",
+            "Accept-Language": self.accept_language,
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "User-Agent": _BROWSER_USER_AGENT,
@@ -782,7 +792,7 @@ class FamilySafetyWebAPI:
         self._web_csrf = None
         headers = {
             "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "de,de-DE;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Accept-Language": self.accept_language,
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "User-Agent": _BROWSER_USER_AGENT,
@@ -1088,7 +1098,7 @@ class FamilySafetyWebAPI:
                 referer = f"{self.WEB_API_BASE}/family/settings/windows/{child}/devices"
         headers = {
             "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "de,de-DE;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Accept-Language": self.accept_language,
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "X-Requested-With": "XMLHttpRequest",
@@ -1883,7 +1893,8 @@ class FamilySafetyWebAPI:
 
     @staticmethod
     def _mobile_now() -> str:
-        return datetime.now().astimezone().isoformat(timespec="seconds")
+        # Home Assistant's time zone, not the container's (which may be UTC).
+        return dt_util.now().isoformat(timespec="seconds")
 
     async def _get_mobile_schedules(self, child_id: str, *, max_age: float = 0.0) -> dict:
         """GET the child's schedules (Windows and Xbox in one payload).
@@ -1968,32 +1979,12 @@ class FamilySafetyWebAPI:
             schedule = self._mobile_platform_schedule(
                 await self._get_mobile_schedules(child_id), platform
             )
-            if schedule is None:
-                self.mobile_schedule_ok = False
-                return None
-            daily: dict[str, dict[str, Any]] = {}
-            for day, data in (schedule.get("dailyRestrictions") or {}).items():
-                if not isinstance(data, dict):
-                    continue
-                seconds = int(data.get("allowance") or 0) // 1000
-                intervals = data.get("allottedIntervals") or []
-                slots = self._intervals_to_slots(intervals)
-                daily[day] = {
-                    "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
-                    "allottedIntervals": intervals,
-                    "allowedIntervals": slots,
-                    # The lock/unlock restore reads 48 booleans only from "timeline".
-                    "timeline": slots,
-                }
+            result = self._convert_mobile_schedule(schedule) if schedule else None
         except Exception:
             self.mobile_schedule_ok = False
             raise
-        if not daily:
-            self.mobile_schedule_ok = False
-            return None
-        self.mobile_schedule_ok = True
-        return {"isEnabled": schedule.get("enabled"), "appliesTo": schedule.get("appliesTo"),
-                "dailyRestrictions": daily}
+        self.mobile_schedule_ok = result is not None
+        return result
 
     @classmethod
     def _convert_mobile_schedule(cls, schedule: dict) -> dict | None:
@@ -2008,6 +1999,7 @@ class FamilySafetyWebAPI:
                 "allowance": f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}",
                 "allottedIntervals": intervals,
                 "allowedIntervals": slots,
+                # The lock/unlock restore reads 48 booleans only from "timeline".
                 "timeline": slots,
             }
         if not daily:

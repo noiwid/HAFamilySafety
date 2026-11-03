@@ -276,6 +276,34 @@ class MicrosoftFamilyAuthProxy:
         self._complete = True
         self._completion_event.set()
 
+    def _capture_oauth_redirect(self, url: URL, source: str) -> None:
+        """In oauth mode, the registered desktop redirect ends the proxy.
+
+        Capture the code (or error) and send the browser to the callback
+        instead of letting it navigate to the desktop page.
+        """
+        if not (
+            self._completion_mode == "oauth"
+            and url.host == "login.live.com"
+            and url.path == "/oauth20_desktop.srf"
+            and ("code" in url.query or "error" in url.query)
+        ):
+            return
+        self._oauth_redirect_url = str(url)
+        if "code" in url.query:
+            self._mark_complete()
+            _LOGGER.info(
+                "Native Microsoft Family mobile OAuth redirect captured from %s: "
+                "code_present=True cookie_count=%d",
+                source, len(self.export_cookies()),
+            )
+        else:
+            _LOGGER.warning(
+                "Microsoft Family mobile OAuth returned an error %s: error=%s",
+                source, url.query.get("error", "unknown"),
+            )
+        raise web.HTTPFound(location=self.callback_url)
+
     def _start_family_wait_ui(self) -> None:
         """Move the HA external step to its native progress UI once per flow."""
         if self._completion_mode != "web":
@@ -433,11 +461,16 @@ class MicrosoftFamilyAuthProxy:
                     raise web.HTTPForbidden(
                         text="Microsoft authentication host not allowed"
                     )
-                target = URL.build(
-                    scheme="https",
-                    host=host,
-                    path=f"/{path}" if slash else "/",
-                )
+                try:
+                    target = URL.build(
+                        scheme="https",
+                        host=host,
+                        path=f"/{path}" if slash else "/",
+                    )
+                except ValueError as err:  # "a@b", "x#y": a 403, not a 500
+                    raise web.HTTPForbidden(
+                        text="Microsoft authentication host not allowed"
+                    ) from err
             else:
                 # Defensive fallback for relative requests that escaped browser
                 # rewriting. Resolve them against the actual last Microsoft URL.
@@ -460,14 +493,7 @@ class MicrosoftFamilyAuthProxy:
                     )
                 )
 
-        # The security-filter bypass middleware may have hidden the real query
-        # string from Home Assistant's middleware chain; prefer the stashed
-        # original when present so proxied OAuth parameters survive intact.
-        stashed_query = request.get(_ORIGINAL_QUERY_KEY)
-        if stashed_query:
-            query_items = list(parse_qsl(stashed_query, keep_blank_values=True))
-        else:
-            query_items = list(request.query.items())
+        query_items = list(request.query.items())
 
         if query_items:
             proxy_origin = f"{request.scheme}://{request.host}"
@@ -974,6 +1000,7 @@ class MicrosoftFamilyAuthProxy:
             secure: bool = False,
             same_site: str = "",
             max_age: str = "",
+            expires: str = "",
         ) -> None:
             # One browser origin cannot preserve Microsoft's domain partitioning.
             # For the active Microsoft host, the most recent value per name is
@@ -999,6 +1026,9 @@ class MicrosoftFamilyAuthProxy:
             parts = [f"{name}={value}", f"Path={self.proxy_path}/"]
             if max_age:
                 parts.append(f"Max-Age={max_age}")
+            if expires:
+                # A deletion sent as "Expires=1970" must delete here too.
+                parts.append(f"Expires={expires}")
             if secure_proxy and secure:
                 parts.append("Secure")
             same_site = (same_site or "").strip()
@@ -1028,6 +1058,7 @@ class MicrosoftFamilyAuthProxy:
                     secure=bool(morsel["secure"]),
                     same_site=morsel["samesite"] or "",
                     max_age=morsel["max-age"] or "",
+                    expires=morsel["expires"] or "",
                 )
 
         # Include the current server-side cookie jar as well. Redirects are now
@@ -1147,7 +1178,10 @@ class MicrosoftFamilyAuthProxy:
         if not self._remember_host(current.host, "upstream response"):
             _LOGGER.warning("Microsoft auth response came from unexpected host %s", current.host)
             raise web.HTTPBadGateway(text="Unexpected Microsoft authentication response")
-        self._last_url = current
+        # Only a navigation moves the "current page": a telemetry XHR finishing
+        # just before the sign-in form posts must not become its Referer.
+        if request.headers.get("Sec-Fetch-Dest", "document") in ("document", "iframe"):
+            self._last_url = current
         _LOGGER.debug(
             "Native Family auth proxy response: HTTP %s https://%s%s",
             response.status_code,
@@ -1170,26 +1204,7 @@ class MicrosoftFamilyAuthProxy:
 
             # The mobile API's registered desktop redirect is terminal for this
             # proxy. Capture the code/error before the browser navigates there.
-            if (
-                self._completion_mode == "oauth"
-                and resolved.host == "login.live.com"
-                and resolved.path == "/oauth20_desktop.srf"
-                and ("code" in resolved.query or "error" in resolved.query)
-            ):
-                self._oauth_redirect_url = str(resolved)
-                self._complete = "code" in resolved.query
-                if self._complete:
-                    _LOGGER.info(
-                        "Native Microsoft Family mobile OAuth redirect captured: "
-                        "code_present=True cookie_count=%d",
-                        len(self.export_cookies()),
-                    )
-                else:
-                    _LOGGER.warning(
-                        "Microsoft Family mobile OAuth returned an error redirect: error=%s",
-                        resolved.query.get("error", "unknown"),
-                    )
-                raise web.HTTPFound(location=self.callback_url)
+            self._capture_oauth_redirect(resolved, "redirect")
 
             proxied_location = self._proxyize_url(
                 str(resolved),
@@ -1225,27 +1240,8 @@ class MicrosoftFamilyAuthProxy:
         final = current
 
         # Some Microsoft variants return the desktop redirect as a normal 200
-        # document instead of an HTTP redirect. Keep this fallback for both.
-        if (
-            self._completion_mode == "oauth"
-            and final.host == "login.live.com"
-            and final.path == "/oauth20_desktop.srf"
-            and ("code" in final.query or "error" in final.query)
-        ):
-            self._oauth_redirect_url = str(final)
-            self._complete = "code" in final.query
-            if self._complete:
-                _LOGGER.info(
-                    "Native Microsoft Family mobile OAuth redirect captured from 200 response: "
-                    "code_present=True cookie_count=%d",
-                    len(self.export_cookies()),
-                )
-            else:
-                _LOGGER.warning(
-                    "Microsoft Family mobile OAuth returned an error document: error=%s",
-                    final.query.get("error", "unknown"),
-                )
-            raise web.HTTPFound(location=self.callback_url)
+        # document instead of an HTTP redirect.
+        self._capture_oauth_redirect(final, "200 response")
 
         def _is_authenticated_account_destination(url: URL, status_code: int) -> bool:
             """Return whether an account.microsoft.com navigation proves SSO is live.
@@ -1403,60 +1399,35 @@ class MicrosoftFamilyAuthProxy:
         # On the last attempt the watchdog returns to our callback and completes
         # authentication with the valid account cookies even if no Family token
         # could be captured.
+        # The same applies to the INIT-FAIL page: the proxied client-signin
+        # page can report it and still recover later via
+        # complete-sso-with-redirect (~45 s seen). Do not bounce back to
+        # /account at once, that aborts Microsoft's own recovery.
         if (
             self._completion_mode == "web"
             and response.status_code == 200
             and final.host == "account.microsoft.com"
-            and final.path == "/auth/complete-client-signin-oauth-silent"
+            and (
+                final.path == "/auth/complete-client-signin-oauth-silent"
+                or final.path.startswith("/auth/client-signin-oauth-silent-error/")
+            )
             and self._family_bootstrap_attempts > 0
         ):
             family_watchdog_target = _next_family_bootstrap_target()
             if family_watchdog_target:
                 _LOGGER.debug(
-                    "Family browser silent-SSO page reached; arming %.1fs watchdog "
+                    "Family browser page %s reached; arming %.1fs watchdog "
                     "for next Family landing route (%d/3)",
-                    55.0,
-                    self._family_bootstrap_attempts,
+                    final.path, 55.0, self._family_bootstrap_attempts,
                 )
             else:
                 self._mark_complete()
                 family_watchdog_target = self.callback_url
                 _LOGGER.warning(
-                    "Family browser silent-SSO page reached after all bootstrap "
-                    "routes; arming %.1fs watchdog to complete Home Assistant "
+                    "Family browser page %s reached after all bootstrap routes; "
+                    "arming %.1fs watchdog to complete Home Assistant "
                     "authentication without a Family antiforgery token",
-                    55.0,
-                )
-
-        # During Family bootstrap the proxied Microsoft client-signin page can
-        # report INIT-FAIL and still recover later via complete-sso-with-redirect.
-        # Older proxy builds proved that this recovery can take ~45 seconds.
-        # Do not immediately bounce back to /account here, because that aborts
-        # Microsoft's own recovery and advances to the next bootstrap route.
-        if (
-            self._completion_mode == "web"
-            and response.status_code == 200
-            and final.host == "account.microsoft.com"
-            and final.path.startswith("/auth/client-signin-oauth-silent-error/")
-            and self._family_bootstrap_attempts > 0
-        ):
-            family_watchdog_target = _next_family_bootstrap_target()
-            if family_watchdog_target:
-                _LOGGER.debug(
-                    "Family browser INIT-FAIL reached during bootstrap; preserving "
-                    "Microsoft recovery page and arming %.1fs fallback for next "
-                    "Family landing route (%d/3)",
-                    55.0,
-                    self._family_bootstrap_attempts,
-                )
-            else:
-                self._mark_complete()
-                family_watchdog_target = self.callback_url
-                _LOGGER.warning(
-                    "Family browser INIT-FAIL persisted after all bootstrap routes; "
-                    "arming %.1fs fallback to complete Home Assistant authentication "
-                    "without a Family antiforgery token",
-                    55.0,
+                    final.path, 55.0,
                 )
 
         content_type = response.headers.get("content-type", "")
@@ -2013,21 +1984,14 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
         )
 
 
-#: Request key holding the original query string of a proxied request, stashed
-#: by :func:`_install_security_filter_bypass` before the query is hidden from
-#: Home Assistant's security filter.
-_ORIGINAL_QUERY_KEY = f"{DOMAIN}_native_auth_original_query"
-
-
-#: Set (within the current asyncio context) while HA's security filter is
-#: inspecting a request aimed at this integration's auth proxy. The filter
-#: scans ``request.path`` first and ``request.query_string`` second, as two
-#: separate ``FILTERS.search()`` calls inside one middleware coroutine. The
-#: path scan is where the proxy route is recognisable; the query scan receives
-#: the bare query string, so it needs this marker to know it belongs to the
-#: same proxy request.
-_IN_PROXY_REQUEST: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    f"{DOMAIN}_native_auth_in_proxy_request", default=False
+#: Verdict of the path scan for the current request (per asyncio context):
+#: ``None`` before the path was scanned, then whether it is a proxy route. HA's
+#: security filter scans ``request.path`` first and ``request.query_string``
+#: second, as two separate ``FILTERS.search()`` calls inside one middleware
+#: coroutine. Only the path scan may open the exemption: a query string that
+#: merely starts with the proxy prefix must not be exempted on another route.
+_PROXY_PATH_VERDICT: contextvars.ContextVar[bool | None] = contextvars.ContextVar(
+    f"{DOMAIN}_native_auth_proxy_path_verdict", default=None
 )
 
 
@@ -2048,14 +2012,15 @@ class _ScopedSecurityFilter:
         self.flags = original.flags
 
     def search(self, string: str, *args: Any, **kwargs: Any) -> re.Match[str] | None:
-        if isinstance(string, str) and string.startswith(f"{AUTH_PROXY_PATH}/"):
-            # Path scan for a proxy request: exempt it and remember that the
-            # upcoming query-string scan belongs to this same request.
-            _IN_PROXY_REQUEST.set(True)
-            return None
-        if _IN_PROXY_REQUEST.get():
-            # Query-string scan of the proxy request recognised just above.
-            _IN_PROXY_REQUEST.set(False)
+        verdict = _PROXY_PATH_VERDICT.get()
+        if verdict is None:
+            # First scan of the request: the path. Decide and remember.
+            verdict = isinstance(string, str) and string.startswith(f"{AUTH_PROXY_PATH}/")
+            _PROXY_PATH_VERDICT.set(verdict)
+        else:
+            # Second scan: the query string of that same request.
+            _PROXY_PATH_VERDICT.set(None)
+        if verdict:
             return None
         return self._original.search(string, *args, **kwargs)
 
