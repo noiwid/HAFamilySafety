@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_FIRST_NAME, ATTR_SURNAME, DAYS, DOMAIN
 from .coordinator import FamilySafetyDataUpdateCoordinator
+from .permissions import async_check_entity_action
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -207,6 +208,7 @@ class FamilySafetyIntervalTime(CoordinatorEntity, TimeEntity):
         When either start or end is changed, we re-send both to the API.
         The other value is read from the current state.
         """
+        await async_check_entity_action(self)
         account_data = self._get_account_data()
         policy = account_data.get("screentime_policy") if account_data else None
         current_start, current_end = _extract_day_times(policy, self._day_key)

@@ -87,10 +87,12 @@
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
-          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
+          "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)",
+          "allowed_users": "Users allowed to control Microsoft Family Safety"
         },
         "data_description": {
-          "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in."
+          "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in.",
+          "allowed_users": "Leave empty to let every user use the buttons and settings (default). As soon as users are ticked, only they and the administrators can: a child's non-administrator account is refused on every button, switch, limit and time window, and on the microsoft_family_safety actions. Automations and scripts run by Home Assistant are not affected. Give the child a non-administrator account: an administrator can change this option."
         }
       }
     }

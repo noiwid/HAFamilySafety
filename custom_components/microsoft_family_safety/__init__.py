@@ -38,8 +38,10 @@ from .const import (
     SERVICE_LOCK_ACCOUNT,
     SERVICE_UNLOCK_ACCOUNT,
     SERVICE_REQUEST_REAUTH,
+    CONF_ALLOWED_USERS,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
+from .permissions import guard_service
 from ._httpx_web_adapter import apply_httpx_web_transport_patch
 from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 
@@ -189,13 +191,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _register_services(hass)
 
     # Reload on options change (e.g. update interval)
+    _LOADED_OPTIONS[entry.entry_id] = _reload_relevant(entry.options)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     return True
 
 
+#: entry_id -> the options the entry was loaded with, minus those read live.
+_LOADED_OPTIONS: dict[str, dict] = {}
+
+
+def _reload_relevant(options) -> dict:
+    """Options whose change needs a reload. The allowed users are read at each action."""
+    return {k: v for k, v in dict(options).items() if k != CONF_ALLOWED_USERS}
+
+
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update — reload the integration."""
+    """Reload on an options change, unless only the allowed users changed."""
+    if _LOADED_OPTIONS.get(entry.entry_id) == _reload_relevant(entry.options):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -290,7 +304,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     for name, schema, method, extract in services:
         hass.services.async_register(
-            DOMAIN, name, make_handler(method, extract), schema=schema
+            DOMAIN, name, guard_service(hass, make_handler(method, extract)), schema=schema
         )
 
 

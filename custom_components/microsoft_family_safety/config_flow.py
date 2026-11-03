@@ -16,8 +16,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
+    CONF_ALLOWED_USERS,
     CONF_XBOX_FEATURES,
     DEFAULT_XBOX_FEATURES,
     AVAILABLE_PLATFORMS,
@@ -91,6 +98,38 @@ async def validate_redirect_url(hass: HomeAssistant, redirect_url: str) -> dict[
     except Exception as err:
         _LOGGER.error("Authentication validation failed: %s", err)
         raise InvalidAuth(f"Cannot connect: {err}") from err
+
+
+async def _allowed_users_selector(
+    hass: HomeAssistant, current: list[str] | None
+) -> tuple[SelectSelector, list[str]]:
+    """Selector of the people of this Home Assistant, and the saved choice still valid.
+
+    System accounts (Supervisor, add-ons, cloud) and deactivated users are left
+    out. The saved list is filtered on the users that still exist, otherwise
+    the selector refuses an id that was deleted and the form cannot be saved.
+    """
+    users = [
+        u for u in await hass.auth.async_get_users()
+        if not u.system_generated and u.is_active
+    ]
+    options = [
+        SelectOptionDict(
+            value=u.id,
+            label=f"{u.name} (administrator)" if u.is_admin else (u.name or u.id),
+        )
+        for u in sorted(users, key=lambda u: (u.name or "").lower())
+    ]
+    known = {u.id for u in users}
+    selected = [user_id for user_id in (current or []) if user_id in known]
+    return (
+        SelectSelector(
+            SelectSelectorConfig(
+                options=options, multiple=True, mode=SelectSelectorMode.LIST
+            )
+        ),
+        selected,
+    )
 
 
 def _wants_xbox(platforms: Any) -> bool:
@@ -1426,6 +1465,9 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
             CONF_XBOX_FEATURES, DEFAULT_XBOX_FEATURES
         ) and not _wants_xbox(current_platforms):
             current_platforms = [*current_platforms, "Xbox"]
+        users_selector, current_allowed = await _allowed_users_selector(
+            self.hass, self._config_entry.options.get(CONF_ALLOWED_USERS)
+        )
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -1440,6 +1482,10 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                     ): cv.multi_select(
                         {p: p for p in AVAILABLE_PLATFORMS}
                     ),
+                    vol.Optional(
+                        CONF_ALLOWED_USERS,
+                        default=current_allowed,
+                    ): users_selector,
                     vol.Optional(
                         CONF_ALLOW_INSECURE_HTTP_AUTH,
                         default=current_allow_insecure_http_auth,

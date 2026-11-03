@@ -177,7 +177,20 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 |--------|----------------|---------|-------|
 | Update interval (seconds) | 30 – 3600 | 300 (5 min) | |
 | Monitored platforms | Windows / Xbox / Mobile | Windows | One lock switch per platform. Xbox also decides whether the web session is used, see [below](#xbox-and-the-web-session) |
+| Users allowed to control Microsoft Family Safety | list of Home Assistant users | *(empty: everybody)* | See [Who can control the integration](#who-can-control-the-integration) |
 | Allow insecure local HTTP authentication (testing only) | on / off | off | See below |
+
+#### Who can control the integration
+
+Home Assistant lets every user press any button, flip any switch or change any number, unless an entity permission policy says otherwise, and Home Assistant has no screen to write such policies. If your child has a Home Assistant account, they could otherwise lift their own limits from the integration's entities.
+
+The option **Users allowed to control Microsoft Family Safety** closes that gap:
+
+- **Empty** (default): nothing changes, every user can use the buttons and settings.
+- **Some users ticked**: only they and the administrators can. Any other account is refused, with a warning in the log, on every button, switch, daily limit and time window of the integration, and on every `microsoft_family_safety.*` action.
+- Automations and scripts started by Home Assistant itself are never affected. A script started by a person from the dashboard runs with that person's rights.
+
+Give the child a **non-administrator** account and tick the parents: an administrator can change this option, so a child with an administrator account bypasses it. The child still sees the entities (Home Assistant cannot hide them per user) but can no longer use them. Changing the option takes effect immediately, without reloading the integration.
 
 #### Xbox and the web session
 

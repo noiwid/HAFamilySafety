@@ -31,6 +31,9 @@ DEFAULT_PLATFORMS: Final = ["Windows"]
 # entry runs on the mobile refresh token only: no web sign-in, no stored
 # browser cookies, no Xbox entities.
 CONF_XBOX_FEATURES: Final = "xbox_features"
+# Users allowed to control the integration (see permissions.py). Empty =
+# everybody, as before.
+CONF_ALLOWED_USERS: Final = "allowed_users"
 DEFAULT_XBOX_FEATURES: Final = True
 
 # Days of week, in Microsoft API order (index 0 = Sunday)
