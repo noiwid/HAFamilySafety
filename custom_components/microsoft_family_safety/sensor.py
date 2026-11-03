@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -207,13 +208,23 @@ class FamilySafetyDeviceSensor(CoordinatorEntity, SensorEntity):
                 manufacturer="Microsoft",
             )
         account_id = device_data.get("account_id")
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={(DOMAIN, self._device_id)},
             name=device_data.get(ATTR_DEVICE_NAME, "Unknown Device"),
             manufacturer=device_data.get("device_make", "Unknown"),
             model=device_data.get("device_model"),
-            via_device=(DOMAIN, account_id) if account_id else None,
         )
+        if account_id:
+            # `via_device` is deprecated (removed in HA 2027.8): the link now
+            # needs the registry id of the child's device. The account sensors
+            # fill in its name and model; creating it bare here only
+            # guarantees it exists whatever the order entities are added in.
+            parent = dr.async_get(self.hass).async_get_or_create(
+                config_entry_id=self.coordinator.entry.entry_id,
+                identifiers={(DOMAIN, account_id)},
+            )
+            info["via_device_id"] = parent.id
+        return info
 
 
 class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):

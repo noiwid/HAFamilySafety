@@ -22,8 +22,7 @@ from homeassistant.helpers.httpx_client import create_async_httpx_client
 from .api_client import FamilySafetyWebAPI
 
 _LOGGER = logging.getLogger(__name__)
-# Same marker used by _pyfamilysafety_compat so its aiohttp IPv4 patch skips us.
-_TRANSPORT_MARKER = "_hafs_ipv4_threaded_web_transport_patch"
+_TRANSPORT_MARKER = "_hafs_httpx_web_transport_patch"
 
 
 def _make_bot_manager_eviction_hook(cookies: httpx.Cookies):

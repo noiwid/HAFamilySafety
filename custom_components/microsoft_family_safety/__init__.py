@@ -1,7 +1,7 @@
 """The Microsoft Family Safety integration."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
 
 import voluptuous as vol
@@ -14,6 +14,7 @@ from homeassistant.exceptions import (
     HomeAssistantError,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ALL_SERVICES,
@@ -153,14 +154,24 @@ SERVICE_UNLOCK_ACCOUNT_SCHEMA = vol.Schema({
 SERVICE_REQUEST_REAUTH_SCHEMA = vol.Schema({})
 
 
-def _get_coordinator(hass: HomeAssistant) -> FamilySafetyDataUpdateCoordinator | None:
-    """Get the first available coordinator."""
-    if DOMAIN not in hass.data:
-        return None
-    for coordinator in hass.data[DOMAIN].values():
-        if isinstance(coordinator, FamilySafetyDataUpdateCoordinator):
+def _get_coordinator(
+    hass: HomeAssistant, account_id: str | None = None
+) -> FamilySafetyDataUpdateCoordinator | None:
+    """The coordinator whose roster holds ``account_id``, else the first one.
+
+    With two Microsoft accounts configured, each entry has its own token: a
+    call sent to the wrong one is refused by Microsoft.
+    """
+    coordinators = [
+        c for c in hass.data.get(DOMAIN, {}).values()
+        if isinstance(c, FamilySafetyDataUpdateCoordinator)
+    ]
+    for coordinator in coordinators:
+        if account_id is not None and str(account_id) in (
+            str(k) for k in ((coordinator.data or {}).get("accounts") or {})
+        ):
             return coordinator
-    return None
+    return coordinators[0] if coordinators else None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -232,7 +243,7 @@ def _register_services(hass: HomeAssistant) -> None:
         (SERVICE_LOCK_PLATFORM, SERVICE_LOCK_PLATFORM_SCHEMA, "async_lock_platform",
          lambda d: (
              d["account_id"], d["platform"],
-             datetime.now() + timedelta(hours=d.get("duration_hours", 24)),
+             dt_util.now() + timedelta(hours=d.get("duration_hours", 24)),
          )),
         (SERVICE_UNLOCK_PLATFORM, SERVICE_UNLOCK_PLATFORM_SCHEMA, "async_unlock_platform",
          lambda d: (d["account_id"], d["platform"])),
@@ -287,7 +298,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     def make_handler(method_name, extract_args):
         async def handler(call: ServiceCall) -> None:
-            coordinator = _get_coordinator(hass)
+            coordinator = _get_coordinator(hass, call.data.get("account_id"))
             if coordinator is None:
                 raise HomeAssistantError("No Microsoft Family Safety coordinator available")
             try:
