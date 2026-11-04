@@ -40,7 +40,8 @@
         "description": "Connectez-vous avec le compte Microsoft qui gère la famille, et répondez **Oui** quand Microsoft demande « Rester connecté ? ». Laissez la fenêtre d'authentification ouverte : une fois la connexion visible terminée, Home Assistant passe sur un écran d'attente pendant que la session Family et le jeton mobile sont établis."
       },
       "check_proxy": {
-        "title": "Session web Microsoft Family"
+        "title": "Session web Microsoft Family",
+        "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
       },
       "auth_success": {
         "title": "Connexion Microsoft Family Safety terminée",
@@ -71,12 +72,6 @@
     },
     "progress": {
       "family_sso": "La connexion Microsoft est terminée. Home Assistant finalise la session Family dans la fenêtre ouverte et récupère le jeton mobile. Cela peut prendre jusqu'à 60 secondes environ. Laissez la fenêtre Microsoft ouverte ; aucune action n'est requise."
-    },
-    "check_mobile_proxy": {
-      "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
-    },
-    "check_proxy": {
-      "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
     }
   },
   "options": {
