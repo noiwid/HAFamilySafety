@@ -2032,6 +2032,19 @@ class FamilySafetyWebAPI:
         )
         return True
 
+    async def set_mobile_xbox_screentime_intervals(
+        self, child_id: str, day_of_week: int, allowed_intervals: list[bool]
+    ) -> bool:
+        if len(allowed_intervals) != 48 or not all(
+            isinstance(value, bool) for value in allowed_intervals
+        ):
+            raise ValueError("allowed_intervals must contain exactly 48 booleans")
+        await self._patch_mobile_day(
+            child_id, day_of_week,
+            intervals=self._slots_to_intervals(allowed_intervals), platform="Xbox",
+        )
+        return True
+
     async def _patch_mobile_day(
         self,
         child_id: str,
@@ -2042,11 +2055,33 @@ class FamilySafetyWebAPI:
         platform: str = "Windows",
     ) -> None:
         payload = await self._get_mobile_schedules(child_id)
+        if platform == "Xbox":
+            matches = [
+                schedule for schedule in payload.get("schedules") or []
+                if isinstance(schedule, dict)
+                and str(schedule.get("appliesTo")).lower() == "xbox"
+            ]
+            if payload.get("mode") != "PerDeviceType" or len(matches) != 1:
+                raise FamilySafetyWebAPIError("A separate, unambiguous Xbox schedule is required")
         schedule = self._mobile_platform_schedule(payload, platform)
         if schedule is None:
             raise FamilySafetyWebAPIError(f"No {platform} schedule in the mobile response")
         day = DAY_KEYS[day_of_week]
         current = (schedule.get("dailyRestrictions") or {}).get(day) or {}
+        if platform == "Xbox":
+            if (
+                not isinstance(current, dict)
+                or type(current.get("allowance")) is not int
+                or current["allowance"] < 0
+                or not isinstance(current.get("allottedIntervals"), list)
+                or any(
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("begin"), str)
+                    or not isinstance(item.get("end"), str)
+                    for item in current["allottedIntervals"]
+                )
+            ):
+                raise FamilySafetyWebAPIError("A complete Xbox day is required to preserve its other field")
         body = {
             "dailyRestrictions": {
                 day: {
