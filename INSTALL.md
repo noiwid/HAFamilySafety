@@ -1,12 +1,12 @@
 # Microsoft Family Safety - Installation Guide
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=Integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=Integration)
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
-  - [HACS (Recommended)](#hacs-recommended)
+  - [Marketplace (Recommended)](#marketplace-recommended)
   - [Manual Installation](#manual-installation)
 - [Configuration](#configuration)
 - [Options](#options)
@@ -20,7 +20,7 @@
 
 - **Home Assistant** 2024.1.0 or newer (any installation type: OS, Supervised, Container, Core)
 - A Home Assistant URL reachable from your browser over **HTTPS**. If your instance is HTTP-only on the local network, see [Insecure local HTTP](#insecure-local-http)
-- **HACS** installed ([install guide](https://hacs.xyz/docs/setup/download)) -- recommended
+- The **Marketplace** -- recommended. It is built into Home Assistant since 2026.11; before that it is a separate install called HACS ([install guide](https://hacs.xyz/docs/setup/download))
 - **Microsoft account** with parent/organizer role in a Family Safety group, with at least one child account and monitored device
 - **Python dependencies:** `pyfamilysafety==1.1.2`, `cryptography>=3.4.8` (installed automatically)
 
@@ -32,16 +32,10 @@
 
 ## Installation
 
-### HACS (Recommended)
+### Marketplace (Recommended)
 
-1. Open **HACS** > **Integrations**.
-2. Click the three-dot menu in the top-right corner and select **Custom repositories**.
-3. Add the repository:
-   - **URL:** `https://github.com/noiwid/HAFamilySafety`
-   - **Category:** Integration
-4. Click **Add**, then close the dialog.
-5. Click **+ Explore & Download Repositories**, search for **Microsoft Family Safety**, and download it.
-6. Restart Home Assistant: **Settings > System > Restart**.
+1. Go to **Settings > Marketplace > Browse**, search for **Microsoft Family Safety**, and install it.
+2. Restart Home Assistant: **Settings > System > Restart**.
 
 ### Manual Installation
 
@@ -239,7 +233,7 @@ For the web session (Xbox ticked): the account page session lapses about once a 
 
 ### Dashboard card
 
-A ready-made per-child card ships in [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) (decluttering template) with a full example view in [`examples/dashboard.yaml`](examples/dashboard.yaml). It needs the HACS frontend cards `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod` and `mushroom`. See the README section *Dashboard card* for the variables to fill in.
+A ready-made per-child card ships in [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) (decluttering template) with a full example view in [`examples/dashboard.yaml`](examples/dashboard.yaml). It needs the Marketplace dashboard cards `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod` and `mushroom`. See the README section *Dashboard card* for the variables to fill in.
 
 ### Debug Logging
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two components for **Microsoft Family Safety** in Home Assistant, shipped from one repo:
 
-- `custom_components/microsoft_family_safety/` — the HACS **integration** (Python, HA-side). Domain `microsoft_family_safety`. **This is the whole product in the normal case**: it authenticates natively and talks to both Microsoft APIs itself.
+- `custom_components/microsoft_family_safety/` — the Marketplace **integration** (Python, HA-side). Domain `microsoft_family_safety`. **This is the whole product in the normal case**: it authenticates natively and talks to both Microsoft APIs itself.
 - `familysafety-playwright/` — the **legacy auth add-on**: a FastAPI service that drives a Chromium (Playwright) to hold an authenticated Microsoft browser session. Shipped both as an HA OS add-on and as a standalone Docker image. Since native authentication landed it is a **fallback**, kept for existing installs and for cases where the native flow cannot run.
 
 They are versioned and released together (integration `manifest.json` and add-on `config.json` must be at the same version; bump both when cutting a release). There is **no linter config**, and the only automated tests cover the allowed-users option (`tests/`, run in CI); everything that talks to Microsoft is verified manually against a real Microsoft Family Safety account.
