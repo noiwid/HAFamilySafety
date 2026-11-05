@@ -1323,13 +1323,17 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return result
 
         _LOGGER.info(
-            "Microsoft Family Safety reauthentication completed; updating config entry"
+            "Microsoft Family Safety reauthentication completed; updating and reloading config entry"
         )
-        return self.async_update_and_abort(
+        # Same reload as above: a coordinator loaded without web credentials (Xbox
+        # just ticked) would otherwise never see them and ask to sign in again.
+        result = self.async_update_and_abort(
             entry,
             data_updates=updates,
             options=self._pending_options or entry.options,
         )
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return result
 
     async def async_step_auth(
         self, user_input: dict[str, Any] | None = None
