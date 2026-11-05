@@ -234,8 +234,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Account ids reach the coordinator as int (from the mobile API roster)
         and as str (from the web API and from service calls), while JSON object
         keys are always str. Without normalizing, a restore point saved before
-        a reload became invisible afterwards: `1055519684390826 in
-        {"1055519684390826": ...}` is False, so unlock believed there was
+        a reload became invisible afterwards: `1234567890123456 in
+        {"1234567890123456": ...}` is False, so unlock believed there was
         nothing to restore and overwrote the schedule with its default.
         """
         return str(account_id)
