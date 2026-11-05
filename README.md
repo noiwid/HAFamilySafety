@@ -1,7 +1,7 @@
 # <img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/custom_components/microsoft_family_safety/brand/icon.png" alt="Microsoft Family Safety" width="30" > Microsoft Family Safety for Home Assistant
 
 [![GitHub Release][releases-shield]][releases]
-[![HACS][hacs-shield]][hacs]
+[![Marketplace][marketplace-shield]][marketplace]
 [![License][license-shield]][license]
 [![Buy Me A Beer](https://img.shields.io/badge/Buy%20me%20a%20beer-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/noiwid)
 
@@ -141,14 +141,11 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 
 ### Step 1 — Install the Integration
 
-#### Via HACS (Recommended)
+#### Via the Marketplace (Recommended)
 
-1. Open **HACS** in Home Assistant
-2. Go to **Integrations** and click the three-dot menu in the top right
-3. Select **Custom repositories**
-4. Add `https://github.com/noiwid/HAFamilySafety` with category **Integration**
-5. Search for **Microsoft Family Safety** in HACS and click **Download**
-6. Restart Home Assistant
+1. Go to **Settings > Marketplace > Browse**
+2. Search for **Microsoft Family Safety** and install it
+3. Restart Home Assistant
 
 #### Manual Installation
 
@@ -625,7 +622,7 @@ Two files:
 - [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) — the `fs_child` template only.
 - [`examples/dashboard.yaml`](examples/dashboard.yaml) — a full example view instantiating it with placeholder entities.
 
-**Required HACS frontend cards:** `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
+**Required Marketplace dashboard cards:** `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
 
 Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock` and `title`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
 
@@ -918,5 +915,5 @@ When reporting an issue, please include: HA version, integration version, whethe
 [releases]: https://github.com/noiwid/HAFamilySafety/releases
 [license-shield]: https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge
 [license]: LICENSE
-[hacs-shield]: https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge
-[hacs]: https://github.com/hacs/integration
+[marketplace-shield]: https://img.shields.io/badge/Marketplace-Default-41BDF5.svg?style=for-the-badge
+[marketplace]: https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=integration

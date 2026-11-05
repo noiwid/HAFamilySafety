@@ -1,6 +1,6 @@
 # Microsoft Family Safety - Lovelace card (decluttering template)
 #
-# One clean panel per child. Required HACS frontend cards:
+# One clean panel per child. Required Marketplace dashboard cards:
 #   decluttering-card, button-card, vertical-stack-in-card, card-mod, mushroom
 # Paste this decluttering_templates: block into your dashboard (one such key per
 # dashboard - merge, do not duplicate), then add one custom:decluttering-card per child.

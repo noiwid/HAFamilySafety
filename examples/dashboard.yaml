@@ -1,6 +1,6 @@
 # Microsoft Family Safety - full example dashboard
 #
-# Import via Settings > Dashboards > Raw configuration editor. Install the HACS
+# Import via Settings > Dashboards > Raw configuration editor. Install the Marketplace
 # cards listed in family-safety-card.yaml first. Replace the placeholder variables:
 #   child   sensor/number/time entity prefix (sensor.<child>_screen_time)
 #   lock    switch/button entity prefix     (switch.<lock>_lock)
