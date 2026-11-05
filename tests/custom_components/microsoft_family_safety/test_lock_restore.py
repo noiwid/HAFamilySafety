@@ -9,11 +9,13 @@ issue #23 plus the ones added after the 2026-11 audit.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+from pyfamilysafety.exceptions import AggregatorException
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.microsoft_family_safety.const import DAY_KEYS, DOMAIN
@@ -174,3 +176,25 @@ async def test_lock_and_unlock_do_not_interleave(coordinator):
     await lock_task
     await unlock_task
     assert [h for _, h, _ in web.allowances] == [0] * 7 + [2] * 7
+
+
+async def test_platform_override_judges_a_microsoft_500_by_the_real_state(coordinator):
+    account = MagicMock(override_device=AsyncMock(side_effect=AggregatorException()))
+    coordinator._accounts[CHILD] = account
+    state = coordinator.data["accounts"][CHILD]
+    state["blocked_platforms"] = []
+
+    # Nothing changed on Microsoft's side: the error reaches the user.
+    coordinator.async_refresh = AsyncMock()
+    with pytest.raises(HomeAssistantError):
+        await coordinator.async_lock_platform(CHILD, "Windows")
+
+    # Applied despite the 500, both ways: no error.
+    coordinator.async_refresh = AsyncMock(
+        side_effect=lambda: state.update(blocked_platforms=["Windows"])
+    )
+    await coordinator.async_lock_platform(CHILD, "Windows")
+    coordinator.async_refresh = AsyncMock(
+        side_effect=lambda: state.update(blocked_platforms=[])
+    )
+    await coordinator.async_unlock_platform(CHILD, "Windows")

@@ -14,7 +14,7 @@ from pyfamilysafety.account import Account
 from pyfamilysafety.application import Application
 from pyfamilysafety.device import Device
 from pyfamilysafety.enum import OverrideTarget, OverrideType
-from pyfamilysafety.exceptions import HttpException
+from pyfamilysafety.exceptions import AggregatorException, HttpException
 from yarl import URL
 
 from homeassistant.config_entries import ConfigEntry
@@ -687,11 +687,37 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Cannot lock {platform}: it can only be locked through the Family "
                 "web session, which is not available. Re-authenticate the integration."
             )
-        target = OverrideTarget.from_pretty(platform)
         # pyfamilysafety formats the value with a literal "Z": give it real UTC.
-        await account.override_device(
-            target, OverrideType.UNTIL, dt_util.as_utc(until).replace(tzinfo=None)
+        await self._override_platform_mobile(
+            account, account_id, platform, OverrideType.UNTIL,
+            dt_util.as_utc(until).replace(tzinfo=None),
         )
+
+    async def _override_platform_mobile(
+        self,
+        account: Account,
+        account_id: str,
+        platform: str,
+        override: OverrideType,
+        until: datetime | None = None,
+    ) -> None:
+        """Send a mobile override; judge a Microsoft 500 by the state it leaves."""
+        try:
+            await account.override_device(
+                OverrideTarget.from_pretty(platform), override, until
+            )
+        except AggregatorException as err:
+            # Seen on 2026-11-05: HTTP 500 "aggregator error", override applied anyway.
+            await self.async_refresh()
+            accounts = (self.data or {}).get("accounts", {})
+            blocked = accounts.get(str(account_id), {}).get("blocked_platforms", [])
+            if (platform in blocked) != (override == OverrideType.UNTIL):
+                raise HomeAssistantError(
+                    f"Microsoft answered an error and {platform} has not changed yet; "
+                    "check its state after the next update before trying again."
+                ) from err
+            _LOGGER.info("Microsoft answered 500 but the %s override was applied", platform)
+            return
         await self.async_request_refresh()
 
     async def async_unlock_platform(self, account_id: str, platform: str) -> None:
@@ -738,11 +764,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Cannot unlock {platform}: it can only be unlocked through the Family "
                 "web session, which is not available. Re-authenticate the integration."
             )
-        await account.override_device(
-            OverrideTarget.from_pretty(platform), OverrideType.CANCEL
+        await self._override_platform_mobile(
+            account, account_id, platform, OverrideType.CANCEL
         )
         self._platform_override_until.pop((str(account_id), platform.lower()), None)
-        await self.async_request_refresh()
 
     async def async_approve_request(
         self, request_id: str, extension_time: int = 3600
