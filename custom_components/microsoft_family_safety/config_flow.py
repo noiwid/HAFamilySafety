@@ -1271,12 +1271,16 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "Microsoft Family Safety sign-in completed for an already configured "
             "account; updating and reloading the existing entry"
         )
-        return self.async_update_reload_and_abort(
+        # The update listener only reloads on an options change; new credentials
+        # need one too, and core no longer lets the helper do it for us (2026.12).
+        result = self.async_update_and_abort(
             entry,
             data_updates=updates,
             options=self._pending_options or entry.options,
             reason="reauth_successful",
         )
+        self.hass.config_entries.async_schedule_reload(entry.entry_id)
+        return result
 
     async def async_step_reauth_success(
         self, user_input: dict[str, Any] | None = None
@@ -1310,11 +1314,13 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "Microsoft Family Safety reconfiguration completed; "
                 "updating and reloading config entry"
             )
-            return self.async_update_reload_and_abort(
+            result = self.async_update_and_abort(
                 entry,
                 data_updates=updates,
                 options=self._pending_options or entry.options,
             )
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
+            return result
 
         _LOGGER.info(
             "Microsoft Family Safety reauthentication completed; updating config entry"

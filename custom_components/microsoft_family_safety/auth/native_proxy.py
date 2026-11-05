@@ -8,12 +8,13 @@ has been reached.  Passwords and MFA values are never persisted or logged.
 from __future__ import annotations
 
 import asyncio
+import base64
 import html
 import json
 import logging
-import contextvars
 import re
 import secrets
+import time
 from http.cookies import SimpleCookie
 from collections.abc import Mapping
 from typing import Any
@@ -24,7 +25,9 @@ from aiohttp import web
 from yarl import URL
 
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.security_filter import FILTERS
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import UnknownFlow
 from homeassistant.helpers.httpx_client import create_async_httpx_client
 
 from ..api_client import _BOT_MANAGER_COOKIE_NAMES
@@ -36,17 +39,27 @@ AUTH_PROXY_PATH = "/auth/microsoft_family_safety/proxy"
 AUTH_CALLBACK_PATH = "/auth/microsoft_family_safety/callback"
 _PROXY_REGISTRY = f"{DOMAIN}_native_auth_proxies"
 _VIEWS_REGISTERED = f"{DOMAIN}_native_auth_views_registered"
-_FILTER_BYPASS_INSTALLED = f"{DOMAIN}_native_auth_filter_bypass"
+_CALLBACK_TOKENS = f"{DOMAIN}_native_auth_callback_tokens"
 _HOST_MARKER = "__ms_host__"
 
-# Authentication hosts are discovered dynamically, but only inside these
-# Microsoft-owned namespace roots.  This avoids a brittle per-host allow-list
-# while preventing the auth endpoint from becoming a general-purpose proxy.
-_TRUSTED_MICROSOFT_DOMAIN_ROOTS = (
-    "live.com",
-    "microsoft.com",
-    "microsoftonline.com",
+#: The only hosts served from the Home Assistant origin: the pages of the sign-in
+#: itself. Their scripts run same-origin with the frontend, so nothing else gets
+#: in. Assets, telemetry and fingerprinting hosts stay direct browser requests.
+_PROXIED_HOSTS = frozenset(
+    {
+        "account.live.com",
+        "account.microsoft.com",
+        "login.live.com",
+        "login.microsoft.com",
+        "login.microsoftonline.com",
+    }
 )
+#: A redirect to these leaves the proxy for the real site (support and privacy
+#: links, sign-up); anywhere else is refused.
+_MICROSOFT_DOMAIN_ROOTS = ("live.com", "microsoft.com", "microsoftonline.com")
+#: Query parameter carrying a whole upstream query, see _hide_query_from_filter.
+_HIDDEN_QUERY = "__ms_q"
+_PROXY_LIFETIME_SECONDS = 600
 
 _AUTH_COOKIE_NAMES = {
     "MSPAuth",
@@ -99,18 +112,66 @@ _REWRITABLE_ATTRS = (
 )
 
 
-def _is_allowed_host(host: str | None) -> bool:
-    """Return whether host is inside a trusted Microsoft auth namespace."""
-    if not host:
-        return False
+def _normalized_host(host: str | None) -> str:
     # Microsoft's MSAL sign-in page builds some links with an explicit port
     # (login.microsoftonline.com:443); the port is not part of the host.
-    normalized = host.split(":", 1)[0].rstrip(".").lower()
+    return (host or "").split(":", 1)[0].rstrip(".").lower()
+
+
+def _is_allowed_host(host: str | None) -> bool:
+    """Return whether host is one of the sign-in hosts served through the proxy."""
+    return _normalized_host(host) in _PROXIED_HOSTS
+
+
+def _is_microsoft_host(host: str | None) -> bool:
+    """Return whether host belongs to a Microsoft domain."""
+    normalized = _normalized_host(host)
     return any(
         normalized == root or normalized.endswith(f".{root}")
-        for root in _TRUSTED_MICROSOFT_DOMAIN_ROOTS
+        for root in _MICROSOFT_DOMAIN_ROOTS
     )
 
+
+def _trips_security_filter(path_and_query: str) -> bool:
+    """Return whether Home Assistant's security filter would refuse this request."""
+    previous = None
+    while path_and_query != previous:
+        previous, path_and_query = path_and_query, unquote(path_and_query)
+    return FILTERS.search(path_and_query) is not None
+
+
+def _hide_query_from_filter(url: str) -> str:
+    """Carry a query the security filter refuses as one opaque parameter.
+
+    Microsoft's silent-SSO redirects hold values such as ``epctrc=/w/...`` that
+    look like a file injection, so the browser would get a bare 400 on its way
+    back to the proxy. The query only travels through Home Assistant to reach
+    Microsoft, and _reveal_query restores it before that. The filter stays in
+    force: it scans the encoded form, and Home Assistant itself never reads it.
+    """
+    parts = urlsplit(url)
+    if not parts.query or not _trips_security_filter(f"{parts.path}?{parts.query}"):
+        return url
+    hidden = base64.urlsafe_b64encode(parts.query.encode()).decode().rstrip("=")
+    return urlunsplit(parts._replace(query=f"{_HIDDEN_QUERY}={hidden}"))
+
+
+def _reveal_query(hidden: str) -> str:
+    """Return the query that _hide_query_from_filter encoded."""
+    padded = hidden + "=" * (-len(hidden) % 4)
+    return base64.b64decode(padded, altchars=b"-_", validate=True).decode()
+
+
+def _reveal_url_query(url: str) -> str:
+    """Restore a hidden query inside a full URL; anything else is returned as is."""
+    parts = urlsplit(url)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    if len(pairs) != 1 or pairs[0][0] != _HIDDEN_QUERY:
+        return url
+    try:
+        return urlunsplit(parts._replace(query=_reveal_query(pairs[0][1])))
+    except ValueError:
+        return url
 
 
 def _extract_family_request_verification_token(page: str) -> str | None:
@@ -163,7 +224,11 @@ class MicrosoftFamilyAuthProxy:
     ) -> None:
         self.hass = hass
         self.token = token or secrets.token_urlsafe(24)
-        self.callback_url = callback_url
+        # The token proves to the callback view that the browser went through
+        # this proxy; server-side uses have no callback.
+        self.callback_url = (
+            str(URL(callback_url).update_query(token=self.token)) if callback_url else ""
+        )
         self.proxy_path = f"{AUTH_PROXY_PATH}/{self.token}"
         self._start_url = URL(start_url)
         self._last_url = self._start_url
@@ -355,6 +420,10 @@ class MicrosoftFamilyAuthProxy:
         )
 
     @property
+    def flow_id(self) -> str | None:
+        return self._flow_id
+
+    @property
     def access_path(self) -> str:
         return self.proxy_path
 
@@ -432,11 +501,11 @@ class MicrosoftFamilyAuthProxy:
         """Remember a dynamically discovered trusted Microsoft auth host."""
         if not _is_allowed_host(host):
             return False
-        normalized = str(host).split(":", 1)[0].rstrip(".").lower()
+        normalized = _normalized_host(host)
         if normalized not in self._discovered_hosts:
             self._discovered_hosts.add(normalized)
             _LOGGER.debug(
-                "Discovered trusted Microsoft auth host %s via %s",
+                "Proxying Microsoft auth host %s via %s",
                 normalized,
                 source,
             )
@@ -494,6 +563,11 @@ class MicrosoftFamilyAuthProxy:
                 )
 
         query_items = list(request.query.items())
+        if hidden := request.query.get(_HIDDEN_QUERY):
+            try:
+                query_items = parse_qsl(_reveal_query(hidden), keep_blank_values=True)
+            except ValueError as err:
+                raise web.HTTPBadRequest(text="Invalid proxied query") from err
 
         if query_items:
             proxy_origin = f"{request.scheme}://{request.host}"
@@ -524,7 +598,9 @@ class MicrosoftFamilyAuthProxy:
                 host = host.rstrip(".").lower()
                 if not self._remember_host(host, "deproxy"):
                     return value
-                return f"https://{host}/" + rest if slash else f"https://{host}/"
+                return _reveal_url_query(
+                    f"https://{host}/" + rest if slash else f"https://{host}/"
+                )
 
             # The root proxy URL represents the current upstream page. This is
             # needed when Microsoft derives postBackUrl from window.location.
@@ -739,9 +815,9 @@ class MicrosoftFamilyAuthProxy:
         proxy_origin = proxy_origin.rstrip("/")
         absolute_base, relative_base = self._proxy_bases(proxy_origin)
         if value.startswith(absolute_base + "/"):
-            return value
+            return _hide_query_from_filter(value)
         if value.startswith(relative_base + "/"):
-            return proxy_origin + value
+            return _hide_query_from_filter(proxy_origin + value)
 
         candidate = html.unescape(value)
         if candidate.startswith("//"):
@@ -763,7 +839,7 @@ class MicrosoftFamilyAuthProxy:
             proxied += f"?{parsed.query}"
         if parsed.fragment:
             proxied += f"#{parsed.fragment}"
-        return proxied
+        return _hide_query_from_filter(proxied)
 
     def _proxy_response_object(
         self,
@@ -838,8 +914,7 @@ class MicrosoftFamilyAuthProxy:
         body = attr_pattern.sub(attr_repl, body)
 
         # Dynamically rewrite absolute Microsoft URL literals in inline config.
-        # There is no per-host list: the host is accepted only if it belongs to a
-        # trusted Microsoft namespace. Keeping the result absolute preserves
+        # Only the sign-in hosts are rewritten. Keeping the result absolute preserves
         # Microsoft code that calls new URL(value) without a base URL.
         plain_url_prefix = re.compile(
             r"(?P<prefix>https?:)?//(?P<host>[A-Za-z0-9.-]+)",
@@ -873,22 +948,34 @@ class MicrosoftFamilyAuthProxy:
         proxy_path_js = json.dumps(self.proxy_path)
         proxy_origin_js = json.dumps(proxy_origin)
         host_js = json.dumps(current_host)
-        roots_js = json.dumps(list(_TRUSTED_MICROSOFT_DOMAIN_ROOTS))
+        hosts_js = json.dumps(sorted(_PROXIED_HOSTS))
+        hidden_js = json.dumps(_HIDDEN_QUERY)
         shim = f"""<script>
 (function(){{
-  const po={proxy_origin_js}, pp={proxy_path_js}, ch={host_js}, roots={roots_js};
+  const po={proxy_origin_js}, pp={proxy_path_js}, ch={host_js}, hosts={hosts_js}, hq={hidden_js};
   function trusted(h){{
-    h=(h||"").toLowerCase().replace(/\\.$/,"");
-    return roots.some(r=>h===r || h.endsWith("."+r));
+    return hosts.includes((h||"").toLowerCase().replace(/\\\\.$/,""));
+  }}
+  // Same rule as _hide_query_from_filter: Home Assistant's filter would refuse it.
+  const refused=/[a-z0-9_]=\\/([a-z0-9_.]\\/\\/?)+|\\.\\.\\/|proc\\/self\\/environ|<.*script.*>|union.*select.*\\(|union.*all.*select|concat.*\\(/i;
+  function hide(u){{
+    const q=u.indexOf("?");
+    if(q<0) return u;
+    const f=u.indexOf("#",q), end=f<0?u.length:f;
+    let d=u.slice(q+1,end);
+    try {{ for(let p;p!==d;) {{ p=d; d=decodeURIComponent(d); }} }} catch(e) {{}}
+    if(!refused.test(d)) return u;
+    const b=btoa(u.slice(q+1,end)).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,"");
+    return u.slice(0,q)+"?"+hq+"="+b+u.slice(end);
   }}
   function rw(u){{
     if(typeof u!=="string" || !u) return u;
-    if(u.startsWith(po+pp+"/")) return u;
-    if(u.startsWith(pp+"/")) return po+u;
+    if(u.startsWith(po+pp+"/")) return hide(u);
+    if(u.startsWith(pp+"/")) return hide(po+u);
     try {{
       const p=new URL(u,"https://"+ch+"/");
       if(!trusted(p.hostname)) return u;
-      return po+pp+"/{_HOST_MARKER}/"+p.hostname.toLowerCase()+p.pathname+p.search+p.hash;
+      return hide(po+pp+"/{_HOST_MARKER}/"+p.hostname.toLowerCase()+p.pathname+p.search+p.hash);
     }} catch(e) {{ return u; }}
   }}
   const fo=window.fetch;
@@ -916,6 +1003,12 @@ class MicrosoftFamilyAuthProxy:
     Location.prototype.assign=function(url){{ return la.call(this,rw(String(url))); }};
     Location.prototype.replace=function(url){{ return lr.call(this,rw(String(url))); }};
   }} catch(e) {{}}
+  // location.href= cannot be wrapped; the Navigation API sees it where available.
+  if(window.navigation) navigation.addEventListener("navigate",e=>{{
+    if(e.formData || !e.cancelable) return;
+    const to=hide(e.destination.url);
+    if(to!==e.destination.url){{ e.preventDefault(); location.replace(to); }}
+  }});
   for(const n of ["pushState","replaceState"]){{
     try {{
       const ho=history[n].bind(history);
@@ -1189,6 +1282,27 @@ class MicrosoftFamilyAuthProxy:
             current.path,
         )
 
+        def _next_family_bootstrap_target() -> str | None:
+            # The supplied 2026-08-12 browser HAR reaches the authenticated Family
+            # SPA through complete-silent-signin -> /family/windows/home/direct.
+            # The hidden token from that page is then reused by successful Family
+            # API calls. Reproduce that route first so Microsoft can establish any
+            # Family-specific compact-ticket/session state before token capture.
+            targets = (
+                "https://account.microsoft.com/family/windows/home/direct?fref=coldstartv2&refd=account.microsoft.com",
+                "https://account.microsoft.com/family/windows/coldstart?refd=account.microsoft.com",
+                "https://account.microsoft.com/family/home",
+            )
+            if self._family_bootstrap_attempts >= len(targets):
+                return None
+            target = targets[self._family_bootstrap_attempts]
+            self._family_bootstrap_attempts += 1
+            proxied = self._proxyize_url(
+                target, str(current), proxy_origin, allow_relative=False,
+                source="family browser bootstrap",
+            )
+            return proxied if proxied != target else None
+
         # Preserve Microsoft's redirect state in the real browser. Silent SSO
         # callbacks rely on browser-visible navigation/location semantics;
         # following redirects inside Home Assistant collapses that state and can
@@ -1199,8 +1313,36 @@ class MicrosoftFamilyAuthProxy:
                 raise web.HTTPBadGateway(text="Microsoft redirect did not include Location")
             resolved = URL(urljoin(str(current), location))
             if not self._remember_host(resolved.host, "upstream redirect"):
-                _LOGGER.warning("Microsoft auth redirected to unexpected host %s", resolved.host)
-                raise web.HTTPBadGateway(text="Unexpected Microsoft authentication redirect")
+                if not _is_microsoft_host(resolved.host):
+                    _LOGGER.warning("Microsoft auth redirected to unexpected host %s", resolved.host)
+                    raise web.HTTPBadGateway(text="Unexpected Microsoft authentication redirect")
+                # The marketing page ends a Family landing route: never serve it,
+                # go on with the next route in the same tab.
+                if (
+                    self._completion_mode == "web"
+                    and resolved.host == "www.microsoft.com"
+                    and "family-safety" in resolved.path
+                ):
+                    next_target = _next_family_bootstrap_target()
+                    if next_target:
+                        _LOGGER.debug(
+                            "Family browser bootstrap reached Microsoft marketing page; "
+                            "trying next Family landing route in same tab (%d/3)",
+                            self._family_bootstrap_attempts,
+                        )
+                        raise web.HTTPFound(location=next_target)
+                    self._mark_complete()
+                    _LOGGER.warning(
+                        "Family browser bootstrap exhausted all landing routes on the "
+                        "Microsoft marketing page; completing Home Assistant authentication "
+                        "without a Family antiforgery token"
+                    )
+                    raise web.HTTPFound(location=self.callback_url)
+                # Named so that a sign-in stuck on a new Microsoft host can be reported.
+                _LOGGER.info(
+                    "Microsoft auth redirect leaves the proxy for %s", resolved.host
+                )
+                raise web.HTTPFound(location=str(resolved))
 
             # The mobile API's registered desktop redirect is terminal for this
             # proxy. Capture the code/error before the browser navigates there.
@@ -1327,27 +1469,6 @@ class MicrosoftFamilyAuthProxy:
                 final.path, response.status_code, self._family_bootstrap_attempts,
             )
 
-        def _next_family_bootstrap_target() -> str | None:
-            # The supplied 2026-08-12 browser HAR reaches the authenticated Family
-            # SPA through complete-silent-signin -> /family/windows/home/direct.
-            # The hidden token from that page is then reused by successful Family
-            # API calls. Reproduce that route first so Microsoft can establish any
-            # Family-specific compact-ticket/session state before token capture.
-            targets = (
-                "https://account.microsoft.com/family/windows/home/direct?fref=coldstartv2&refd=account.microsoft.com",
-                "https://account.microsoft.com/family/windows/coldstart?refd=account.microsoft.com",
-                "https://account.microsoft.com/family/home",
-            )
-            if self._family_bootstrap_attempts >= len(targets):
-                return None
-            target = targets[self._family_bootstrap_attempts]
-            self._family_bootstrap_attempts += 1
-            proxied = self._proxyize_url(
-                target, str(final), proxy_origin, allow_relative=False,
-                source="family browser bootstrap",
-            )
-            return proxied if proxied != target else None
-
         if self._completion_mode == "web" and authenticated_account_page:
             next_target = _next_family_bootstrap_target()
             if next_target:
@@ -1367,28 +1488,6 @@ class MicrosoftFamilyAuthProxy:
             raise web.HTTPFound(location=self.callback_url)
 
         family_watchdog_target: str | None = None
-        if (
-            self._completion_mode == "web"
-            and response.status_code == 200
-            and final.host == "www.microsoft.com"
-            and "family-safety" in final.path
-        ):
-            next_target = _next_family_bootstrap_target()
-            if next_target:
-                _LOGGER.debug(
-                    "Family browser bootstrap reached Microsoft marketing page; "
-                    "trying next Family landing route in same tab (%d/3)",
-                    self._family_bootstrap_attempts,
-                )
-                raise web.HTTPFound(location=next_target)
-            self._mark_complete()
-            _LOGGER.warning(
-                "Family browser bootstrap exhausted all landing routes on the "
-                "Microsoft marketing page; completing Home Assistant authentication "
-                "without a Family antiforgery token"
-            )
-            raise web.HTTPFound(location=self.callback_url)
-
         # A Family landing route can start a second Microsoft silent-SSO round.
         # In a proxied top-level tab Microsoft occasionally leaves
         # complete-client-signin-oauth-silent rendered without performing the
@@ -1775,6 +1874,21 @@ async def _async_renotify_frontend(
         sent += 1
 
 
+def _callback_token_matches(hass: HomeAssistant, flow_id: str, token: str) -> bool:
+    """Return whether token is a live proxy token issued for this flow."""
+    matches = False
+    now = time.monotonic()
+    # Every entry is compared: this view has no Home Assistant authentication.
+    for known, (known_flow_id, expires) in hass.data.get(_CALLBACK_TOKENS, {}).items():
+        if (
+            secrets.compare_digest(known.encode(), token.encode())
+            and known_flow_id == flow_id
+            and now < expires
+        ):
+            matches = True
+    return matches
+
+
 class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
     """Resume the config flow once Microsoft authentication is complete."""
 
@@ -1787,11 +1901,13 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
         flow_id = request.query.get("flow_id")
         if not flow_id:
             raise web.HTTPBadRequest(text="Missing flow_id")
+        if not _callback_token_matches(hass, flow_id, request.query.get("token", "")):
+            raise web.HTTPForbidden(text="Invalid authentication callback")
         try:
-            from homeassistant.data_entry_flow import UnknownFlow
-
             try:
                 before = hass.config_entries.flow.async_get(flow_id)
+                if before.get("handler") != DOMAIN:
+                    raise web.HTTPForbidden(text="Invalid authentication callback")
                 before_step = before.get("step_id")
                 before_source = (before.get("context") or {}).get("source")
             except UnknownFlow:
@@ -1876,6 +1992,8 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
                 in_progress,
             )
             raise web.HTTPBadRequest(text="Authentication flow is no longer active") from err
+        except web.HTTPException:
+            raise
         except Exception as err:  # Flow may already have been closed/expired.
             _LOGGER.exception(
                 "Could not resume native auth flow %s (%s)",
@@ -1984,103 +2102,10 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
         )
 
 
-#: Verdict of the path scan for the current request (per asyncio context):
-#: ``None`` before the path was scanned, then whether it is a proxy route. HA's
-#: security filter scans ``request.path`` first and ``request.query_string``
-#: second, as two separate ``FILTERS.search()`` calls inside one middleware
-#: coroutine. Only the path scan may open the exemption: a query string that
-#: merely starts with the proxy prefix must not be exempted on another route.
-_PROXY_PATH_VERDICT: contextvars.ContextVar[bool | None] = contextvars.ContextVar(
-    f"{DOMAIN}_native_auth_proxy_path_verdict", default=None
-)
-
-
-class _ScopedSecurityFilter:
-    """Delegate to HA's security-filter regex, except for the auth proxy path.
-
-    Behaves like the compiled ``re.Pattern`` it wraps for every request on the
-    instance. Only a request whose *path* is under ``AUTH_PROXY_PATH`` is
-    exempted, and that exemption then also covers the query-string scan that
-    the middleware performs immediately afterwards for the same request.
-    """
-
-    _hafs_scoped_security_filter = True
-
-    def __init__(self, original: re.Pattern[str]) -> None:
-        self._original = original
-        self.pattern = original.pattern
-        self.flags = original.flags
-
-    def search(self, string: str, *args: Any, **kwargs: Any) -> re.Match[str] | None:
-        verdict = _PROXY_PATH_VERDICT.get()
-        if verdict is None:
-            # First scan of the request: the path. Decide and remember.
-            verdict = isinstance(string, str) and string.startswith(f"{AUTH_PROXY_PATH}/")
-            _PROXY_PATH_VERDICT.set(verdict)
-        else:
-            # Second scan: the query string of that same request.
-            _PROXY_PATH_VERDICT.set(None)
-        if verdict:
-            return None
-        return self._original.search(string, *args, **kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._original, name)
-
-
-def _install_security_filter_bypass(hass: HomeAssistant) -> None:
-    """Exempt only this integration's proxy routes from HA's security filter.
-
-    Home Assistant installs ``http.security_filter`` as the outermost aiohttp
-    middleware. It rejects any request whose *query string* matches a
-    file-injection heuristic ``[a-zA-Z0-9_]=/([a-z0-9_.]//?)+``. Microsoft's
-    silent Family SSO redirects carry OAuth parameters such as
-    ``epctrc=/w/V6cI...`` which match that heuristic, so the browser gets a bare
-    ``400 Bad Request`` before the proxy view is ever reached.
-
-    Percent-encoding the value does not help: ``request.query_string`` is the
-    already-decoded form, so the filter sees the decoded slashes either way.
-
-    aiohttp freezes ``app.middlewares`` once the HTTP server has started, and
-    this function runs from the config flow, long after that. Inserting a
-    middleware here therefore raises ``RuntimeError: Cannot modify frozen list``
-    (issues #39, #40, #41). Instead, wrap the module-level ``FILTERS`` regex
-    that the security-filter middleware consults on every request, so that it
-    reports no match for the auth proxy path and for that request's query
-    string, while every other request keeps the original filter untouched.
-
-    Scope is deliberately narrow:
-      * only ``AUTH_PROXY_PATH`` requests are affected — never the callback
-        (whose ``flow_id`` query is required and never matches the filter), and
-        never any other Home Assistant endpoint;
-      * the security-filter middleware itself is left registered and fully
-        active for the rest of the instance.
-    """
-    if hass.data.get(_FILTER_BYPASS_INSTALLED):
-        return
-
-    from homeassistant.components.http import security_filter as ha_security_filter
-
-    current = ha_security_filter.FILTERS
-    # Idempotent across config-entry reloads: the module object persists.
-    if getattr(current, "_hafs_scoped_security_filter", False):
-        hass.data[_FILTER_BYPASS_INSTALLED] = True
-        return
-
-    ha_security_filter.FILTERS = _ScopedSecurityFilter(current)
-    hass.data[_FILTER_BYPASS_INSTALLED] = True
-    _LOGGER.debug(
-        "Installed Microsoft Family auth proxy security-filter bypass "
-        "(scoped to %s/*, wrapping http.security_filter.FILTERS)",
-        AUTH_PROXY_PATH,
-    )
-
-
 def ensure_native_auth_views(hass: HomeAssistant) -> None:
     """Register the shared proxy/callback views once."""
     if hass.data.get(_VIEWS_REGISTERED):
         return
-    _install_security_filter_bypass(hass)
     hass.http.register_view(MicrosoftFamilyAuthorizationProxyView())
     hass.http.register_view(MicrosoftFamilyAuthorizationCallbackView())
     hass.data[_VIEWS_REGISTERED] = True
@@ -2090,9 +2115,16 @@ def ensure_native_auth_views(hass: HomeAssistant) -> None:
 def register_native_proxy(hass: HomeAssistant, proxy: MicrosoftFamilyAuthProxy) -> None:
     ensure_native_auth_views(hass)
     hass.data.setdefault(_PROXY_REGISTRY, {})[proxy.token] = proxy
+    # Kept apart from the registry: the browser's final callback can arrive after
+    # the flow has already closed this proxy.
+    now = time.monotonic()
+    tokens = hass.data.setdefault(_CALLBACK_TOKENS, {})
+    for known in [known for known, (_, expires) in tokens.items() if expires <= now]:
+        del tokens[known]
+    tokens[proxy.token] = (proxy.flow_id, now + _PROXY_LIFETIME_SECONDS)
 
     async def expire() -> None:
-        await asyncio.sleep(600)
+        await asyncio.sleep(_PROXY_LIFETIME_SECONDS)
         registry = hass.data.get(_PROXY_REGISTRY, {})
         if registry.pop(proxy.token, None) is proxy:
             _LOGGER.debug("Expired native Family auth proxy flow")

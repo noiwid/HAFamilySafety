@@ -188,7 +188,7 @@ No HTTPS Home Assistant URL is configured. Configure HTTPS, or enable [Insecure 
 
 ### The sign-in window returns "400 Bad Request"
 
-Home Assistant's `security_filter` middleware rejects query strings matching a file-injection pattern, and some of Microsoft's silent-SSO redirects (`epctrc=/w/...`) match it. The integration ships a workaround scoped to its own proxy routes only, but the problem is **intermittent** -- it depends on the OAuth path Microsoft picks. Retry the flow, and check the logs for `security_filter` entries.
+Home Assistant's `security_filter` middleware rejects query strings matching a file-injection pattern, and some of Microsoft's silent-SSO redirects (`epctrc=/w/...`) match it. The integration carries such a query encoded through Home Assistant and restores it before it reaches Microsoft. If you still see the error, retry the flow and check the logs for `security_filter` entries.
 
 ### "Microsoft authentication host not allowed"
 
@@ -262,8 +262,7 @@ Check logs at **Settings > System > Logs**. Include these logs when filing [issu
 - **OAuth 2.0 and browser sign-in:** Authentication uses Microsoft's own sign-in pages. Your password is never stored, never logged, and never persisted by the integration.
 - **The sign-in is proxied through Home Assistant.** Microsoft's login page is served from your Home Assistant origin, so the address bar shows your Home Assistant URL rather than `login.live.com` and you cannot check the Microsoft certificate visually. Only ever start the flow from Home Assistant itself.
 - **Stored credentials are not encrypted.** Microsoft session cookies, the Family antiforgery token and the OAuth refresh token are written to the config entry and to `.storage/` in **clear text**. The legacy add-on encrypted its cookie file with Fernet; the native path does not. Anyone able to read your configuration directory -- including anyone holding an unencrypted backup -- can extract a usable Microsoft session. Protect and encrypt your backups.
-- **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication; the only guard is a 24-byte random token in the URL. It only forwards to `live.com`, `microsoft.com` and `microsoftonline.com`, it lives at most **10 minutes**, and it is destroyed when the flow ends.
-- **Security filter:** the integration bypasses Home Assistant's `security_filter` query-string check **for its own proxy routes only**. The global filter stays active for every other endpoint.
+- **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication; the only guard is a 24-byte random token in the URL. It only serves the Microsoft sign-in hosts, the callback only accepts that token for its own flow, it lives at most **10 minutes**, and it is destroyed when the flow ends.
 - **Scope:** The integration only accesses Microsoft Family Safety data -- no access to email, files, or other services.
 - **Unofficial API:** This integration uses unofficial Microsoft Family Safety APIs. Use at your own risk.
 - **Local processing:** All data processing happens within your Home Assistant instance. Data is fetched from Microsoft servers; only tokens and cookies are persisted locally.

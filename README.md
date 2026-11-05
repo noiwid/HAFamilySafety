@@ -639,13 +639,17 @@ To add more children, add one `custom:decluttering-card` block per child in the 
 
 Home Assistant's built-in `security_filter` middleware rejects URLs whose query string looks like a file-injection attempt, using the pattern `[a-zA-Z0-9_]=/([a-z0-9_.]//?)+`. Some of Microsoft's silent-SSO redirects carry parameters such as `epctrc=/w/...`, which match that pattern, and the request is refused before the integration ever sees it.
 
-The integration ships a **narrowly scoped workaround**: for the authentication proxy routes only (`/auth/microsoft_family_safety/proxy/*`), the security filter reports no match, so those requests get through. Every other endpoint keeps the filter unchanged.
+The integration carries such a query in an encoded form on its way through Home Assistant and restores it before it reaches Microsoft. The filter itself is not changed.
 
-This problem is **intermittent** — it depends on which OAuth path Microsoft chooses for a given sign-in. If you still hit a 400 during authentication, retry the flow; check the Home Assistant log for `security_filter` entries, and open an issue with the (redacted) URL.
+If you still hit a 400 during authentication, retry the flow; check the Home Assistant log for `security_filter` entries, and open an issue with the (redacted) URL.
+
+### Microsoft asks "Work or school account" or "Personal account"
+
+This page appears when the same address exists as both kinds of Microsoft account, sometimes again after you have signed in. Pick **Personal account**: Family Safety only works with it. The setup then continues on its own.
 
 ### "Microsoft authentication host not allowed"
 
-Microsoft's sign-in page links some of its own pages with an explicit port (`login.microsoftonline.com:443`), and versions before 2.0.4 rejected that host. Update to 2.0.4 or later; the port is ignored now. If you still see it, the host in the address bar after `__ms_host__/` is outside `live.com`, `microsoft.com` and `microsoftonline.com`, which the proxy deliberately refuses.
+Microsoft's sign-in page links some of its own pages with an explicit port (`login.microsoftonline.com:443`), and versions before 2.0.4 rejected that host. Update to 2.0.4 or later; the port is ignored now. If you still see it, the host in the address bar after `__ms_host__/` is not one of the sign-in hosts (`account.microsoft.com`, `account.live.com`, `login.live.com`, `login.microsoft.com`, `login.microsoftonline.com`), which the proxy deliberately refuses. Please open an issue with that host name.
 
 ### Sign-in never finishes / stuck on the waiting screen
 
@@ -725,10 +729,9 @@ Useful markers: `family_token_present`, `exported_cookies`, `bootstrap_attempts`
 Native authentication trades some of the add-on's isolation for simplicity. Be aware of the following before enabling it:
 
 - **Credentials are stored in clear text.** Microsoft session cookies, the Family antiforgery token and the OAuth refresh token are persisted in the config entry and in `.storage/` **unencrypted**. The legacy add-on encrypted its cookie file with Fernet; the native path does not. Anyone with read access to your Home Assistant configuration directory (including backups) can extract a usable Microsoft session. Protect and encrypt your backups accordingly.
-- **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication — the only protection is a 24-byte random token in the URL. The flow is scoped: the proxy only forwards to `live.com`, `microsoft.com` and `microsoftonline.com`, it exists for at most **10 minutes**, and it is destroyed when the flow finishes. Still, while a flow is live, anyone who can reach your Home Assistant HTTP interface **and** guess the token would be proxied to Microsoft.
+- **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication — the only protection is a 24-byte random token in the URL. The flow is scoped: the proxy only serves the Microsoft sign-in hosts (`account.microsoft.com`, `account.live.com`, `login.live.com`, `login.microsoft.com`, `login.microsoftonline.com`), the callback only accepts that token for its own flow, it exists for at most **10 minutes**, and it is destroyed when the flow finishes. Still, while a flow is live, anyone who can reach your Home Assistant HTTP interface **and** guess the token would be proxied to Microsoft.
 - **The Microsoft login page is served from your Home Assistant origin.** Because the sign-in is proxied, the address bar shows your Home Assistant URL rather than `login.live.com`, so you cannot verify the Microsoft certificate visually. Only start the flow from Home Assistant itself.
 - **HTTP mode is genuinely insecure.** With `allow_insecure_http_auth` enabled, your Microsoft password crosses the local network unencrypted. It is restricted to local/private addresses and logs a warning, but it remains a testing option, not a deployment mode.
-- **The security filter workaround.** The bypass is scoped to the proxy routes and leaves the filter in place for every other request. It is nonetheless a modification of Home Assistant's request handling — see [Troubleshooting](#the-sign-in-window-shows-400-bad-request).
 
 ### Limitations
 
@@ -836,7 +839,7 @@ Registered by the integration only while a sign-in flow is running, and destroye
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| any | `/auth/microsoft_family_safety/proxy/{token}[/{path}]` | Reverse proxy to Microsoft sign-in (restricted to `live.com`, `microsoft.com`, `microsoftonline.com`) |
+| any | `/auth/microsoft_family_safety/proxy/{token}[/{path}]` | Reverse proxy to Microsoft sign-in (restricted to `account.microsoft.com`, `account.live.com`, `login.live.com`, `login.microsoft.com`, `login.microsoftonline.com`) |
 | GET | `/auth/microsoft_family_safety/callback?flow_id=` | Hands the captured result back to the config flow |
 
 ### Addon API — `http://{addon-hostname}:8098` *(legacy mode only)*
