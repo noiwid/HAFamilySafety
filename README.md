@@ -915,5 +915,5 @@ When reporting an issue, please include: HA version, integration version, whethe
 [releases]: https://github.com/noiwid/HAFamilySafety/releases
 [license-shield]: https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge
 [license]: LICENSE
-[marketplace-shield]: https://img.shields.io/badge/Marketplace-Listed-41BDF5.svg?style=for-the-badge
+[marketplace-shield]: https://img.shields.io/badge/Marketplace-Default-41BDF5.svg?style=for-the-badge
 [marketplace]: https://my.home-assistant.io/redirect/hacs_repository/?owner=noiwid&repository=HAFamilySafety&category=integration
