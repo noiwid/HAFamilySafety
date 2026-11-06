@@ -890,8 +890,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def async_set_screentime_limit(
-        self, child_id: str, day_of_week: int, hours: int, minutes: int
+        self, child_id: str, day_of_week: int, hours: int, minutes: int,
+        platform: str = "Windows",
     ) -> None:
+        if platform not in ("Windows", "Xbox"):
+            raise ValueError("platform must be Windows or Xbox")
+        if platform == "Xbox":
+            await self.async_set_xbox_screentime_limit(child_id, day_of_week, hours, minutes)
+            return
         if not 0 <= day_of_week <= 6:
             raise ValueError("day_of_week must be between 0 and 6")
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
@@ -910,7 +916,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         start_minute: int,
         end_hour: int,
         end_minute: int,
+        platform: str = "Windows",
     ) -> None:
+        if platform not in ("Windows", "Xbox"):
+            raise ValueError("platform must be Windows or Xbox")
+        if platform == "Xbox":
+            await self.async_set_xbox_screentime_intervals(
+                child_id, day_of_week, start_hour, start_minute, end_hour, end_minute
+            )
+            return
         if not 0 <= day_of_week <= 6:
             raise ValueError("day_of_week must be between 0 and 6")
         start_total = start_hour * 60 + start_minute
@@ -1006,6 +1020,31 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             entry = (policy.get("dailyRestrictions") or {}).get(day)
             if isinstance(entry, dict):
                 entry["allowance"] = f"{hours:02d}:{minutes:02d}:00"
+
+        self._set_xbox_policy_field(child_id, _update)
+        await self.async_request_refresh()
+
+    async def async_set_xbox_screentime_intervals(
+        self, child_id: str, day_of_week: int, start_hour: int,
+        start_minute: int, end_hour: int, end_minute: int,
+    ) -> None:
+        if not self.web_api:
+            raise RuntimeError("Web API not initialized")
+        if not 0 <= day_of_week <= 6:
+            raise ValueError("day_of_week must be between 0 and 6")
+        start_total = start_hour * 60 + start_minute
+        end_total = end_hour * 60 + end_minute
+        if not 0 <= start_total < end_total <= 1440:
+            raise ValueError("screen-time interval end must be later than start")
+        slots = _range_to_slots(start_hour, start_minute, end_hour, end_minute)
+        await self.web_api.set_mobile_xbox_screentime_intervals(child_id, day_of_week, slots)
+
+        def _update(policy: dict) -> None:
+            entry = (policy.get("dailyRestrictions") or {}).get(DAY_KEYS[day_of_week])
+            if isinstance(entry, dict):
+                entry["timeline"] = list(slots)
+                entry["allowedIntervals"] = list(slots)
+                entry.pop("allottedIntervals", None)
 
         self._set_xbox_policy_field(child_id, _update)
         await self.async_request_refresh()

@@ -425,6 +425,24 @@ data:
 
 ### Screen Time
 
+`set_screentime_limit` and `set_screentime_intervals` accept an optional
+`platform` field, either `Windows` or `Xbox`. Omitting it keeps the existing
+Windows behavior. Select `Xbox` explicitly to update the separate Xbox schedule.
+Xbox writes require an unambiguous `PerDeviceType` schedule and never fall back
+to a Windows write if the Xbox request fails. The same checks apply to existing
+Xbox daily-limit entities because they use the shared Xbox writer.
+
+```yaml
+action: microsoft_family_safety.set_screentime_intervals
+data:
+  account_id: "1234567890123456"
+  platform: Xbox
+  day_of_week: 1
+  start_hour: 18
+  end_hour: 20
+  end_minute: 30
+```
+
 ```yaml
 # Set daily screen time allowance
 service: microsoft_family_safety.set_screentime_limit

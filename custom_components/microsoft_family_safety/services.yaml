@@ -120,6 +120,15 @@ set_screentime_limit:
   name: Set Screen Time Limit
   description: Set the daily screen time allowance for a specific day of the week.
   fields:
+    platform:
+      name: Platform
+      description: Target schedule. Omitted values preserve Windows behavior.
+      default: Windows
+      selector:
+        select:
+          options:
+            - Windows
+            - Xbox
     account_id:
       name: Account ID
       description: The user ID of the child account.
@@ -160,6 +169,15 @@ set_screentime_intervals:
   name: Set Screen Time Intervals
   description: Set the allowed time window for screen time on a specific day.
   fields:
+    platform:
+      name: Platform
+      description: Target schedule. Omitted values preserve Windows behavior.
+      default: Windows
+      selector:
+        select:
+          options:
+            - Windows
+            - Xbox
     account_id:
       name: Account ID
       description: The user ID of the child account.
