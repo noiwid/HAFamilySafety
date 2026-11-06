@@ -612,9 +612,12 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     else:
                         self._platform_override_until.pop(key, None)
                     self._xbox_lock_known.add(key[0])
-            elif override_type == "cancel" or (
+            elif override_type in ("cancel", "allowuntil") or (
                 override is None and "dailyRestrictions" in data
             ):
+                # "allowUntil" (extra time granted, e.g. an
+                # approved request) explicitly allows the console, so it is a
+                # readable "not blocked", not an unknown.
                 # Microsoft answered and is not blocking: a stale local entry goes.
                 self._platform_override_until.pop(key, None)
                 self._xbox_lock_known.add(key[0])
@@ -1572,6 +1575,27 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _family_context_dead_end(self) -> bool:
         return self._family_auth_required_polls >= _FAMILY_AUTH_REQUIRED_POLLS
 
+    async def _async_rewarm_dropped_family_context(self) -> None:
+        """Bootstrap again in the poll where an Xbox call found the session rejected.
+
+        Before #64 the /st read noticed the rejection and
+        bootstrapped in the same poll, so the +8 h / +16 h silent renewals
+        (which recover on the next bootstrap) counted as one auth_required
+        poll. Leaving the bootstrap to the next poll made them count twice and
+        raised a needless reauth prompt each time.
+        """
+        if (
+            not self._native_web_auth
+            or self.web_api is None
+            or not getattr(self.web_api, "family_context_dropped", False)
+        ):
+            return
+        self.web_api.family_context_dropped = False
+        try:
+            await self.web_api._warm_family_context()
+        except Exception as err:  # noqa: BLE001 - Xbox extras only
+            _LOGGER.debug("Could not re-warm the Family web context: %r", err)
+
     async def _async_track_family_context(self) -> None:
         """Escalate a Family bootstrap that keeps landing on a login page.
 
@@ -1594,7 +1618,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._family_auth_required_polls += 1
         if not self._family_context_dead_end:
             return
-        if getattr(self.web_api, "mobile_schedule_ok", False):
+        # Only skip the prompt when nothing needs the web
+        # session. This method runs only with a native web session, which
+        # means Xbox is enabled, and the Xbox usage and lock stop without it.
+        if getattr(self.web_api, "mobile_schedule_ok", False) and not self.xbox_features:
             # Schedules run on the mobile API; the expired web context only
             # affects web-only extras, so a daily reauth prompt is not worth it.
             if self._family_auth_required_polls == _FAMILY_AUTH_REQUIRED_POLLS:
@@ -1690,6 +1717,24 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if self.web_api.web_session_state == "missing"
                         else "web_session_expired"
                     )
+            # Since the schedules moved to the mobile API (#64)
+            # no other request warms the Family web session, so after a restart
+            # (no stored token) the Xbox reads below never started, and nothing
+            # noticed when the session died. Warm it here whenever Xbox is on;
+            # a login page then shows up as family_context "auth_required",
+            # which _async_track_family_context escalates as before.
+            if (
+                self._native_web_auth
+                and self.web_api is not None
+                and self.web_api.has_web_cookies
+                and self.web_api.family_context_state != "ready"
+                and float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
+                <= time.monotonic()
+            ):
+                try:
+                    await self.web_api._warm_family_context()
+                except Exception as err:  # noqa: BLE001 - Xbox extras only
+                    _LOGGER.debug("Could not warm the Family web context for Xbox: %r", err)
             await self.api.update()
             if not getattr(self.api, "accounts", None):
                 self.api.accounts = []
@@ -1792,6 +1837,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 accounts_data[account_id]["xbox_policy"] = (
                     xbox_policy if xbox_policy is not None else previous.get("xbox_policy")
                 )
+            await self._async_rewarm_dropped_family_context()
             await self._async_track_family_context()
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts
