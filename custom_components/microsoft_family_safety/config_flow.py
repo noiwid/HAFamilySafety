@@ -28,6 +28,7 @@ from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 from .const import (
     CONF_ALLOWED_USERS,
     CONF_XBOX_FEATURES,
+    CONF_XBOX_LINK,
     DEFAULT_XBOX_FEATURES,
     AVAILABLE_PLATFORMS,
     CONF_ALLOW_INSECURE_HTTP_AUTH,
@@ -1454,18 +1455,25 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._pending_options: dict[str, Any] = {}
+        self._xbox_link_url: str | None = None
+        self._xbox_verifier: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         if user_input is not None:
             data = dict(user_input)
+            link_xbox = bool(data.pop(CONF_XBOX_LINK, False))
             data[CONF_XBOX_FEATURES] = _wants_xbox(data.get(CONF_PLATFORMS))
             # The add-on fields are gone from the form; keep a legacy entry's
             # values so saving the options does not cut it off its add-on.
             for key in (CONF_AUTH_URL, CONF_API_KEY):
                 if self._config_entry.options.get(key):
                     data[key] = self._config_entry.options[key]
+            if link_xbox and data[CONF_XBOX_FEATURES]:
+                self._pending_options = data
+                return await self.async_step_xbox_link()
             return self.async_create_entry(title="", data=data)
         current_interval = self._config_entry.options.get(
             CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
@@ -1507,8 +1515,46 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                         CONF_ALLOW_INSECURE_HTTP_AUTH,
                         default=current_allow_insecure_http_auth,
                     ): cv.boolean,
+                    vol.Optional(CONF_XBOX_LINK, default=False): cv.boolean,
                 }
             ),
+        )
+
+    async def async_step_xbox_link(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Link the Xbox Family Settings sign-in by pasting the redirect.
+
+        Same manual step as the integration's old "paste the redirect URL":
+        sign in on the link, then paste the oauth20_desktop.srf address the
+        browser lands on. The code in it is single-use and needs the PKCE
+        verifier kept here, so the address is useless to anyone else.
+        """
+        from .xbox_family_api import XboxFamilyAPI, XboxFamilyError, build_authorize_url
+
+        errors: dict[str, str] = {}
+        if user_input is not None and self._xbox_verifier:
+            api = XboxFamilyAPI(self.hass, self._config_entry.entry_id)
+            try:
+                await api.async_link_from_redirect(
+                    user_input["redirect_url"], self._xbox_verifier, "manual"
+                )
+            except XboxFamilyError as err:
+                _LOGGER.warning("Xbox Family Settings link failed: %s", err)
+                errors["base"] = "xbox_link_failed"
+                self._xbox_link_url = None
+            else:
+                return self.async_create_entry(title="", data=self._pending_options)
+        if self._xbox_link_url is None:
+            self._xbox_link_url, self._xbox_verifier = build_authorize_url()
+        return self.async_show_form(
+            step_id="xbox_link",
+            data_schema=vol.Schema({vol.Required("redirect_url"): str}),
+            description_placeholders={
+                "url": self._xbox_link_url,
+                "redirect_prefix": "https://login.live.com/oauth20_desktop.srf?code=",
+            },
+            errors=errors,
         )
 
 
