@@ -1534,7 +1534,13 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
 
         errors: dict[str, str] = {}
         if user_input is not None and self._xbox_verifier:
-            api = XboxFamilyAPI(self.hass, self._config_entry.entry_id)
+            # Link through the running coordinator's instance when there is
+            # one: a token saved by a separate client would only be read at
+            # the next reload, and the options are usually unchanged.
+            coordinator = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+            api = getattr(coordinator, "xbox_family", None) or XboxFamilyAPI(
+                self.hass, self._config_entry.entry_id
+            )
             try:
                 await api.async_link_from_redirect(
                     user_input["redirect_url"], self._xbox_verifier, "manual"
@@ -1544,6 +1550,8 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                 errors["base"] = "xbox_link_failed"
                 self._xbox_link_url = None
             else:
+                if coordinator is not None:
+                    coordinator.async_xbox_linked()
                 return self.async_create_entry(title="", data=self._pending_options)
         if self._xbox_link_url is None:
             self._xbox_link_url, self._xbox_verifier = build_authorize_url()

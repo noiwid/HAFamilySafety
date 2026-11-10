@@ -280,3 +280,99 @@ async def test_only_a_refused_token_makes_xapprove_unusable(hass, state, usable)
     api._refresh_token = "token"
     api.state = state
     assert api.usable is usable
+
+
+# --- review follow-ups (#69) -------------------------------------------------------
+async def test_refused_token_on_the_first_lookup_is_recorded(hass, hass_storage, aioclient_mock):
+    # After a restart the first call is the family lookup, outside _request.
+    aioclient_mock.post(TOKEN_URL, status=400, json={"error": "invalid_grant"})
+    api = await _linked_api(hass, hass_storage)
+    with pytest.raises(XboxFamilyAuthError):
+        await api.async_child_xuid("Sam", "Doe")
+    assert api.state == "auth_failed"
+    assert api.usable is False
+
+
+async def test_relink_forgets_the_previous_account(hass, hass_storage, aioclient_mock):
+    aioclient_mock.post(
+        TOKEN_URL, json={"access_token": "new", "refresh_token": "new-rt", "expires_in": 86400}
+    )
+    api = await _linked_api(hass, hass_storage)
+    api._parent_xuid = "old-parent"
+    api._family = [{"xuid": "old-child"}]
+    api._xsts = ("uhs", "old", dt_util.utcnow() + timedelta(hours=1))
+    api.state = "auth_failed"
+    await api.async_link_from_redirect(
+        "https://login.live.com/oauth20_desktop.srf?code=abc", "verifier", "manual"
+    )
+    assert (api._parent_xuid, api._family, api._xsts) == (None, None, None)
+    assert api.state == "linked"
+
+
+async def test_allow_until_override_reads_as_unlocked(coordinator):
+    account_data: dict = {}
+    policy = overrides_to_policy({"overrides": [{"overrideType": 1, "validUntil": "2099-01-01T00:00:00Z"}]})
+    coordinator._platform_override_until[(CHILD, "xbox")] = dt_util.utcnow() + timedelta(hours=1)
+    coordinator._apply_xbox_lock_state(CHILD, account_data, policy)
+    assert "Xbox" not in account_data["blocked_platforms"]
+    assert account_data["xbox_lock_known"] is True
+
+
+@pytest.mark.parametrize(
+    ("xapprove", "expected"),
+    [
+        (None, (True, True)),
+        ({"usage": 12, "lock_policy": {}}, (False, False)),
+        ({"usage": None, "lock_policy": {}}, (False, True)),  # only usage falls back
+    ],
+)
+async def test_web_gates(coordinator, xapprove, expected):
+    coordinator.web_api = SimpleNamespace(
+        has_web_cookies=True, family_context_state="ready", _family_web_backoff_until=0.0
+    )
+    assert coordinator._xbox_web_gates(xapprove) == expected
+
+
+async def test_child_match_is_counted_and_not_logged_by_name(coordinator, caplog):
+    caplog.set_level("INFO")
+    await coordinator._async_xbox_xuid(coordinator._accounts[CHILD])
+    coordinator.xbox_family.async_child_xuid = AsyncMock(return_value=None)
+    await coordinator._async_xbox_xuid(SimpleNamespace(user_id=42, first_name="Kim", surname="Doe"))
+    info = [r.getMessage() for r in caplog.records if r.levelname == "INFO"]
+    assert info and not any("Sam" in m or XUID in m for m in info)
+    assert len(coordinator._xbox_xuids) == 1
+    assert coordinator._xbox_unmatched == {"42"}
+
+
+async def test_manual_link_is_used_without_a_reload(hass, coordinator):
+    coordinator.xbox_family.async_link_from_redirect = AsyncMock()
+    coordinator._xbox_xuids = {"stale": "x"}
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data.setdefault(DOMAIN, {})[coordinator.entry.entry_id] = coordinator
+    result = await hass.config_entries.options.async_init(coordinator.entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"update_interval": 300, "platforms": ["Windows", "Xbox"], "xbox_link": True},
+    )
+    assert result["step_id"] == "xbox_link"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"redirect_url": "https://login.live.com/oauth20_desktop.srf?code=abc"},
+    )
+    await hass.async_block_till_done()
+    assert result["type"] == "create_entry"
+    coordinator.xbox_family.async_link_from_redirect.assert_awaited_once()
+    assert coordinator._xbox_xuids == {}
+    coordinator.async_request_refresh.assert_awaited()
+
+
+async def test_removing_the_entry_deletes_the_xbox_token(hass, hass_storage):
+    from custom_components.microsoft_family_safety import async_remove_entry
+
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    hass_storage[f"{DOMAIN}.xbox.{entry.entry_id}"] = {
+        "version": 1, "key": f"{DOMAIN}.xbox.{entry.entry_id}", "data": {"refresh_token": "rt"}
+    }
+    await async_remove_entry(hass, entry)
+    await hass.async_block_till_done()
+    assert f"{DOMAIN}.xbox.{entry.entry_id}" not in hass_storage

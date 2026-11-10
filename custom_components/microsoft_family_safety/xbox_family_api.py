@@ -270,6 +270,13 @@ class XboxFamilyAPI:
                 "scope": USER_AUTH_SCOPE,
             }
         )
+        # A relink may be another parent account: forget everything derived
+        # from the previous token.
+        self._msa.clear()
+        self._xsts = None
+        self._user_token = None
+        self._parent_xuid = None
+        self._family = None
         self._refresh_token = body["refresh_token"]
         self._remember_msa(USER_AUTH_SCOPE, body)
         self.linked_via = via
@@ -452,7 +459,16 @@ class XboxFamilyAPI:
 
     async def _xbl_auth_locked(self) -> None:
         async with self._lock:
-            await self._xbl_auth()
+            try:
+                await self._xbl_auth()
+            except XboxFamilyAuthError as err:
+                self.state = "auth_failed"
+                self.last_error = str(err)
+                raise
+            except XboxFamilyError as err:
+                self.state = "error"
+                self.last_error = str(err)
+                raise
 
     async def async_child_xuid(self, first_name: str | None, surname: str | None) -> str | None:
         """Find a child's Xbox user id by the names on the Family Safety roster."""
