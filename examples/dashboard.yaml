@@ -543,6 +543,84 @@ decluttering_templates:
             - border-bottom-left-radius: '0'
             - border-bottom-right-radius: '0'
         - type: custom:button-card
+          name: Websites this week
+          tap_action:
+            action: none
+          show_icon: false
+          styles:
+            card:
+            - height: 35px
+            - border: none
+            - padding: 0 0 0 12px
+            - margin: '0'
+            - box-shadow: none
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
+            name:
+            - font-size: 13px
+            - font-weight: '600'
+            - opacity: '0.7'
+            - justify-self: start
+          card_mod:
+            style: ':host { background: none !important; }
+
+              ha-card { background: none !important; }'
+        - type: custom:button-card
+          entity: sensor.[[child]]_websites_visited
+          tap_action:
+            action: more-info
+          show_icon: false
+          show_name: false
+          show_state: false
+          styles:
+            card:
+            - padding: 0 12px 12px 12px
+            - border: none
+            - box-shadow: none
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
+            custom_fields:
+              sites:
+              - grid-area: sites
+              - justify-self: stretch
+              - width: 100%
+              - text-align: left
+            grid:
+            - grid-template-areas: '"sites"'
+            - grid-template-columns: 1fr
+          custom_fields:
+            sites: |-
+              [[[
+                const a = entity.attributes || {};
+                const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+                if (!a.report_available) return `<div style="opacity:0.5;font-size:13px;text-align:center;padding:6px 0">No Edge browsing reported</div>`;
+                const head = `<div style="font-size:12px;opacity:0.7">${entity.state} visits · ${a.site_count || 0} sites · ${a.blocked_count || 0} blocked</div>`;
+                const rows = (a.sites || []).slice(0, 5).map((s) => `<div style="display:flex;align-items:center;gap:10px"><span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.domain)}${s.blocked ? '<span style="color:#F44336;font-size:11px;margin-left:6px">blocked</span>' : ''}</span><span style="font-size:13px;font-weight:500;opacity:0.8">${s.visits}</span></div>`).join('');
+                const q = (a.searches || []).slice(0, 3).map((s) => esc(s.search)).join(', ');
+                const searches = q ? `<div style="font-size:12px;opacity:0.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Searches: ${q}</div>` : '';
+                return `<div style="display:flex;flex-direction:column;gap:8px;width:100%">${head}${rows}${searches}</div>`;
+              ]]]
+          card_mod:
+            style: ':host { background: none !important; }
+
+              ha-card { background: none !important; }'
+        - type: custom:mod-card
+          card_mod:
+            style: 'ha-card { height: 1px; background: rgba(152, 152, 157, 0.3); box-shadow: none; border: none; } ha-card { border-radius: 0 !important; }'
+          card:
+            type: custom:mushroom-title-card
+            title: ''
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
+        - type: custom:button-card
           name: Weekly limits
           tap_action:
             action: none
