@@ -50,6 +50,13 @@ that surface on Home Assistant, especially on Python 3.14:
    child with empty data for the failing endpoint and records the failure in
    ``Account.roster_errors`` for the coordinator to surface.
 
+9. ``Account._get_overrides`` reads the device-limits overrides from the old
+   ``/v1`` route, counts extra time as a lock and knows Windows only by the
+   name "Windows" (Microsoft now also lists it as "Desktop"). The replacement
+   reads the ``/v4`` route with ``Plat-Info: ALL`` that the Family Safety app
+   and current pyfamilysafety use, and decides what is locked with
+   ``mobile_overrides``.
+
 This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
@@ -63,6 +70,7 @@ from typing import Any
 
 import aiohttp
 from pyfamilysafety import application as _pfs_application
+from pyfamilysafety import const as _pfs_const
 from pyfamilysafety.account import Account
 from pyfamilysafety.api import FamilySafetyAPI
 from pyfamilysafety.authenticator import Authenticator
@@ -77,6 +85,13 @@ from pyfamilysafety.exceptions import HttpException, Unauthorized
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .mobile_overrides import (
+    MOBILE_OVERRIDES_PATH,
+    MOBILE_OVERRIDES_PLAT_INFO,
+    mobile_blocked_platforms,
+    mobile_lock_of,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 # Markers so we never double-patch.
@@ -90,6 +105,10 @@ _CONNECTION_STATE_PATCH_MARKER = "_hafs_connection_state_diagnostics_patch"
 _ROSTER_TOLERANCE_PATCH_MARKER = "_hafs_roster_tolerance_patch"
 _APP_PLATFORM_PATCH_MARKER = "_hafs_app_platform_patch"
 _APP_NAME_PATCH_MARKER = "_hafs_app_display_name_patch"
+_V4_OVERRIDES_PATCH_MARKER = "_hafs_v4_overrides_read_patch"
+
+# pyfamilysafety endpoint key for the /v4 overrides read.
+_V4_OVERRIDES_ENDPOINT = "hafs_get_override_device_restrictions_v4"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
 # data continues to refresh normally during the backoff window.
@@ -750,6 +769,41 @@ def _patch_app_display_name() -> bool:
     return True
 
 
+def _patch_v4_overrides_read() -> bool:
+    """Read the device-limits overrides from the /v4 route (see 9. above)."""
+    current = Account._get_overrides
+    if getattr(current, _V4_OVERRIDES_PATCH_MARKER, False):
+        return False
+    _pfs_const.ENDPOINTS[_V4_OVERRIDES_ENDPOINT] = {
+        "url": "{BASE_URL}" + MOBILE_OVERRIDES_PATH.replace("{child_id}", "{USER_ID}"),
+        "method": "GET",
+    }
+
+    async def _patched_get_overrides(self: Account) -> None:
+        response = await self._api.send_request(
+            endpoint=_V4_OVERRIDES_ENDPOINT,
+            platform=MOBILE_OVERRIDES_PLAT_INFO,
+            USER_ID=self.user_id,
+        )
+        state = response.get("json") if isinstance(response, dict) else None
+        if not isinstance(state, dict):
+            state = {}
+        self.blocked_platforms = mobile_blocked_platforms(state)
+        for entry in state.get("lockablePlatforms") or []:
+            if not isinstance(entry, dict):
+                continue
+            locked = mobile_lock_of(entry) is not None
+            for raw in entry.get("devices") or []:
+                device_id = str((raw or {}).get("deviceId") or "").replace("g:", "")
+                for device in self.devices or []:
+                    if getattr(device, "device_id", None) == device_id:
+                        device.update_blocked_status(locked)
+
+    setattr(_patched_get_overrides, _V4_OVERRIDES_PATCH_MARKER, True)
+    Account._get_overrides = _patched_get_overrides
+    return True
+
+
 def _patch_account_roster_tolerance() -> bool:
     """Keep loading a family member when Microsoft cannot resolve part of it.
 
@@ -856,6 +910,9 @@ def apply_patches(hass: HomeAssistant) -> None:
 
     if _patch_account_roster_tolerance():
         applied.append("per-member roster error tolerance")
+
+    if _patch_v4_overrides_read():
+        applied.append("v4 device-limits overrides read")
 
     if applied:
         _LOGGER.debug(

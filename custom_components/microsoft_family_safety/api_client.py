@@ -25,6 +25,7 @@ from homeassistant.util import dt as dt_util
 
 from ._pyfamilysafety_compat import authenticator_access_token_expired
 from .const import DAY_KEYS
+from .mobile_overrides import MOBILE_OVERRIDES_PATH, MOBILE_OVERRIDES_PLAT_INFO
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1662,9 +1663,47 @@ class FamilySafetyWebAPI:
             )
             if isinstance(result, dict):
                 return result
-        # Exact pyfamilysafety 1.1.2 compatibility fallback.
-        result = await self._request("GET", f"/v1/devicelimits/{child_id}/overrides")
-        return result if isinstance(result, dict) else None
+        return await self.get_mobile_device_overrides(child_id)
+
+    async def get_mobile_device_overrides(self, child_id: str) -> dict:
+        """The child's device-limits overrides from the mobile API, read fresh.
+
+        See mobile_overrides for the route and the answer's shape.
+        """
+        result = await self._request(
+            "GET",
+            MOBILE_OVERRIDES_PATH.format(child_id=child_id),
+            extra_headers={"Plat-Info": MOBILE_OVERRIDES_PLAT_INFO},
+        )
+        if not isinstance(result, dict):
+            raise FamilySafetyWebAPIError("The mobile overrides answer was not an object")
+        return result
+
+    async def set_mobile_device_override(
+        self,
+        child_id: str,
+        target: str,
+        override_type: str,
+        valid_until: datetime,
+        culture: str = "en-US",
+    ) -> dict | list | None:
+        """POST one device-limits override on the mobile API; return the answer.
+
+        ``target`` is the platform's ``appliesTo`` name from a read.
+        """
+        body = {
+            "target": target,
+            "overrideType": override_type,
+            "validUntil": dt_util.as_utc(valid_until).strftime("%Y-%m-%dT%H:%M:%S.000%z"),
+            "culture": culture,
+        }
+        _LOGGER.debug("Mobile device-limits override for %s: %s", child_id, body)
+        return await self._request(
+            "POST",
+            MOBILE_OVERRIDES_PATH.format(child_id=child_id),
+            json_data=body,
+            extra_headers={"Plat-Info": MOBILE_OVERRIDES_PLAT_INFO},
+        )
 
     # Each platform has its OWN override endpoint.  They are not one endpoint
     # parameterised by platformType -- Xbox lives under an /xbox/ path segment,

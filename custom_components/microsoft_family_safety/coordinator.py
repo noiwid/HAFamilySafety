@@ -7,14 +7,14 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
 from pyfamilysafety.application import Application
 from pyfamilysafety.device import Device
-from pyfamilysafety.enum import OverrideTarget, OverrideType
-from pyfamilysafety.exceptions import AggregatorException, HttpException
+from pyfamilysafety.exceptions import HttpException
 from yarl import URL
 
 from homeassistant.config_entries import ConfigEntry
@@ -30,8 +30,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
-from .api_client import FamilySafetyWebAPI
+from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
 from .app_pause import AppPauser
+from .mobile_overrides import (
+    MOBILE_OVERRIDE_BLOCK,
+    MOBILE_OVERRIDE_CANCEL,
+    is_overrides_document,
+    mobile_blocked_platforms,
+    mobile_lock_of,
+    mobile_platform_entry,
+    mobile_platform_name,
+)
 from .auth.addon_client import AddonCookieClient
 from .screen_time import (
     BLOCK_UNTIL,
@@ -252,6 +261,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auth_notification_sent = False
         self._roster_notification_sent = False
         self._platform_override_until: dict[tuple[str, str], datetime] = {}
+        #: (child, platform) -> (when, the platform's overrides entry) as our
+        #: last mobile write left it; see _MOBILE_WRITE_GRACE.
+        self._mobile_writes: dict[tuple[str, str], tuple[datetime, dict]] = {}
         #: Children whose Xbox lock state is known: Microsoft's Xbox policy
         #: was read, or a web lock/unlock from here succeeded. Until then the
         #: Xbox lock switch reports unknown rather than "unlocked".
@@ -709,6 +721,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 pretty = platform.capitalize()
                 if pretty not in blocked:
                     blocked.append(pretty)
+        for (acct, platform), (written, entry) in list(self._mobile_writes.items()):
+            if now - written >= self._MOBILE_WRITE_GRACE:
+                self._mobile_writes.pop((acct, platform), None)
+            elif acct == str(account.user_id):
+                # Microsoft's GET lags behind its writes: our write's answer wins.
+                blocked = [p for p in blocked if p.lower() != platform.lower()]
+                if mobile_lock_of(entry) is not None:
+                    blocked.append(platform)
         return blocked
 
     def _apply_xbox_lock_state(
@@ -859,36 +879,177 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Cannot lock {platform}: it can only be locked through the Family "
                 "web session, which is not available. Re-authenticate the integration."
             )
-        # pyfamilysafety formats the value with a literal "Z": give it real UTC.
         await self._override_platform_mobile(
-            account, account_id, platform, OverrideType.UNTIL,
-            dt_util.as_utc(until).replace(tzinfo=None),
+            account, account_id, platform, MOBILE_OVERRIDE_BLOCK, until
         )
+
+    #: Microsoft's GET of the mobile overrides lags behind its writes: a Cancel
+    #: whose answer listed nothing was still listed by a GET a second later,
+    #: and a block cleared in the app for minutes. For this long after a write
+    #: of ours, its answer stands for that platform over what a GET says.
+    _MOBILE_WRITE_GRACE = timedelta(minutes=2)
+    #: Pauses (seconds) before the reads that judge a write whose own answer
+    #: is unusable (an error such as HTTP 500, or no overrides document).
+    _MOBILE_READBACK_DELAYS: tuple[float, ...] = (0.0, 3.0, 3.0)
+
+    def _remember_mobile_write(self, child: str, state: Any, platform: str) -> None:
+        """Keep the platform's entry of a state our write left (see above)."""
+        entry = mobile_platform_entry(state, mobile_platform_name(platform))
+        if entry is not None:
+            self._mobile_writes[(child, mobile_platform_name(entry.get("appliesTo")))] = (
+                dt_util.utcnow(), entry,
+            )
+
+    def _with_recent_writes(self, child: str, state: Any) -> Any:
+        """A GET's overrides, with our writes of the last minutes standing over it."""
+        if not is_overrides_document(state):
+            return state
+        now = dt_util.utcnow()
+        platforms = []
+        for entry in state["lockablePlatforms"]:
+            name = mobile_platform_name((entry or {}).get("appliesTo")) if isinstance(entry, dict) else ""
+            written = self._mobile_writes.get((child, name))
+            if written is not None and now - written[0] < self._MOBILE_WRITE_GRACE:
+                if entry.get("overrides") != written[1].get("overrides"):
+                    _LOGGER.debug(
+                        "The %s overrides read for %s differ from our write %s ago; "
+                        "keeping what the write answered",
+                        name, child, now - written[0],
+                    )
+                entry = {**entry, "overrides": written[1].get("overrides") or []}
+            platforms.append(entry)
+        return {**state, "lockablePlatforms": platforms}
+
+    async def _async_read_mobile_overrides(self, child: str) -> dict:
+        """GET the mobile overrides, our recent writes standing over a lagging answer."""
+        return self._with_recent_writes(
+            child, await self.web_api.get_mobile_device_overrides(child)
+        )
+
+    async def _async_post_mobile_override(
+        self,
+        child: str,
+        target: str,
+        override_type: str,
+        until: datetime,
+        settled: Callable[[Any], bool],
+    ) -> tuple[Any, FamilySafetyWebAPIError | None, FamilySafetyWebAPIError | None]:
+        """POST one mobile override; return ``(state, write_error, read_error)``.
+
+        ``state`` is the POST's own answer when it is an overrides document.
+        Otherwise (an error such as HTTP 500, which Microsoft has answered to
+        writes it applied, or no document) the overrides are read up to
+        len(_MOBILE_READBACK_DELAYS) times, stopping at the first read for
+        which ``settled`` holds; ``state`` is then the last read (None, with
+        ``read_error``, when no read succeeded). A state from the POST answer,
+        or a settled read, is remembered for _MOBILE_WRITE_GRACE.
+        """
+        write_error: FamilySafetyWebAPIError | None = None
+        reply: Any = None
+        try:
+            reply = await self.web_api.set_mobile_device_override(
+                child, target, override_type, until
+            )
+        except FamilySafetyWebAPIError as err:
+            write_error = err
+        if write_error is None and is_overrides_document(reply):
+            self._remember_mobile_write(child, reply, target)
+            return reply, None, None
+        state: Any = None
+        read_error: FamilySafetyWebAPIError | None = None
+        for delay in self._MOBILE_READBACK_DELAYS:
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                state = await self.web_api.get_mobile_device_overrides(child)
+            except FamilySafetyWebAPIError as err:
+                read_error = err
+                continue
+            read_error = None
+            if settled(state):
+                self._remember_mobile_write(child, state, target)
+                break
+        return state, write_error, (read_error if state is None else None)
 
     async def _override_platform_mobile(
         self,
         account: Account,
         account_id: str,
         platform: str,
-        override: OverrideType,
+        override_type: str,
         until: datetime | None = None,
     ) -> None:
-        """Send a mobile override; judge a Microsoft 500 by the state it leaves."""
-        try:
-            await account.override_device(
-                OverrideTarget.from_pretty(platform), override, until
+        """Lock (BlockUntil) or unlock (Cancel) a platform on the mobile API.
+
+        The target name is read from Microsoft's own list first ("Windows" is
+        also listed as "Desktop"). The outcome is decided by the overrides
+        document the POST answers with; when the POST fails (Microsoft has
+        answered HTTP 500 both to overrides it applied and to a cancel it did
+        not apply) or answers no document, by reads retried for a few
+        seconds (see _async_post_mobile_override). Never by the last poll.
+        """
+        if self.web_api is None:
+            raise HomeAssistantError(
+                f"Cannot change {platform}: the Family Safety mobile API is not connected yet."
             )
-        except AggregatorException as err:
-            # Seen on 2026-11-05: HTTP 500 "aggregator error", override applied anyway.
-            await self.async_refresh()
-            blocked = (self.account_data(account_id) or {}).get("blocked_platforms", [])
-            if (platform in blocked) != (override == OverrideType.UNTIL):
+        child = str(account_id)
+        lock = override_type == MOBILE_OVERRIDE_BLOCK
+        verb = "lock" if lock else "unlock"
+        try:
+            entry = mobile_platform_entry(
+                await self._async_read_mobile_overrides(child), platform
+            )
+        except FamilySafetyWebAPIError as err:
+            raise HomeAssistantError(
+                f"Could not read the {platform} overrides, so nothing was sent: {err}"
+            ) from err
+        if entry is None:
+            raise HomeAssistantError(
+                f"Microsoft lists no {platform} device limits for this child, "
+                f"so there is nothing to {verb}."
+            )
+
+        def locked(state: Any) -> bool:
+            return any(p.lower() == platform.lower() for p in mobile_blocked_platforms(state))
+
+        state, write_error, read_error = await self._async_post_mobile_override(
+            child,
+            str(entry.get("appliesTo")),
+            override_type,
+            until or dt_util.utcnow(),
+            lambda state: locked(state) == lock,
+        )
+        if state is None:
+            if write_error is not None:
                 raise HomeAssistantError(
-                    f"Microsoft answered an error and {platform} has not changed yet; "
-                    "check its state after the next update before trying again."
-                ) from err
-            _LOGGER.info("Microsoft answered 500 but the %s override was applied", platform)
+                    f"Microsoft answered an error to the {platform} {verb} ({write_error}) "
+                    f"and the overrides could not be read back ({read_error}); check its "
+                    "state before trying again."
+                ) from write_error
+            _LOGGER.warning(
+                "%s %s accepted, but the overrides could not be read back: %s",
+                platform, verb, read_error,
+            )
+            await self.async_request_refresh()
             return
+        account.blocked_platforms = mobile_blocked_platforms(
+            self._with_recent_writes(child, state)
+        )
+        if locked(state) != lock:
+            await self.async_request_refresh()
+            answer = (
+                f"answered an error ({write_error})" if write_error else "accepted it"
+            )
+            listed = "still lists a lock" if not lock else "lists no lock"
+            raise HomeAssistantError(
+                f"Could not {verb} {platform}: Microsoft {answer}, but its "
+                f"overrides {listed}. Check the Family Safety app before trying again."
+            ) from write_error
+        if write_error is not None:
+            _LOGGER.info(
+                "Microsoft answered an error but the %s %s was applied: %s",
+                platform, verb, write_error,
+            )
         await self.async_request_refresh()
 
     async def async_unlock_platform(self, account_id: str, platform: str) -> None:
@@ -958,7 +1119,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "web session, which is not available. Re-authenticate the integration."
             )
         await self._override_platform_mobile(
-            account, account_id, platform, OverrideType.CANCEL
+            account, account_id, platform, MOBILE_OVERRIDE_CANCEL
         )
         self._platform_override_until.pop((str(account_id), platform.lower()), None)
 
