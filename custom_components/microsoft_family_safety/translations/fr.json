@@ -186,7 +186,7 @@
     },
     "add_time_bonus": {
       "name": "Ajouter du temps Xbox",
-      "description": "Donne du temps supplémentaire à un enfant sur la Xbox, pour quelques minutes ou jusqu'à une heure donnée, via le service Xbox Family Settings. Nécessite la connexion Xbox Family Settings liée. Échoue si Microsoft ne confirme pas le temps supplémentaire, ou si la Xbox reste verrouillée.",
+      "description": "Donne du temps supplémentaire à un enfant sur la Xbox, pour quelques minutes ou jusqu'à une heure donnée, via le service Xbox Family Settings. Nécessite la connexion Xbox Family Settings liée. Refusé tant que la Xbox est verrouillée, sauf si « Remplacer le verrouillage » est activé. Échoue si Microsoft ne confirme pas le temps supplémentaire, ou si la Xbox reste verrouillée. Peut répondre avec added, until et replaced_lock.",
       "fields": {
         "account_id": {
           "name": "ID du compte",
@@ -203,12 +203,16 @@
         "until": {
           "name": "Jusqu'à",
           "description": "Fin du temps supplémentaire, au lieu des minutes (24 heures au plus à partir de maintenant)."
+        },
+        "replace_lock": {
+          "name": "Remplacer le verrouillage",
+          "description": "Microsoft ne garde qu'une seule dérogation Xbox, donc le temps supplémentaire remplace un verrouillage. Désactivé (par défaut) : refusé tant que la Xbox est verrouillée, par cette intégration ou par un parent. Activé : le verrouillage est remplacé par le temps supplémentaire."
         }
       }
     },
     "cancel_time_bonus": {
       "name": "Annuler le temps Xbox supplémentaire",
-      "description": "Annule le temps supplémentaire en cours sur la Xbox d'un enfant. Seul le temps supplémentaire est annulé : un verrouillage n'est jamais levé, et rien n'est envoyé quand aucun temps supplémentaire n'est en cours.",
+      "description": "Annule le temps supplémentaire en cours sur la Xbox d'un enfant. Seul le temps supplémentaire est annulé : échoue tant que la Xbox est verrouillée (un verrouillage n'est jamais levé), et ne fait rien quand aucun temps supplémentaire n'est en cours. Peut répondre avec cancelled et reason ou lock_in_force.",
       "fields": {
         "account_id": {
           "name": "ID du compte",

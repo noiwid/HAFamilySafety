@@ -1104,12 +1104,39 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _BONUS_TOLERANCE = timedelta(minutes=2)
 
     @staticmethod
-    def _xapprove_override_of(answer: dict[str, Any] | None, override_type: int) -> dict | None:
-        """The override of override_type in an xapprove overrides answer, if any."""
+    def _xapprove_until(value: Any) -> datetime | None:
+        """An xapprove validUntil as UTC; one without an offset is UTC too."""
+        parsed = dt_util.parse_datetime(str(value or ""))
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_util.UTC)
+        return dt_util.as_utc(parsed)
+
+    @classmethod
+    def _xapprove_override_of(
+        cls, answer: dict[str, Any] | None, override_type: int
+    ) -> dict | None:
+        """The override of override_type in force in an xapprove answer, if any.
+
+        Entries whose validUntil has passed are ignored; among several, the
+        one ending last is returned (one without a readable end counts as in
+        force and ending last).
+        """
+        now = dt_util.utcnow()
+        best: dict | None = None
+        best_until: datetime | None = None
         for override in (answer or {}).get("overrides") or []:
-            if isinstance(override, dict) and override.get("overrideType") == override_type:
-                return override
-        return None
+            if not isinstance(override, dict) or override.get("overrideType") != override_type:
+                continue
+            until = cls._xapprove_until(override.get("validUntil"))
+            if until is not None and until <= now:
+                continue
+            if best is None or (
+                best_until is not None and (until is None or until > best_until)
+            ):
+                best, best_until = override, until
+        return best
 
     async def _async_bonus_xuid(self, account_id: str, platform: str) -> str:
         """The child's Xbox user id for extra time, or a clear error.
@@ -1130,24 +1157,45 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         return xuid
 
+    async def _async_xbox_overrides(self, xuid: str, what: str) -> dict[str, Any]:
+        try:
+            return await self.xbox_family.async_get_overrides(xuid)
+        except XboxFamilyError as err:
+            raise HomeAssistantError(
+                f"Could not read the Xbox overrides, so {what}: {err}"
+            ) from err
+
     async def async_add_time_bonus(
-        self, account_id: str, platform: str, until: datetime
-    ) -> None:
+        self,
+        account_id: str,
+        platform: str,
+        until: datetime,
+        replace_lock: bool = False,
+    ) -> dict[str, Any]:
         """Give a child extra time on the Xbox until ``until``.
 
-        The Xbox Family Settings app's own "add time" (xapprove override 1). It
-        succeeds only when Microsoft's answer lists the extra time ending when
-        asked and no lock left in force.
+        The Xbox Family Settings app's own "add time" (xapprove override 1).
+        Microsoft keeps one Xbox override, so extra time replaces a lock: while
+        one is in force (ours or a parent's) this is refused unless
+        ``replace_lock``. It succeeds only when Microsoft's answer lists the
+        extra time ending when asked and no lock left in force.
         """
         xuid = await self._async_bonus_xuid(account_id, platform)
         until = dt_util.as_utc(until)
+        current = await self._async_xbox_overrides(xuid, "no extra time was given")
+        lock = self._xapprove_override_of(current, OVERRIDE_BLOCK)
+        if lock is not None and not replace_lock:
+            raise HomeAssistantError(
+                f"The Xbox is locked (until {lock.get('validUntil')}); extra time would "
+                "lift that lock. Pass replace_lock: true to replace it."
+            )
         try:
             answer = await self.xbox_family.async_create_override(xuid, OVERRIDE_ALLOW, until)
         except XboxFamilyError as err:
             raise HomeAssistantError(f"Could not give Xbox extra time: {err}") from err
         allow = self._xapprove_override_of(answer, OVERRIDE_ALLOW)
-        valid_until = dt_util.parse_datetime(str((allow or {}).get("validUntil") or ""))
-        if valid_until is None or abs(dt_util.as_utc(valid_until) - until) > self._BONUS_TOLERANCE:
+        valid_until = self._xapprove_until((allow or {}).get("validUntil"))
+        if valid_until is None or abs(valid_until - until) > self._BONUS_TOLERANCE:
             _LOGGER.debug("Xbox extra time not confirmed by xapprove: answer %s", answer)
             raise HomeAssistantError(
                 "Microsoft did not confirm the Xbox extra time "
@@ -1161,34 +1209,34 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Microsoft recorded the Xbox extra time but the Xbox is still locked; "
                 "unlock it with unlock_platform first."
             )
-        # Microsoft keeps one Xbox override: the extra time replaced any lock.
+        # The extra time replaced any lock.
         self._platform_override_until.pop(key, None)
         await self.async_request_refresh()
+        return {
+            "added": True,
+            "until": dt_util.as_local(valid_until).isoformat(),
+            "replaced_lock": lock is not None,
+        }
 
-    async def async_cancel_time_bonus(self, account_id: str, platform: str) -> None:
+    async def async_cancel_time_bonus(self, account_id: str, platform: str) -> dict[str, Any]:
         """Cancel the Xbox extra time in force, and nothing else.
 
         The Xbox Family Settings app's revoke (override 100) is sent only when
         extra time is in force and no lock is: the revoke would lift a lock too,
-        and a lock (from this integration or from a parent) is never touched here.
+        and a lock (from this integration or from a parent) is never touched
+        here. With a lock in force this fails; with no extra time in force it
+        does nothing and says so.
         """
         xuid = await self._async_bonus_xuid(account_id, platform)
-        try:
-            current = await self.xbox_family.async_get_overrides(xuid)
-        except XboxFamilyError as err:
+        current = await self._async_xbox_overrides(xuid, "nothing was cancelled")
+        if self._xapprove_override_of(current, OVERRIDE_BLOCK) is not None:
             raise HomeAssistantError(
-                f"Could not read the Xbox overrides, so nothing was cancelled: {err}"
-            ) from err
+                "The Xbox is locked, so nothing was cancelled: the revoke would lift "
+                "the lock as well. Use unlock_platform to end the lock."
+            )
         if self._xapprove_override_of(current, OVERRIDE_ALLOW) is None:
             _LOGGER.info("No Xbox extra time in force for account %s; nothing to cancel", account_id)
-            return
-        if self._xapprove_override_of(current, OVERRIDE_BLOCK) is not None:
-            _LOGGER.info(
-                "The Xbox of account %s is locked; the extra time is left as it is "
-                "so the lock is not lifted",
-                account_id,
-            )
-            return
+            return {"cancelled": False, "reason": "no_extra_time"}
         try:
             answer = await self.xbox_family.async_create_override(
                 xuid, OVERRIDE_REVOKE, dt_util.utcnow() + timedelta(minutes=10)
@@ -1198,6 +1246,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
         if self._xapprove_override_of(answer, OVERRIDE_ALLOW) is not None:
             raise HomeAssistantError("Microsoft left the Xbox extra time in place.")
+        lock = self._xapprove_override_of(answer, OVERRIDE_BLOCK)
+        if lock is not None:
+            _LOGGER.warning(
+                "After cancelling the Xbox extra time of account %s, Microsoft lists a "
+                "lock until %s",
+                account_id, lock.get("validUntil"),
+            )
+        return {"cancelled": True, "lock_in_force": lock is not None}
 
     # --- Xbox Family Settings API (xapprove) ---------------------------------
     @property

@@ -186,7 +186,7 @@
     },
     "add_time_bonus": {
       "name": "Add Xbox Extra Time",
-      "description": "Give a child extra time on the Xbox, for some minutes or until a time, through the Xbox Family Settings service. Needs the Xbox Family Settings sign-in linked. Fails when Microsoft does not confirm the extra time, or when the Xbox stays locked.",
+      "description": "Give a child extra time on the Xbox, for some minutes or until a time, through the Xbox Family Settings service. Needs the Xbox Family Settings sign-in linked. Refused while the Xbox is locked, unless Replace lock is on. Fails when Microsoft does not confirm the extra time, or when the Xbox stays locked. Can answer with added, until and replaced_lock.",
       "fields": {
         "account_id": {
           "name": "Account ID",
@@ -203,12 +203,16 @@
         "until": {
           "name": "Until",
           "description": "When the extra time ends, instead of minutes (at most 24 hours from now)."
+        },
+        "replace_lock": {
+          "name": "Replace lock",
+          "description": "Microsoft keeps one Xbox override, so extra time replaces a lock. Off (default): refused while the Xbox is locked, by this integration or by a parent. On: the lock is replaced by the extra time."
         }
       }
     },
     "cancel_time_bonus": {
       "name": "Cancel Xbox Extra Time",
-      "description": "Cancel the extra time in force on a child's Xbox. Only extra time is cancelled; a lock is never lifted, and nothing is sent when no extra time is in force.",
+      "description": "Cancel the extra time in force on a child's Xbox. Only extra time is cancelled: fails while the Xbox is locked (a lock is never lifted), and does nothing when no extra time is in force. Can answer with cancelled and reason or lock_in_force.",
       "fields": {
         "account_id": {
           "name": "Account ID",

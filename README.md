@@ -396,9 +396,11 @@ data:
 
 `add_time_bonus` gives a child extra time on the Xbox, for some `minutes` (1 – 1440) or `until` a time (at most 24 hours ahead); `cancel_time_bonus` takes it back. Both go through the Xbox Family Settings service (the same "add time" as the Xbox Family Settings app), so they need **Xbox** among the monitored platforms and the Xbox Family Settings sign-in linked; otherwise they fail with an error saying so. They never use the web session.
 
-- The extra time is believed only when Microsoft's answer lists it ending when asked; otherwise the action fails. Microsoft keeps one Xbox override, so extra time replaces a lock; if a lock is still listed afterwards, the action fails and the lock stays.
+- Microsoft keeps **one** Xbox override, so extra time replaces a lock. While the Xbox is locked (by `lock_platform` or by a parent in the app), `add_time_bonus` is refused unless you pass `replace_lock: true`.
+- The extra time is believed only when Microsoft's answer lists it ending when asked; otherwise the action fails. If a lock is still listed afterwards, the action fails and the lock stays.
 - While extra time runs, the Xbox lock switch reads off (Microsoft reports `allowUntil`).
-- `cancel_time_bonus` only ever cancels extra time: when nothing or a lock is in force, nothing is sent, and a lock is never lifted.
+- `cancel_time_bonus` only ever cancels extra time. While the Xbox is locked it fails without sending anything (the cancel would lift the lock too); with no extra time in force it does nothing.
+- Both can answer with what they did (`response_variable`): `add_time_bonus` with `{added, until, replaced_lock}`, `cancel_time_bonus` with `{cancelled: true, lock_in_force}` or `{cancelled: false, reason: "no_extra_time"}`.
 - Windows has no confirmed request for extra time yet, so only `platform: "Xbox"` (the default) is accepted.
 
 ```yaml
@@ -407,6 +409,16 @@ service: microsoft_family_safety.add_time_bonus
 data:
   account_id: "1234567890123456"
   minutes: 30
+```
+
+```yaml
+# One more hour even though the Xbox is locked: the lock is replaced
+service: microsoft_family_safety.add_time_bonus
+data:
+  account_id: "1234567890123456"
+  minutes: 60
+  replace_lock: true
+response_variable: extra_time
 ```
 
 ```yaml
