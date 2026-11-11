@@ -1,0 +1,76 @@
+"""Websites visited and searches from the mobile activity report (#65)."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+from custom_components.microsoft_family_safety.api_client import (
+    FamilySafetyWebAPI,
+    FamilySafetyWebAPIError,
+    summarize_web_activity,
+)
+
+CHILD = "1234567890123456"
+
+WEB = {
+    "allowed": [
+        {"domain": "example.com", "totalCountOfVisitsToDomain": 3,
+         "lastVisitToDomain": "2026-11-08T11:36:00", "visits": [{"url": "x"}]},
+        {"domain": "news.example", "totalCountOfVisitsToDomain": 108,
+         "lastVisitToDomain": "2026-11-09T08:00:00"},
+    ],
+    "blocked": [{"domain": "blocked.example", "totalCountOfVisitsToDomain": 1}],
+}
+SEARCH = {
+    "searched": [
+        {"domain": "bing.com", "searches": [
+            {"search": "older", "date": "2026-11-07T10:00:00"},
+            {"search": "newer", "date": "2026-11-09T10:00:00"},
+        ]}
+    ]
+}
+
+
+def test_summary_sorts_and_trims_the_report() -> None:
+    summary = summarize_web_activity(WEB, SEARCH)
+    assert summary["report_available"] is True
+    assert summary["total_visits"] == 112
+    assert summary["site_count"] == 3
+    assert summary["blocked_count"] == 1
+    assert [s["domain"] for s in summary["sites"]] == [
+        "news.example", "example.com", "blocked.example"
+    ]
+    assert summary["sites"][1] == {
+        "domain": "example.com", "visits": 3,
+        "last_visit": "2026-11-08T11:36:00", "blocked": False,
+    }
+    assert [s["search"] for s in summary["searches"]] == ["newer", "older"]
+
+
+def test_no_report_is_not_zero_browsing() -> None:
+    summary = summarize_web_activity(None, None)
+    assert summary["report_available"] is False
+    assert summary["total_visits"] == 0
+    assert summary["sites"] == []
+
+
+async def test_403_reads_as_no_report_and_skips_the_search_call() -> None:
+    api = FamilySafetyWebAPI(authenticator=None)
+    api._request = AsyncMock(
+        side_effect=FamilySafetyWebAPIError("API request failed with status 403: ")
+    )
+    summary = await api.get_web_activity(CHILD)
+    assert summary["report_available"] is False
+    assert api._request.await_count == 1
+
+
+async def test_report_request_uses_a_boolean_allow_status() -> None:
+    api = FamilySafetyWebAPI(authenticator=None)
+    api._request = AsyncMock(side_effect=[WEB, SEARCH])
+    summary = await api.get_web_activity(CHILD)
+    assert summary["total_visits"] == 112
+    web_call, search_call = api._request.await_args_list
+    assert web_call.args[1] == f"/v1/activityreport/webactivity/{CHILD}"
+    assert web_call.kwargs["params"]["allowStatus"] == "true"
+    assert web_call.kwargs["params"]["beginTime"].endswith("Z")
+    assert "allowStatus" not in search_call.kwargs["params"]

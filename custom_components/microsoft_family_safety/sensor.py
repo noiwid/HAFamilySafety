@@ -72,6 +72,7 @@ def _create_account_sensors(
         FamilySafetyApplicationCountSensor(coordinator, entry, account_id),
         FamilySafetyPendingRequestsSensor(coordinator, entry, account_id),
         FamilySafetyWebFilterSensor(coordinator, entry, account_id),
+        FamilySafetyWebActivitySensor(coordinator, entry, account_id),
         FamilySafetyScreenTimePolicySensor(coordinator, entry, account_id),
     ]
 
@@ -609,6 +610,45 @@ class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
                 if source in content_data and target not in attrs:
                     attrs[target] = content_data[source]
         return attrs
+
+
+class FamilySafetyWebActivitySensor(FamilySafetyAccountSensor):
+    """Websites visited in Edge over the last 7 days, with the Bing searches (#65)."""
+
+    _attr_icon = "mdi:web-clock"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "visits"
+    # Up to 50 sites and 50 searches: keep them out of the recorder database.
+    _unrecorded_attributes = frozenset({"sites", "searches"})
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, account_id)
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_web_activity"
+        self._attr_name = f"{self._get_account_name()} Websites Visited"
+
+    def _activity(self) -> dict[str, Any] | None:
+        account_data = self._get_account_data()
+        return account_data.get("web_activity") if account_data else None
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of visits over the last 7 days."""
+        activity = self._activity()
+        return activity.get("total_visits") if activity else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the sites (most visited first) and the latest searches."""
+        activity = self._activity()
+        if not activity:
+            return {}
+        return {key: value for key, value in activity.items() if key != "total_visits"}
 
 
 class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):

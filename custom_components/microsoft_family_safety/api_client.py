@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from http.cookies import SimpleCookie
 import json
@@ -159,6 +159,48 @@ def _extract_msa_continue_form(page: str) -> tuple[str, dict[str, str]] | None:
     if not fields:
         return None
     return action, fields
+
+
+#: Sites and searches kept in the sensor attributes (the raw report is ~30 KB).
+_WEB_ACTIVITY_LIMIT = 50
+
+
+def summarize_web_activity(web: Any, search: Any) -> dict[str, Any]:
+    """Trim the mobile web and search activity reports for a sensor.
+
+    ``web`` is None when Microsoft has no report (403): the summary then says
+    so instead of pretending there was no browsing.
+    """
+    available = isinstance(web, dict)
+    web = web if available else {}
+    search = search if isinstance(search, dict) else {}
+    sites = []
+    for status in ("allowed", "blocked"):
+        for entry in web.get(status) or []:
+            if isinstance(entry, dict) and entry.get("domain"):
+                sites.append({
+                    "domain": entry["domain"],
+                    "visits": int(entry.get("totalCountOfVisitsToDomain") or 0),
+                    "last_visit": entry.get("lastVisitToDomain"),
+                    "blocked": status == "blocked",
+                })
+    sites.sort(key=lambda s: s["visits"], reverse=True)
+    searches = [
+        {"search": item.get("search"), "date": item.get("date"), "site": group.get("domain")}
+        for group in search.get("searched") or []
+        if isinstance(group, dict)
+        for item in group.get("searches") or []
+        if isinstance(item, dict) and item.get("search")
+    ]
+    searches.sort(key=lambda s: s["date"] or "", reverse=True)
+    return {
+        "report_available": available,
+        "total_visits": sum(s["visits"] for s in sites),
+        "site_count": len(sites),
+        "blocked_count": sum(1 for s in sites if s["blocked"]),
+        "sites": sites[:_WEB_ACTIVITY_LIMIT],
+        "searches": searches[:_WEB_ACTIVITY_LIMIT],
+    }
 
 
 class FamilySafetyWebAPI:
@@ -1968,6 +2010,33 @@ class FamilySafetyWebAPI:
                 intervals.append({"begin": fmt(start), "end": fmt(index)})
                 start = None
         return intervals
+
+    async def get_web_activity(self, child_id: str, days: int = 7) -> dict[str, Any]:
+        """Websites visited and Bing searches over the last ``days`` (#65).
+
+        Microsoft answers 403 when the child has no Edge browsing data; that
+        is reported as an empty summary with ``report_available`` false.
+        """
+        end = dt_util.utcnow()
+        params = {
+            "beginTime": (end - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "endTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        path = f"/v1/activityreport/webactivity/{child_id}"
+        try:
+            web = await self._request("GET", path, params={**params, "allowStatus": "true"})
+        except FamilySafetyWebAPIError as err:
+            if "status 403" not in str(err):
+                raise
+            return summarize_web_activity(None, None)
+        try:
+            search = await self._request(
+                "GET", f"/v1/activityreport/searchactivity/{child_id}", params=params
+            )
+        except FamilySafetyWebAPIError as err:
+            _LOGGER.debug("Could not read search activity: %s", err)
+            search = None
+        return summarize_web_activity(web, search)
 
     async def get_mobile_screentime_policy(self, child_id: str, platform: str = "Windows") -> dict | None:
         """Return the child's schedule in the shape the entities read (allowance "HH:MM:SS").

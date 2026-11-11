@@ -268,7 +268,7 @@ For one child with no per-app switches, an account with Windows monitoring enabl
 
 | Platform | Count | What |
 |----------|-------|------|
-| `sensor` | 6 – 7 | Screen Time, Account Info, Applications, Pending Requests, Web Filter, Screen Time Policy (+ Balance when the account exposes one) |
+| `sensor` | 7 – 8 | Screen Time, Account Info, Applications, Pending Requests, Web Filter, Websites Visited, Screen Time Policy (+ Balance when the account exposes one) |
 | `switch` | 4 + platforms + apps | Account Lock, Screen Time Limits, Xbox Screen Time Limits, App Limits, one Platform Lock per monitored platform, one per application |
 | `button` | 2 | Approve Request, Deny Request |
 | `number` | 7 (+7 Xbox) | one daily limit per day, plus one Xbox daily limit per day once the Xbox schedule is on |
@@ -288,6 +288,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 | Balance | `sensor.{prefix}_balance` | Account balance | *(monetary sensor, only if available)* |
 | Pending Requests | `sensor.{prefix}_pending_requests` | Request count | `requests` |
 | Web Filter | `sensor.{prefix}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge`, `content_settings`, `max_age_rating`, `acquisition_policy` |
+| Websites Visited | `sensor.{prefix}_websites_visited` | Visits in Edge over the last 7 days | `report_available`, `site_count`, `blocked_count`, `sites` (50 most visited: `domain`, `visits`, `last_visit`, `blocked`), `searches` (50 latest Bing searches). Read every 30 min; `report_available: false` when Microsoft has no Edge data for the child. `sites` and `searches` are not stored in the history database |
 | Screen Time Policy | `sensor.{prefix}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` … `sunday_allowance`, `*_allowed_intervals`, `daily_restrictions` |
 
 ### Sensors — Per Physical Device
@@ -762,6 +763,8 @@ Used for read operations and app management. Token-based, no browser session req
 |--------|----------|-------------|---------|
 | GET | `/v1/WebRestrictions/{childId}` | Web filter settings & blocked sites | `sensor.web_filter` |
 | GET | `/v1/ContentRestrictions/{childId}` | Age rating & ask-to-buy state | `sensor.web_filter` attributes |
+| GET | `/v1/activityreport/webactivity/{childId}` | Websites visited in Edge (`allowStatus=true`, 403 when there is no data) | `sensor.websites_visited` |
+| GET | `/v1/activityreport/searchactivity/{childId}` | Bing searches | `sensor.websites_visited` attributes |
 | GET | `/v1/DeviceLimits/{childId}/overrides` | Active device overrides | `switch.lock` |
 | PATCH | `/v4/devicelimits/schedules/{childId}` | ~~Set screen time schedule~~ | **Broken** (400 error) |
 | POST | `/v1/devicelimits/{childId}/overrides` | ~~Lock device~~ | **Broken** (Microsoft removed) |
