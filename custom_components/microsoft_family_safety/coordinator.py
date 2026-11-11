@@ -28,6 +28,12 @@ from homeassistant.util import dt as dt_util
 from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
+from .screen_time import (
+    BLOCK_UNTIL,
+    override as make_override,
+    platform_allowance,
+    xbox_policy_override,
+)
 from .xbox_family_api import (
     OVERRIDE_BLOCK,
     OVERRIDE_REVOKE,
@@ -1451,6 +1457,51 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise RuntimeError("Web API not initialized")
         await self.web_api.set_acquisition_policy(child_id, require_approval)
         await self.async_request_refresh()
+
+    @staticmethod
+    def _windows_usage(data: dict[str, Any], account: dict[str, Any]) -> int | None:
+        """Today's minutes on the child's Windows devices; None without one."""
+        devices = data.get("devices") or {}
+        total: int | None = None
+        for device_id in account.get("devices") or []:
+            device = devices.get(device_id) or {}
+            kind = f"{device.get('os_name') or ''} {device.get('device_class') or ''}".lower()
+            if "windows" in kind and "xbox" not in kind:
+                total = (total or 0) + int(device.get("today_time_used") or 0)
+        return total
+
+    def platform_status(
+        self, account_id: Any, platform: str, now: datetime | None = None
+    ) -> dict[str, Any]:
+        """Whether ``platform`` (Windows or Xbox) is allowed now, and for how long.
+
+        Only reads what the last update holds (see
+        screen_time.platform_allowance). The Xbox uses its own schedule, the
+        Xbox play time and the override in the Xbox policy; Windows uses the
+        Windows schedule and the time of the child's Windows devices. A lock
+        listed in ``blocked_platforms`` counts for both.
+        """
+        data = self.data or {}
+        account = (data.get("accounts") or {}).get(account_id) or {}
+        if platform.lower() == "xbox":
+            policy = account.get("xbox_screentime_policy")
+            used = account.get("xbox_today_usage")
+            current = xbox_policy_override(account.get("xbox_policy"))
+        else:
+            policy = account.get("screentime_policy")
+            used = self._windows_usage(data, account)
+            current = None
+        if platform in (account.get("blocked_platforms") or []) and (
+            current is None or current.get("type") != BLOCK_UNTIL
+        ):
+            until = self._platform_override_until.get((str(account_id), platform.lower()))
+            current = make_override(BLOCK_UNTIL, until)
+        return platform_allowance(
+            policy if isinstance(policy, dict) else None,
+            used if isinstance(used, int) else None,
+            now or dt_util.now(),
+            current,
+        )
 
     def is_account_locked(self, account_id: str) -> bool | None:
         account = self.account_data(account_id)

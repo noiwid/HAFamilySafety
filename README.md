@@ -125,6 +125,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | **Native authentication** | Sign in to Microsoft directly from Home Assistant — no add-on, no container, no copy-pasted redirect URL |
 | **Account Lock** | Lock/unlock a child's entire account with a single switch |
 | **Screen time monitoring** | Track daily usage per child and per device |
+| **Allowed now / time left** | See per child and platform (Windows, Xbox) whether it may be used right now, the minutes left today, and when downtime starts and ends |
 | **Screen time policies** | Adjust daily allowances and allowed time intervals per day — directly from the UI |
 | **App management** | Block/unblock apps, set per-app time limits and windows |
 | **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
@@ -269,7 +270,8 @@ For one child with no per-app switches, an account with Windows monitoring enabl
 
 | Platform | Count | What |
 |----------|-------|------|
-| `sensor` | 7 – 8 | Screen Time, Account Info, Applications, Pending Requests, Web Filter, Websites Visited, Screen Time Policy (+ Balance when the account exposes one) |
+| `sensor` | 8 – 11 | Screen Time, Account Info, Applications, Pending Requests, Web Filter, Websites Visited, Screen Time Policy, Windows Time Remaining (+ Balance when the account exposes one, + Xbox Screen Time and Xbox Time Remaining with Xbox data) |
+| `binary_sensor` | 2 (+2 Xbox) | Windows Allowed Now, Windows Downtime Active, plus the same two for the Xbox once its schedule is read |
 | `switch` | 4 + platforms + apps | Account Lock, Screen Time Limits, Xbox Screen Time Limits, App Limits, one Platform Lock per monitored platform, one per application |
 | `button` | 2 | Approve Request, Deny Request |
 | `number` | 7 (+7 Xbox) | one daily limit per day, plus one Xbox daily limit per day once the Xbox schedule is on |
@@ -291,6 +293,27 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 | Web Filter | `sensor.{prefix}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge`, `content_settings`, `max_age_rating`, `acquisition_policy` |
 | Websites Visited | `sensor.{prefix}_websites_visited` | Visits in Edge over the last 7 days | `report_available`, `site_count`, `blocked_count`, `sites` (50 most visited: `domain`, `visits`, `last_visit`, `blocked`), `searches` (50 latest search terms, one row per term: `search`, `visits`, `date`, `site`). Read every 30 min; `report_available: false` when Microsoft has no Edge data for the child. `sites` and `searches` are not stored in the history database |
 | Screen Time Policy | `sensor.{prefix}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` … `sunday_allowance`, `*_allowed_intervals`, `daily_restrictions`; with the Xbox Family Settings sign-in linked, also `xbox_monday_allowed_intervals` … `xbox_sunday_allowed_intervals` (the Xbox allowed hours, e.g. `[{begin: "07:00", end: "22:00"}]`) |
+| Windows Time Remaining | `sensor.{prefix}_windows_time_remaining` | Minutes the child may still use Windows today | `allowed_now`, `reason`, `allowance_minutes`, `used_minutes`, `limits_enabled`, `allowed_ranges`. Same rules as Allowed Now below |
+| Xbox Screen Time | `sensor.{prefix}_xbox_screen_time` | Minutes of Xbox play today | Created with the Xbox features on, once Xbox data was read |
+| Xbox Time Remaining | `sensor.{prefix}_xbox_time_remaining` | Minutes the child may still play on the Xbox today | As Windows Time Remaining, on the Xbox schedule, Xbox play time and Xbox lock or extra time |
+
+### Binary Sensors — Per Child Account and Platform
+
+One of each for Windows, and for the Xbox once its schedule has been read. They only use what the integration already polls (schedule, today's usage, locks and extra time) and are re-evaluated every minute, since allowed hours move with the clock between updates.
+
+| Entity | Entity ID | State | Key Attributes |
+|--------|-----------|-------|----------------|
+| Allowed Now | `binary_sensor.{prefix}_{platform}_allowed_now` | ON while the platform may be used now | `reason`, `remaining_minutes`, `allowance_minutes`, `used_minutes`, `in_allowed_hours`, `override`, `override_until` |
+| Downtime Active | `binary_sensor.{prefix}_{platform}_downtime_active` | ON outside today's allowed hours | `downtime_start`, `downtime_end` (the current downtime, or the next one, local ISO times) |
+
+**How Allowed Now and Time Remaining decide**, in this order:
+
+1. A lock in force (`reason: locked`) → off, 0 minutes left. Extra time granted (`extra_time`) → on until it ends.
+2. Limits turned off for the platform (`no_limits`) → on, counting down to midnight.
+3. Outside today's allowed hours (`outside_allowed_hours`) → off, 0 minutes.
+4. Today's allowance used up (`allowance_used`) → off, 0 minutes. Otherwise on (`within_limits`), with the smaller of the allowance left and the time to the end of the current allowed window.
+
+Windows uses the Windows schedule and the minutes of the child's Windows devices; the Xbox uses the Xbox schedule, Xbox play time and the lock or extra time in the Xbox policy. The state is `unknown` (`reason: unknown`) while the schedule or today's usage has not been read, for example for a child without a Windows device. `remaining_minutes` and `used_minutes` are not stored in the history database.
 
 ### Sensors — Per Physical Device
 
@@ -614,6 +637,25 @@ automation:
           message: >
             {{ state_attr('sensor.firstname_screen_time', 'formatted_time') }}
             of screen time used today.
+```
+
+### Warn before time runs out
+
+```yaml
+automation:
+  - alias: "Five minutes of Xbox left"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.firstname_xbox_time_remaining
+        below: 6
+    condition:
+      - condition: state
+        entity_id: binary_sensor.firstname_xbox_allowed_now
+        state: "on"
+    action:
+      - action: notify.mobile_app_your_phone
+        data:
+          message: "Five minutes of Xbox left today."
 ```
 
 ### Set weekday limits automatically
