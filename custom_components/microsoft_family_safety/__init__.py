@@ -43,6 +43,7 @@ from .const import (
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
 from .permissions import guard_service
+from .targeting import child_schema, resolve_account_id
 from ._httpx_web_adapter import apply_httpx_web_transport_patch
 from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 
@@ -52,21 +53,18 @@ _LOGGER = logging.getLogger(__name__)
 # Service Schemas
 # ──────────────────────────────────────────────────────────────────────
 
-SERVICE_BLOCK_APP_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_BLOCK_APP_SCHEMA = child_schema({
     vol.Required("app_id"): cv.string,
 })
 
-SERVICE_LOCK_PLATFORM_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_LOCK_PLATFORM_SCHEMA = child_schema({
     vol.Required("platform"): vol.In(["Windows", "Xbox", "Mobile"]),
     vol.Optional("duration_hours", default=24): vol.All(
         vol.Coerce(int), vol.Range(min=1, max=168)
     ),
 })
 
-SERVICE_UNLOCK_PLATFORM_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_UNLOCK_PLATFORM_SCHEMA = child_schema({
     vol.Required("platform"): vol.In(["Windows", "Xbox", "Mobile"]),
 })
 
@@ -83,15 +81,13 @@ SERVICE_DENY_REQUEST_SCHEMA = vol.Schema({
 
 # New service schemas (web API)
 
-SERVICE_SET_SCREENTIME_LIMIT_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_SET_SCREENTIME_LIMIT_SCHEMA = child_schema({
     vol.Required("day_of_week"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
     vol.Required("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
 })
 
-SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = child_schema({
     vol.Required("day_of_week"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
     vol.Required("start_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
     vol.Optional("start_minute", default=0): vol.In([0, 30]),
@@ -100,8 +96,7 @@ SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = vol.Schema({
     vol.Optional("end_minute", default=0): vol.In([0, 30]),
 })
 
-SERVICE_SET_APP_TIME_LIMIT_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_SET_APP_TIME_LIMIT_SCHEMA = child_schema({
     vol.Required("app_id"): cv.string,
     vol.Required("app_name"): cv.string,
     vol.Optional("platform", default="windows"): vol.In(["windows", "xbox", "mobile"]),
@@ -111,45 +106,35 @@ SERVICE_SET_APP_TIME_LIMIT_SCHEMA = vol.Schema({
     vol.Optional("end_time", default="22:00:00"): cv.string,
 })
 
-SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA = child_schema({
     vol.Required("app_id"): cv.string,
     vol.Required("app_name"): cv.string,
     vol.Optional("platform", default="windows"): vol.In(["windows", "xbox", "mobile"]),
 })
 
-SERVICE_BLOCK_WEBSITE_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_BLOCK_WEBSITE_SCHEMA = child_schema({
     vol.Required("website"): cv.string,
 })
 
-SERVICE_REMOVE_WEBSITE_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_REMOVE_WEBSITE_SCHEMA = child_schema({
     vol.Required("website"): cv.string,
 })
 
-SERVICE_TOGGLE_WEB_FILTER_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_TOGGLE_WEB_FILTER_SCHEMA = child_schema({
     vol.Required("enabled"): cv.boolean,
 })
 
-SERVICE_SET_AGE_RATING_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_SET_AGE_RATING_SCHEMA = child_schema({
     vol.Required("age"): vol.All(vol.Coerce(int), vol.Range(min=3, max=21)),
 })
 
-SERVICE_SET_ACQUISITION_POLICY_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_SET_ACQUISITION_POLICY_SCHEMA = child_schema({
     vol.Required("require_approval"): cv.boolean,
 })
 
-SERVICE_LOCK_ACCOUNT_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
-})
+SERVICE_LOCK_ACCOUNT_SCHEMA = child_schema({})
 
-SERVICE_UNLOCK_ACCOUNT_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
-})
+SERVICE_UNLOCK_ACCOUNT_SCHEMA = child_schema({})
 
 SERVICE_REQUEST_REAUTH_SCHEMA = vol.Schema({})
 
@@ -296,13 +281,17 @@ def _register_services(hass: HomeAssistant) -> None:
          lambda d: ()),
     ]
 
-    def make_handler(method_name, extract_args):
+    def make_handler(method_name, extract_args, per_child):
         async def handler(call: ServiceCall) -> None:
-            coordinator = _get_coordinator(hass, call.data.get("account_id"))
+            data = dict(call.data)
+            if per_child:
+                # account_id as before, or any entity of the child.
+                data["account_id"] = resolve_account_id(hass, data)
+            coordinator = _get_coordinator(hass, data.get("account_id"))
             if coordinator is None:
                 raise HomeAssistantError("No Microsoft Family Safety coordinator available")
             try:
-                await getattr(coordinator, method_name)(*extract_args(call.data))
+                await getattr(coordinator, method_name)(*extract_args(data))
             except HomeAssistantError:
                 raise
             except Exception as err:  # noqa: BLE001 - report as a service error
@@ -314,8 +303,14 @@ def _register_services(hass: HomeAssistant) -> None:
         return handler
 
     for name, schema, method, extract in services:
+        per_child = schema not in (
+            SERVICE_APPROVE_REQUEST_SCHEMA,
+            SERVICE_DENY_REQUEST_SCHEMA,
+            SERVICE_REQUEST_REAUTH_SCHEMA,
+        )
         hass.services.async_register(
-            DOMAIN, name, guard_service(hass, make_handler(method, extract)), schema=schema
+            DOMAIN, name, guard_service(hass, make_handler(method, extract, per_child)),
+            schema=schema,
         )
 
 
