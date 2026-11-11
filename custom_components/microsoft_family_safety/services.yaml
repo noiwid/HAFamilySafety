@@ -112,6 +112,57 @@ unlock_platform:
             - "Xbox"
             - "Mobile"
 
+add_time_bonus:
+  name: Add Xbox Extra Time
+  description: Give a child extra time on the Xbox, for some minutes or until a time, through the Xbox Family Settings service. Needs the Xbox Family Settings sign-in linked. Fails when Microsoft does not confirm the extra time, or when the Xbox stays locked.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: Only Xbox for now (the default).
+      default: "Xbox"
+      selector:
+        select:
+          options:
+            - "Xbox"
+    minutes:
+      name: Minutes
+      description: Extra time from now, 1 to 1440 minutes. Give this or until.
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minutes
+    until:
+      name: Until
+      description: When the extra time ends, instead of minutes (at most 24 hours from now).
+      selector:
+        datetime:
+
+cancel_time_bonus:
+  name: Cancel Xbox Extra Time
+  description: Cancel the extra time in force on a child's Xbox. Only extra time is cancelled; a lock is never lifted, and nothing is sent when no extra time is in force.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: Only Xbox for now (the default).
+      default: "Xbox"
+      selector:
+        select:
+          options:
+            - "Xbox"
+
 approve_request:
   name: Approve Pending Request
   description: Approve a pending screen time extension request.

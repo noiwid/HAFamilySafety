@@ -29,6 +29,7 @@ from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .xbox_family_api import (
+    OVERRIDE_ALLOW,
     OVERRIDE_BLOCK,
     OVERRIDE_REVOKE,
     XboxFamilyAPI,
@@ -1097,6 +1098,106 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             child_id, app_id, display_name, platform
         )
         await self.async_request_refresh()
+
+    # --- Xbox extra time (add_time_bonus / cancel_time_bonus) -----------------
+    #: How far the extra time Microsoft reads back may be from what was asked.
+    _BONUS_TOLERANCE = timedelta(minutes=2)
+
+    @staticmethod
+    def _xapprove_override_of(answer: dict[str, Any] | None, override_type: int) -> dict | None:
+        """The override of override_type in an xapprove overrides answer, if any."""
+        for override in (answer or {}).get("overrides") or []:
+            if isinstance(override, dict) and override.get("overrideType") == override_type:
+                return override
+        return None
+
+    async def _async_bonus_xuid(self, account_id: str, platform: str) -> str:
+        """The child's Xbox user id for extra time, or a clear error.
+
+        Extra time goes through the Xbox Family Settings service only; Windows
+        has no request for it that could be confirmed.
+        """
+        if str(platform).lower() != "xbox":
+            raise HomeAssistantError("Extra time can only be given on the Xbox.")
+        if not any(str(key) == str(account_id) for key in self._accounts):
+            raise ValueError(f"Account {account_id} not found")
+        xuid = await self._xapprove_xuid_for(account_id)
+        if xuid is None:
+            raise HomeAssistantError(
+                "Xbox extra time needs Xbox among the monitored platforms and the Xbox "
+                "Family Settings sign-in linked (Connection sensor: xbox_family), and "
+                "the child must be on the Xbox family."
+            )
+        return xuid
+
+    async def async_add_time_bonus(
+        self, account_id: str, platform: str, until: datetime
+    ) -> None:
+        """Give a child extra time on the Xbox until ``until``.
+
+        The Xbox Family Settings app's own "add time" (xapprove override 1). It
+        succeeds only when Microsoft's answer lists the extra time ending when
+        asked and no lock left in force.
+        """
+        xuid = await self._async_bonus_xuid(account_id, platform)
+        until = dt_util.as_utc(until)
+        try:
+            answer = await self.xbox_family.async_create_override(xuid, OVERRIDE_ALLOW, until)
+        except XboxFamilyError as err:
+            raise HomeAssistantError(f"Could not give Xbox extra time: {err}") from err
+        allow = self._xapprove_override_of(answer, OVERRIDE_ALLOW)
+        valid_until = dt_util.parse_datetime(str((allow or {}).get("validUntil") or ""))
+        if valid_until is None or abs(dt_util.as_utc(valid_until) - until) > self._BONUS_TOLERANCE:
+            _LOGGER.debug("Xbox extra time not confirmed by xapprove: answer %s", answer)
+            raise HomeAssistantError(
+                "Microsoft did not confirm the Xbox extra time "
+                f"(asked until {until.isoformat()}, answer: {allow or 'no extra time'})."
+            )
+        key = (str(account_id), "xbox")
+        self._xbox_lock_known.add(key[0])
+        if self._xapprove_override_of(answer, OVERRIDE_BLOCK) is not None:
+            await self.async_request_refresh()
+            raise HomeAssistantError(
+                "Microsoft recorded the Xbox extra time but the Xbox is still locked; "
+                "unlock it with unlock_platform first."
+            )
+        # Microsoft keeps one Xbox override: the extra time replaced any lock.
+        self._platform_override_until.pop(key, None)
+        await self.async_request_refresh()
+
+    async def async_cancel_time_bonus(self, account_id: str, platform: str) -> None:
+        """Cancel the Xbox extra time in force, and nothing else.
+
+        The Xbox Family Settings app's revoke (override 100) is sent only when
+        extra time is in force and no lock is: the revoke would lift a lock too,
+        and a lock (from this integration or from a parent) is never touched here.
+        """
+        xuid = await self._async_bonus_xuid(account_id, platform)
+        try:
+            current = await self.xbox_family.async_get_overrides(xuid)
+        except XboxFamilyError as err:
+            raise HomeAssistantError(
+                f"Could not read the Xbox overrides, so nothing was cancelled: {err}"
+            ) from err
+        if self._xapprove_override_of(current, OVERRIDE_ALLOW) is None:
+            _LOGGER.info("No Xbox extra time in force for account %s; nothing to cancel", account_id)
+            return
+        if self._xapprove_override_of(current, OVERRIDE_BLOCK) is not None:
+            _LOGGER.info(
+                "The Xbox of account %s is locked; the extra time is left as it is "
+                "so the lock is not lifted",
+                account_id,
+            )
+            return
+        try:
+            answer = await self.xbox_family.async_create_override(
+                xuid, OVERRIDE_REVOKE, dt_util.utcnow() + timedelta(minutes=10)
+            )
+        except XboxFamilyError as err:
+            raise HomeAssistantError(f"Could not cancel the Xbox extra time: {err}") from err
+        await self.async_request_refresh()
+        if self._xapprove_override_of(answer, OVERRIDE_ALLOW) is not None:
+            raise HomeAssistantError("Microsoft left the Xbox extra time in place.")
 
     # --- Xbox Family Settings API (xapprove) ---------------------------------
     @property

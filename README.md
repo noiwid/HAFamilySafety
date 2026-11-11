@@ -348,7 +348,7 @@ One start/end pair per day of the week, editable from the UI with optimistic upd
 
 ## Services
 
-The integration exposes **18 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
+The integration exposes **20 services**, split between the pyfamilysafety library, the web API and the Xbox Family Settings service, plus one to start the sign-in flow on demand.
 
 Every service that acts on one child takes the child either as `account_id` (the Microsoft user ID, shown in the `user_id` attribute of the child's entities) or as `entity_id`: any Microsoft Family Safety entity of that child or of one of its devices. The account is looked up from the entity, so automations need no hard-coded ID. A list of entities is accepted as long as they all belong to the same child. When both are given, `account_id` wins.
 
@@ -390,6 +390,30 @@ service: microsoft_family_safety.unlock_platform
 data:
   account_id: "1234567890123456"
   platform: "Windows"
+```
+
+#### Xbox extra time
+
+`add_time_bonus` gives a child extra time on the Xbox, for some `minutes` (1 – 1440) or `until` a time (at most 24 hours ahead); `cancel_time_bonus` takes it back. Both go through the Xbox Family Settings service (the same "add time" as the Xbox Family Settings app), so they need **Xbox** among the monitored platforms and the Xbox Family Settings sign-in linked; otherwise they fail with an error saying so. They never use the web session.
+
+- The extra time is believed only when Microsoft's answer lists it ending when asked; otherwise the action fails. Microsoft keeps one Xbox override, so extra time replaces a lock; if a lock is still listed afterwards, the action fails and the lock stays.
+- While extra time runs, the Xbox lock switch reads off (Microsoft reports `allowUntil`).
+- `cancel_time_bonus` only ever cancels extra time: when nothing or a lock is in force, nothing is sent, and a lock is never lifted.
+- Windows has no confirmed request for extra time yet, so only `platform: "Xbox"` (the default) is accepted.
+
+```yaml
+# 30 minutes of extra time on the Xbox
+service: microsoft_family_safety.add_time_bonus
+data:
+  account_id: "1234567890123456"
+  minutes: 30
+```
+
+```yaml
+# End the Xbox extra time early
+service: microsoft_family_safety.cancel_time_bonus
+data:
+  account_id: "1234567890123456"
 ```
 
 ### App Management

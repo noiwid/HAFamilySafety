@@ -184,6 +184,42 @@
         }
       }
     },
+    "add_time_bonus": {
+      "name": "Xbox-Extrazeit geben",
+      "description": "Gibt einem Kind Extrazeit auf der Xbox, für einige Minuten oder bis zu einer Uhrzeit, über den Dienst von Xbox Family Settings. Dafür muss die Xbox-Family-Settings-Anmeldung verknüpft sein. Schlägt fehl, wenn Microsoft die Extrazeit nicht bestätigt oder die Xbox gesperrt bleibt.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "platform": {
+          "name": "Plattform",
+          "description": "Vorerst nur Xbox (Standard)."
+        },
+        "minutes": {
+          "name": "Minuten",
+          "description": "Extrazeit ab jetzt, 1 bis 1440 Minuten. Gib dies oder „Bis“ an."
+        },
+        "until": {
+          "name": "Bis",
+          "description": "Wann die Extrazeit endet, statt Minuten (höchstens 24 Stunden ab jetzt)."
+        }
+      }
+    },
+    "cancel_time_bonus": {
+      "name": "Xbox-Extrazeit aufheben",
+      "description": "Hebt die laufende Extrazeit auf der Xbox eines Kindes auf. Nur Extrazeit wird aufgehoben; eine Sperre wird nie gelöst, und ohne laufende Extrazeit wird nichts gesendet.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "platform": {
+          "name": "Plattform",
+          "description": "Vorerst nur Xbox (Standard)."
+        }
+      }
+    },
     "approve_request": {
       "name": "Ausstehende Anfrage genehmigen",
       "description": "Eine ausstehende Anfrage auf Bildschirmzeit-Verlängerung genehmigen.",

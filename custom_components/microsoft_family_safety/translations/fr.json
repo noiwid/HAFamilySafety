@@ -184,6 +184,42 @@
         }
       }
     },
+    "add_time_bonus": {
+      "name": "Ajouter du temps Xbox",
+      "description": "Donne du temps supplémentaire à un enfant sur la Xbox, pour quelques minutes ou jusqu'à une heure donnée, via le service Xbox Family Settings. Nécessite la connexion Xbox Family Settings liée. Échoue si Microsoft ne confirme pas le temps supplémentaire, ou si la Xbox reste verrouillée.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "Uniquement Xbox pour l'instant (par défaut)."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Temps supplémentaire à partir de maintenant, de 1 à 1440 minutes. Indiquez ceci ou « Jusqu'à »."
+        },
+        "until": {
+          "name": "Jusqu'à",
+          "description": "Fin du temps supplémentaire, au lieu des minutes (24 heures au plus à partir de maintenant)."
+        }
+      }
+    },
+    "cancel_time_bonus": {
+      "name": "Annuler le temps Xbox supplémentaire",
+      "description": "Annule le temps supplémentaire en cours sur la Xbox d'un enfant. Seul le temps supplémentaire est annulé : un verrouillage n'est jamais levé, et rien n'est envoyé quand aucun temps supplémentaire n'est en cours.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "Uniquement Xbox pour l'instant (par défaut)."
+        }
+      }
+    },
     "approve_request": {
       "name": "Approuver une demande en attente",
       "description": "Approuve une demande d'extension de temps d'écran en attente.",
