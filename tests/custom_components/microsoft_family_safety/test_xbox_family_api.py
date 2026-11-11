@@ -33,9 +33,9 @@ from custom_components.microsoft_family_safety.xbox_family_api import (
     usage_today,
 )
 
-CHILD = "914798558090500"
-XUID = "2535449443639838"
-PARENT = "2535416680601644"
+CHILD = "1234567890123456"
+XUID = "2535400000000001"
+PARENT = "2535400000000002"
 TOKEN_URL = "https://login.live.com/oauth20_token.srf"
 XAPPROVE = f"https://xapprove.xboxlive.com/api/v1/user/{XUID}/settings/screentime"
 
