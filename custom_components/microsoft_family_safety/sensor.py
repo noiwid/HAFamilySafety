@@ -36,6 +36,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
+from .site_sync import site_lists
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -598,6 +599,10 @@ class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
             ):
                 if key in web_data:
                     attrs[key] = web_data[key]
+            lists = site_lists(web_data)
+            if lists is not None:
+                attrs["blocked_site_count"] = len(lists[0])
+                attrs["allowed_site_count"] = len(lists[1])
         content_data = account_data.get("content_settings")
         if isinstance(content_data, dict):
             attrs["content_settings"] = content_data

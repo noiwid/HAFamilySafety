@@ -9,6 +9,7 @@ import logging
 import time
 from typing import Any
 
+import aiohttp
 from pyfamilysafety import FamilySafety
 from pyfamilysafety.account import Account
 from pyfamilysafety.application import Application
@@ -20,11 +21,13 @@ from yarl import URL
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
+from . import site_sync
 from .api_client import FamilySafetyWebAPI
 from .auth.addon_client import AddonCookieClient
 from .xbox_family_api import (
@@ -147,6 +150,11 @@ def _ms_to_minutes(milliseconds: int | float | None) -> int:
     return int(milliseconds / 60000)
 
 
+def site_sync_store(hass: HomeAssistant, entry_id: str) -> Store:
+    """Per-entry store of the domains each sync_site_list added, per child and list."""
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.site_sync.{entry_id}")
+
+
 class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch and coordinate Microsoft Family Safety state."""
 
@@ -184,6 +192,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auth_store: Store = Store(
             hass, AUTH_STORAGE_VERSION, f"{DOMAIN}.auth.{entry.entry_id}"
         )
+        #: account id -> list URL -> domains a sync_site_list added (site_sync.py).
+        self._site_sync_store: Store = site_sync_store(hass, entry.entry_id)
+        self._site_sync_lock = asyncio.Lock()
         self._runtime_auth_state: dict[str, Any] = {}
         self._reauth_requested = False
         self._reauth_reason: str | None = None
@@ -1265,28 +1276,286 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_update_listeners()
         await self.async_request_refresh()
 
-    async def async_block_website(self, child_id: str, website: str) -> None:
+    async def _async_change_websites(
+        self, method: str, child_id: str, websites: str | list[str]
+    ) -> None:
+        """Send one website change per site (each is its own PATCH)."""
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
-        await self.web_api.block_website(child_id, website)
+        sites = [websites] if isinstance(websites, str) else list(websites)
+        for site in dict.fromkeys(s.strip() for s in sites if s and s.strip()):
+            await getattr(self.web_api, method)(child_id, site)
         await self.async_request_refresh()
 
-    async def async_remove_website(self, child_id: str, website: str) -> None:
-        if not self.web_api:
-            raise RuntimeError("Web API not initialized")
-        await self.web_api.remove_website(child_id, website)
-        await self.async_request_refresh()
+    async def async_block_website(self, child_id: str, website: str | list[str]) -> None:
+        await self._async_change_websites("block_website", child_id, website)
 
-    async def async_allow_website(self, child_id: str, website: str) -> None:
+    async def async_remove_website(self, child_id: str, website: str | list[str]) -> None:
+        await self._async_change_websites("remove_website", child_id, website)
+
+    async def async_allow_website(self, child_id: str, website: str | list[str]) -> None:
+        await self._async_change_websites("allow_website", child_id, website)
+
+    async def _async_download_site_list(self, url: str) -> str:
+        """The list at ``url`` over HA's shared session; refused above MAX_LIST_BYTES."""
+        limit = site_sync.MAX_LIST_BYTES
+        too_large = f"The site list {url} is larger than {limit // 1024} KiB."
+        body = bytearray()
+        try:
+            # Redirects are not followed: an https address could send the
+            # download to http or to a host inside the network.
+            async with async_get_clientsession(self.hass).get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=site_sync.DOWNLOAD_TIMEOUT),
+                allow_redirects=False,
+            ) as response:
+                if 300 <= response.status < 400:
+                    raise HomeAssistantError(
+                        f"The site list {url} redirects to another address, which is "
+                        "not followed. Use the final https:// address."
+                    )
+                response.raise_for_status()
+                declared = response.headers.get("Content-Length", "")
+                if declared.isdigit() and int(declared) > limit:
+                    raise HomeAssistantError(too_large)
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    body.extend(chunk)
+                    if len(body) > limit:
+                        raise HomeAssistantError(too_large)
+        except HomeAssistantError:
+            raise
+        except Exception as err:
+            raise HomeAssistantError(f"Could not download the site list {url}: {err}") from err
+        # utf-8-sig: a byte order mark would otherwise stick to the first domain.
+        return body.decode("utf-8-sig", errors="replace")
+
+    async def _async_read_web_restrictions(self, account_id: str) -> dict[str, Any] | None:
+        """The child's web restrictions from the mobile API; None if unreadable."""
         if not self.web_api:
-            raise RuntimeError("Web API not initialized")
-        await self.web_api.allow_website(child_id, website)
-        await self.async_request_refresh()
+            raise HomeAssistantError("Web API not initialized")
+        try:
+            return await self.web_api.get_web_restrictions(account_id)
+        except Exception as err:  # noqa: BLE001 - the callers refuse on None
+            _LOGGER.debug("Could not read the website lists of %s: %r", account_id, err)
+            return None
+
+    async def _async_read_site_lists(self, account_id: str) -> tuple[list[str], list[str]]:
+        """(blocked, allowed) sites as Microsoft has them now; refuses when unreadable."""
+        lists = site_sync.site_lists(await self._async_read_web_restrictions(account_id))
+        if lists is None:
+            raise HomeAssistantError(
+                "Could not read the child's blocked and allowed websites from Microsoft, "
+                "so nothing was changed."
+            )
+        return lists
+
+    async def async_sync_site_list(
+        self,
+        account_id: str,
+        url: str,
+        max_domains: int = site_sync.MAX_SYNC_DOMAINS,
+        stop: bool = False,
+    ) -> dict[str, Any]:
+        """Keep the child's blocked websites in step with the list at ``url``.
+
+        See site_sync.py. Returns counts and examples of what was added,
+        removed, kept (already blocked) and skipped (on the allowed list).
+        """
+        account_id = str(account_id)
+        async with self._site_sync_lock:
+            if stop:
+                return await self._async_stop_site_sync(account_id, url)
+            text = await self._async_download_site_list(url)
+            ignored: list[str] = []
+            domains = site_sync.parse_site_list(text, ignored)
+            if not domains:
+                # An emptied file, an HTML error page or a captive portal reads
+                # as a list that dropped every domain and would take them all back.
+                raise HomeAssistantError(
+                    f"The site list {url} has no usable domains ({len(ignored)} entries "
+                    "ignored), so nothing was changed. To remove what the list added, "
+                    "call sync_site_list with stop: true."
+                )
+            if len(domains) > max_domains:
+                raise HomeAssistantError(
+                    f"The site list has {len(domains)} domains, more than max_domains "
+                    f"({max_domains}). Nothing was changed."
+                )
+            blocked, allowed = await self._async_read_site_lists(account_id)
+            data = await self._site_sync_store.async_load() or {}
+            pushed = set((data.get(account_id) or {}).get(url) or [])
+            blocked_set = set(blocked)
+            if pushed and not blocked_set:
+                # A stale or truncated answer: one that has lost every site this
+                # list added is not trusted to decide anything.
+                raise HomeAssistantError(
+                    f"Microsoft returned no blocked websites although {url} added "
+                    f"{len(pushed)} for this child; the answer looks incomplete, so "
+                    "nothing was changed."
+                )
+            wanted: list[str] = []
+            skipped: list[str] = []
+            for domain in domains:
+                if any(site_sync.allowed_overlaps(host, domain) for host in allowed):
+                    skipped.append(domain)
+                else:
+                    wanted.append(domain)
+            insert = [d for d in wanted if d not in blocked_set]
+            kept = [d for d in wanted if d in blocked_set]
+            # Remove only what this list added before and no longer contains.
+            remove = [d for d in sorted(pushed - set(wanted)) if d in blocked_set]
+            # A list cut short also reads as one that dropped most of its domains.
+            if len(remove) > max(site_sync.SYNC_REMOVE_FLOOR, len(pushed) // 2):
+                raise HomeAssistantError(
+                    f"Refusing to remove {len(remove)} of the {len(pushed)} sites {url} "
+                    "added: the list looks cut short. Nothing was changed. If it really "
+                    "shrank that much, call sync_site_list with stop: true, then sync again."
+                )
+
+            async def save(current: set[str]) -> None:
+                data.setdefault(account_id, {})[url] = sorted(current)
+                await self._site_sync_store.async_save(data)
+
+            # Sites added earlier that are gone from Microsoft's list (removed by
+            # hand) are no longer ours; a still-listed one is added again below.
+            pushed &= blocked_set
+            added, failed_add = await site_sync.run_bounded(
+                insert, lambda site: self.web_api.block_website(account_id, site)
+            )
+            pushed |= set(added)
+            await save(pushed)
+            removed, failed_remove = await site_sync.run_bounded(
+                remove, lambda site: self.web_api.remove_website(account_id, site)
+            )
+            pushed -= set(removed)
+            await save(pushed)
+        failed = {**failed_add, **failed_remove}
+        _LOGGER.info(
+            "Site list sync for %s from %s: added %d, removed %d, kept %d, skipped %d "
+            "allowed, %d failed, %d ignored",
+            account_id, url, len(added), len(removed), len(kept), len(skipped),
+            len(failed), len(ignored),
+        )
+        if added or removed:
+            await self.async_request_refresh()
+        return {
+            "account_id": account_id,
+            "url": url,
+            "domains": len(domains),
+            "added": site_sync.sample(added),
+            "removed": site_sync.sample(removed),
+            "kept": site_sync.sample(kept),
+            "skipped_allowed": site_sync.sample(skipped),
+            "failed": {
+                "count": len(failed),
+                "examples": [
+                    {"site": site, "error": error}
+                    for site, error in list(failed.items())[: site_sync.RESPONSE_SAMPLE]
+                ],
+            },
+            "ignored": site_sync.sample(ignored),
+        }
+
+    async def _async_stop_site_sync(self, account_id: str, url: str) -> dict[str, Any]:
+        """Remove everything the list added for the child, then forget the list."""
+        blocked, _ = await self._async_read_site_lists(account_id)
+        data = await self._site_sync_store.async_load() or {}
+        pushed = set((data.get(account_id) or {}).get(url) or [])
+        if pushed and not blocked:
+            # Same guard as the sync: an answer without any blocked site
+            # cannot tell which of ours are still there, and forgetting them
+            # would leave them blocked for good.
+            raise HomeAssistantError(
+                f"Microsoft returned no blocked websites although {url} added "
+                f"{len(pushed)} for this child; the answer looks incomplete, so "
+                "nothing was changed or forgotten."
+            )
+        remove = sorted(pushed & set(blocked))
+        removed, failed = await site_sync.run_bounded(
+            remove, lambda site: self.web_api.remove_website(account_id, site)
+        )
+        if failed:
+            # Keep what is left so a later stop retries it.
+            data.setdefault(account_id, {})[url] = sorted(failed)
+        else:
+            (data.get(account_id) or {}).pop(url, None)
+        await self._site_sync_store.async_save(data)
+        if removed:
+            await self.async_request_refresh()
+        return {
+            "account_id": account_id,
+            "url": url,
+            "stopped": not failed,
+            "removed": site_sync.sample(removed),
+            "failed": site_sync.sample(sorted(failed)),
+        }
+
+    async def async_get_sites(self, account_id: str) -> dict[str, Any]:
+        """The child's website lists as Microsoft stores them, and which a sync added.
+
+        ``from_list`` holds the domains a sync_site_list added and Microsoft
+        still lists as blocked, ``from_list_by_url`` the same per list, so a
+        caller can tell them from sites blocked by hand.
+        """
+        account_id = str(account_id)
+        web = await self._async_read_web_restrictions(account_id)
+        stored = site_sync.stored_site_lists(web)
+        hosts = site_sync.site_lists(web)
+        if stored is None or hosts is None:
+            raise HomeAssistantError(
+                "Could not read the child's blocked and allowed websites from Microsoft."
+            )
+        blocked_hosts = set(hosts[0])
+        async with self._site_sync_lock:
+            synced = ((await self._site_sync_store.async_load()) or {}).get(account_id) or {}
+        by_url = {
+            url: sorted(set(domains) & blocked_hosts) for url, domains in synced.items()
+        }
+        return {
+            "account_id": account_id,
+            "blocked": stored[0],
+            "allowed": stored[1],
+            "filter_enabled": self._web_enabled(web),
+            "from_list": sorted({d for domains in by_url.values() for d in domains}),
+            "from_list_by_url": by_url,
+        }
+
+    def account_data(self, account_id: Any) -> dict[str, Any] | None:
+        """A child's polled data, whether the id comes as int or str.
+
+        The roster keys accounts by Microsoft's id as the mobile API gives it
+        (an int), while service calls and the web API pass it as a str.
+        """
+        accounts = (self.data or {}).get("accounts") or {}
+        if account_id in accounts:
+            return accounts[account_id]
+        key = self._policy_key(account_id)
+        return next(
+            (value for acc_id, value in accounts.items() if self._policy_key(acc_id) == key),
+            None,
+        )
+
+    def web_filter_enabled(self, account_id: Any) -> bool | None:
+        """Whether the child's web filter (Microsoft Edge) is on; None if unknown."""
+        return self._web_enabled((self.account_data(account_id) or {}).get("web_browsing"))
+
+    @staticmethod
+    def _web_enabled(web: Any) -> bool | None:
+        """The on/off of a web restrictions answer (Microsoft spells it "enabled")."""
+        if not isinstance(web, dict):
+            return None
+        value = web.get("enabled", web.get("isEnabled", web.get("IsEnabled")))
+        return value if isinstance(value, bool) else None
 
     async def async_toggle_web_filter(self, child_id: str, enabled: bool) -> None:
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
         await self.web_api.toggle_web_filter(child_id, enabled)
+        # Show the new state at once; the next read confirms it.
+        account = self.account_data(child_id)
+        if isinstance(account, dict) and isinstance(account.get("web_browsing"), dict):
+            account["web_browsing"] = {**account["web_browsing"], "enabled": bool(enabled)}
+            self.async_update_listeners()
         await self.async_request_refresh()
 
     async def async_set_age_rating(self, child_id: str, age: int) -> None:

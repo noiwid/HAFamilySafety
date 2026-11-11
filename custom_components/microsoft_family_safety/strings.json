@@ -311,7 +311,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "The domain to block."
+          "description": "The domain to block, or a list of domains."
         }
       }
     },
@@ -325,7 +325,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "The domain to remove."
+          "description": "The domain to remove, or a list of domains."
         }
       }
     },
@@ -405,7 +405,39 @@
         },
         "website": {
           "name": "Website",
-          "description": "The domain to allow."
+          "description": "The domain to allow, or a list of domains."
+        }
+      }
+    },
+    "sync_site_list": {
+      "name": "Sync Site List",
+      "description": "Keep the child's blocked websites in step with a published list of domains (one per line, '#' comments). Adds what the list gained and removes only what this same list added before and has since dropped; sites blocked by hand and allowed sites are left alone, and a domain sharing a site with an allowed one is skipped. The list must be served over https (redirects are not followed), is read up to 1 MiB, and only plain domains are taken. An empty or failed download, or one that would remove most of what the list added, changes nothing; stop removes everything the list added. Answers with what was added, removed, kept and skipped. Administrators only.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "url": {
+          "name": "List URL",
+          "description": "https:// address of the list, for example a raw file on GitHub."
+        },
+        "max_domains": {
+          "name": "Maximum domains",
+          "description": "Refuse a list with more domains than this (default 2000)."
+        },
+        "stop": {
+          "name": "Stop",
+          "description": "Remove every site this list added for the child and forget the list."
+        }
+      }
+    },
+    "get_sites": {
+      "name": "Get Sites",
+      "description": "Return the child's blocked and allowed websites exactly as Microsoft stores them (absolute URLs), whether the web filter is on, and which blocked domains sync_site_list added (from_list, and per list in from_list_by_url). Administrators only.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
         }
       }
     }

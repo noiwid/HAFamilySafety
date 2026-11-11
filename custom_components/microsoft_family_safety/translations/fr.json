@@ -311,7 +311,7 @@
         },
         "website": {
           "name": "Site web",
-          "description": "Le domaine à bloquer."
+          "description": "Le domaine à bloquer, ou une liste de domaines."
         }
       }
     },
@@ -325,7 +325,7 @@
         },
         "website": {
           "name": "Site web",
-          "description": "Le domaine à retirer."
+          "description": "Le domaine à retirer, ou une liste de domaines."
         }
       }
     },
@@ -405,7 +405,39 @@
         },
         "website": {
           "name": "Site web",
-          "description": "Le domaine à autoriser."
+          "description": "Le domaine à autoriser, ou une liste de domaines."
+        }
+      }
+    },
+    "sync_site_list": {
+      "name": "Synchroniser une liste de sites",
+      "description": "Maintient les sites bloqués de l'enfant en phase avec une liste de domaines publiée (un par ligne, commentaires avec « # »). Ajoute ce que la liste a gagné et ne retire que ce que cette même liste avait ajouté puis a supprimé depuis ; les sites bloqués à la main et les sites autorisés ne sont pas touchés, et un domaine qui recoupe un site autorisé est ignoré. La liste doit être servie en https (les redirections ne sont pas suivies), est lue jusqu'à 1 Mio, et seuls les domaines simples sont retenus. Un téléchargement vide ou en échec, ou qui retirerait l'essentiel de ce que la liste a ajouté, ne change rien ; « Arrêter » retire tout ce que la liste a ajouté. Répond avec ce qui a été ajouté, retiré, conservé et ignoré. Réservé aux administrateurs.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "url": {
+          "name": "URL de la liste",
+          "description": "Adresse https:// de la liste, par exemple un fichier brut sur GitHub."
+        },
+        "max_domains": {
+          "name": "Nombre maximal de domaines",
+          "description": "Refuse une liste comptant plus de domaines que ce nombre (2000 par défaut)."
+        },
+        "stop": {
+          "name": "Arrêter",
+          "description": "Retire tous les sites que cette liste a ajoutés pour l'enfant et oublie la liste."
+        }
+      }
+    },
+    "get_sites": {
+      "name": "Obtenir les sites",
+      "description": "Renvoie les sites bloqués et autorisés de l'enfant exactement tels que Microsoft les enregistre (URL absolues), indique si le filtrage web est actif et quels domaines bloqués ont été ajoutés par sync_site_list (from_list, et par liste dans from_list_by_url). Réservé aux administrateurs.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
         }
       }
     }

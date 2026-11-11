@@ -7,7 +7,7 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -39,10 +39,13 @@ from .const import (
     SERVICE_LOCK_ACCOUNT,
     SERVICE_UNLOCK_ACCOUNT,
     SERVICE_REQUEST_REAUTH,
+    SERVICE_SYNC_SITE_LIST,
+    SERVICE_GET_SITES,
     CONF_ALLOWED_USERS,
 )
-from .coordinator import FamilySafetyDataUpdateCoordinator
-from .permissions import guard_service
+from .coordinator import FamilySafetyDataUpdateCoordinator, site_sync_store
+from .permissions import async_require_admin, guard_service
+from .site_sync import MAX_SYNC_DOMAINS, https_url
 from ._httpx_web_adapter import apply_httpx_web_transport_patch
 from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 
@@ -118,14 +121,17 @@ SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA = vol.Schema({
     vol.Optional("platform", default="windows"): vol.In(["windows", "xbox", "mobile"]),
 })
 
+# One site, or several (a list) applied one after the other.
+_WEBSITES = vol.All(cv.ensure_list, [cv.string], vol.Length(min=1))
+
 SERVICE_BLOCK_WEBSITE_SCHEMA = vol.Schema({
     vol.Required("account_id"): cv.string,
-    vol.Required("website"): cv.string,
+    vol.Required("website"): _WEBSITES,
 })
 
 SERVICE_REMOVE_WEBSITE_SCHEMA = vol.Schema({
     vol.Required("account_id"): cv.string,
-    vol.Required("website"): cv.string,
+    vol.Required("website"): _WEBSITES,
 })
 
 SERVICE_TOGGLE_WEB_FILTER_SCHEMA = vol.Schema({
@@ -152,6 +158,29 @@ SERVICE_UNLOCK_ACCOUNT_SCHEMA = vol.Schema({
 })
 
 SERVICE_REQUEST_REAUTH_SCHEMA = vol.Schema({})
+
+SERVICE_SYNC_SITE_LIST_SCHEMA = vol.Schema({
+    vol.Required("account_id"): cv.string,
+    vol.Required("url"): https_url,
+    vol.Optional("max_domains", default=MAX_SYNC_DOMAINS): vol.All(
+        vol.Coerce(int), vol.Range(min=1, max=MAX_SYNC_DOMAINS)
+    ),
+    vol.Optional("stop", default=False): cv.boolean,
+})
+
+SERVICE_GET_SITES_SCHEMA = vol.Schema({
+    vol.Required("account_id"): cv.string,
+})
+
+#: Services that answer: sync_site_list with what it did, get_sites with what it read.
+_RESPONSE_SERVICES = {
+    SERVICE_SYNC_SITE_LIST: SupportsResponse.OPTIONAL,
+    SERVICE_GET_SITES: SupportsResponse.ONLY,
+}
+#: Services for administrators only, whatever the allowed-users option says:
+#: sync_site_list downloads a URL from inside Home Assistant, and get_sites
+#: answers with the list URLs it uses.
+_ADMIN_SERVICES = frozenset({SERVICE_SYNC_SITE_LIST, SERVICE_GET_SITES})
 
 
 def _get_coordinator(
@@ -294,15 +323,21 @@ def _register_services(hass: HomeAssistant) -> None:
          lambda d: (d["account_id"],)),
         (SERVICE_REQUEST_REAUTH, SERVICE_REQUEST_REAUTH_SCHEMA, "async_request_reauth",
          lambda d: ()),
+        (SERVICE_SYNC_SITE_LIST, SERVICE_SYNC_SITE_LIST_SCHEMA, "async_sync_site_list",
+         lambda d: (d["account_id"], d["url"], d["max_domains"], d["stop"])),
+        (SERVICE_GET_SITES, SERVICE_GET_SITES_SCHEMA, "async_get_sites",
+         lambda d: (d["account_id"],)),
     ]
 
-    def make_handler(method_name, extract_args):
-        async def handler(call: ServiceCall) -> None:
+    def make_handler(method_name, extract_args, responds, admin_only):
+        async def handler(call: ServiceCall) -> dict | None:
+            if admin_only:
+                await async_require_admin(hass, call)
             coordinator = _get_coordinator(hass, call.data.get("account_id"))
             if coordinator is None:
                 raise HomeAssistantError("No Microsoft Family Safety coordinator available")
             try:
-                await getattr(coordinator, method_name)(*extract_args(call.data))
+                result = await getattr(coordinator, method_name)(*extract_args(call.data))
             except HomeAssistantError:
                 raise
             except Exception as err:  # noqa: BLE001 - report as a service error
@@ -311,19 +346,28 @@ def _register_services(hass: HomeAssistant) -> None:
                 raise HomeAssistantError(
                     f"Microsoft Family Safety {call.service} failed: {err}"
                 ) from err
+            return result if responds and call.return_response else None
         return handler
 
     for name, schema, method, extract in services:
+        supports_response = _RESPONSE_SERVICES.get(name, SupportsResponse.NONE)
+        responds = supports_response is not SupportsResponse.NONE
         hass.services.async_register(
-            DOMAIN, name, guard_service(hass, make_handler(method, extract)), schema=schema
+            DOMAIN, name,
+            guard_service(
+                hass, make_handler(method, extract, responds, name in _ADMIN_SERVICES)
+            ),
+            schema=schema,
+            supports_response=supports_response,
         )
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the Xbox Family Settings refresh token kept for this entry."""
+    """Delete what this entry keeps: the Xbox token and the site-list sync record."""
     from .xbox_family_api import XboxFamilyAPI
 
     await XboxFamilyAPI(hass, entry.entry_id).async_unlink()
+    await site_sync_store(hass, entry.entry_id).async_remove()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -311,7 +311,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "Die Domain."
+          "description": "Die zu sperrende Domain oder eine Liste von Domains."
         }
       }
     },
@@ -325,7 +325,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "Die Domain."
+          "description": "Die zu entfernende Domain oder eine Liste von Domains."
         }
       }
     },
@@ -405,7 +405,39 @@
         },
         "website": {
           "name": "Website",
-          "description": "Die zu erlaubende Domain."
+          "description": "Die zu erlaubende Domain oder eine Liste von Domains."
+        }
+      }
+    },
+    "sync_site_list": {
+      "name": "Websiteliste synchronisieren",
+      "description": "Hält die gesperrten Websites des Kindes mit einer veröffentlichten Domainliste abgeglichen (eine Domain pro Zeile, Kommentare mit '#'). Fügt hinzu, was neu in der Liste steht, und entfernt nur, was dieselbe Liste früher hinzugefügt und inzwischen gestrichen hat; von Hand gesperrte und erlaubte Websites bleiben unberührt, und eine Domain, die sich mit einer erlaubten Website überschneidet, wird übersprungen. Die Liste muss über https bereitgestellt werden (Weiterleitungen werden nicht verfolgt), wird bis 1 MiB gelesen, und nur reine Domains werden übernommen. Ein leerer oder fehlgeschlagener Download oder einer, der das meiste von dem entfernen würde, was die Liste hinzugefügt hat, ändert nichts; Stopp entfernt alles, was die Liste hinzugefügt hat. Antwortet mit dem, was hinzugefügt, entfernt, beibehalten und übersprungen wurde. Nur für Administratoren.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "url": {
+          "name": "Listen-URL",
+          "description": "https://-Adresse der Liste, zum Beispiel eine Rohdatei auf GitHub."
+        },
+        "max_domains": {
+          "name": "Maximale Anzahl Domains",
+          "description": "Eine Liste mit mehr Domains als diesen ablehnen (Standard 2000)."
+        },
+        "stop": {
+          "name": "Stopp",
+          "description": "Alle Websites entfernen, die diese Liste für das Kind hinzugefügt hat, und die Liste vergessen."
+        }
+      }
+    },
+    "get_sites": {
+      "name": "Websites abrufen",
+      "description": "Gibt die gesperrten und erlaubten Websites des Kindes genau so zurück, wie Microsoft sie speichert (absolute URLs), dazu, ob der Webfilter aktiv ist und welche gesperrten Domains sync_site_list hinzugefügt hat (from_list, pro Liste in from_list_by_url). Nur für Administratoren.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
         }
       }
     }

@@ -101,6 +101,14 @@ async def async_setup_entry(
                     )
                 )
 
+            # Web filter (Microsoft Edge) on/off, the same write as the
+            # toggle_web_filter action.
+            entities.append(
+                FamilySafetyWebFilterSwitch(
+                    coordinator, entry, account_id, account_name,
+                )
+            )
+
             # Per-child "App, feature, and game limits" switch: per-app limits
             # are only enforced while it is on.
             entities.append(
@@ -527,6 +535,71 @@ class FamilySafetyAppLimitsSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         await async_check_entity_action(self)
         _LOGGER.info("Disabling app limits for %s", self._account_name)
+        await self._async_set(False)
+
+
+class FamilySafetyWebFilterSwitch(CoordinatorEntity, SwitchEntity):
+    """Turn the child's web filter on or off.
+
+    ON = Microsoft filters inappropriate websites and searches in Microsoft
+    Edge (and the blocked/allowed lists apply); OFF = no filtering. Read from
+    and written to the mobile WebRestrictions endpoint.
+    """
+
+    def __init__(
+        self,
+        coordinator: FamilySafetyDataUpdateCoordinator,
+        entry: ConfigEntry,
+        account_id: str,
+        account_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._account_id = account_id
+        self._account_name = account_name
+        self._attr_unique_id = f"{entry.entry_id}_{account_id}_web_filter_switch"
+        self._attr_name = f"{account_name} Web Filtering"
+        self._optimistic_state: bool | None = None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._account_id)},
+            name=f"{self._account_name} (Family Safety)",
+            manufacturer="Microsoft",
+            model="Family Safety Account",
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+        return self.coordinator.web_filter_enabled(self._account_id)
+
+    @property
+    def icon(self) -> str:
+        return "mdi:web-check" if self.is_on else "mdi:web-off"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {ATTR_USER_ID: self._account_id}
+
+    async def _async_set(self, enabled: bool) -> None:
+        self._optimistic_state = enabled
+        self.async_write_ha_state()
+        try:
+            await self.coordinator.async_toggle_web_filter(self._account_id, enabled)
+        finally:
+            self._optimistic_state = None
+            self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await async_check_entity_action(self)
+        _LOGGER.info("Turning the web filter on for %s", self._account_name)
+        await self._async_set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await async_check_entity_action(self)
+        _LOGGER.info("Turning the web filter off for %s", self._account_name)
         await self._async_set(False)
 
 

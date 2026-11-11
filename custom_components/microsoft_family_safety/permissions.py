@@ -82,6 +82,28 @@ async def async_check_service_call(hass: HomeAssistant, call: ServiceCall) -> No
     await _async_check(hass, call.context, f"Service {call.domain}.{call.service}")
 
 
+async def async_require_admin(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Raise ``Unauthorized`` unless the caller is an administrator.
+
+    For a service no option can make safe for a non-administrator, such as one
+    that downloads a URL from inside Home Assistant. A call without a user
+    (an automation, a script run by Home Assistant) is trusted, as above.
+    """
+    user_id = call.context.user_id if call.context else None
+    if not user_id:
+        return
+    user = await hass.auth.async_get_user(user_id)
+    if user is None:
+        raise UnknownUser(context=call.context, permission=POLICY_CONTROL)
+    if user.is_admin:
+        return
+    _LOGGER.warning(
+        "Service %s.%s refused: user %s is not an administrator",
+        call.domain, call.service, user.name,
+    )
+    raise Unauthorized(context=call.context, permission=POLICY_CONTROL)
+
+
 def guard_service(
     hass: HomeAssistant, handler: Callable[[ServiceCall], Awaitable[Any]]
 ) -> Callable[[ServiceCall], Awaitable[Any]]:
