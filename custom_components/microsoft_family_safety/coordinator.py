@@ -264,6 +264,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         return str(account_id)
 
+    def has_saved_screentime(self, account_id: Any) -> bool:
+        """Whether a restore point (account lock / limits off) is kept for this child."""
+        return self._policy_key(account_id) in self._saved_screentime
+
     async def async_load_saved_screentime(self) -> None:
         data = await self._store.async_load()
         if data is None:

@@ -33,3 +33,12 @@ async def test_screen_time_sensors_carry_no_state_class_attribute(hass) -> None:
         # It overrode the entity's real state class in the state attributes.
         assert "state_class" not in attrs
         assert attrs["date"]
+
+
+async def test_saved_schedule_accessor_normalises_the_id(hass) -> None:
+    coord = _coordinator(hass)
+    coord._saved_screentime = {CHILD: {"dailyRestrictions": {}}}
+
+    assert coord.has_saved_screentime(int(CHILD))
+    assert coord.has_saved_screentime(CHILD)
+    assert not coord.has_saved_screentime("42")
