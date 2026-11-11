@@ -444,3 +444,25 @@ async def test_children_gone_from_the_family_are_pruned(hass, rig):
     assert pauser.stale_accounts({OTHER_CHILD}) == {CHILD}
     await pauser.async_prune({OTHER_CHILD})
     assert pauser.saved(CHILD) == {}
+
+
+async def test_activity_report_range_stays_under_seven_days() -> None:
+    """Microsoft answers 400 BeginEndTimeRangeError for 7 days or more."""
+    from datetime import datetime, timedelta
+    from unittest.mock import AsyncMock
+
+    from custom_components.microsoft_family_safety.api_client import FamilySafetyWebAPI
+
+    api = FamilySafetyWebAPI(authenticator=None)
+    api._request = AsyncMock(return_value={"appActivity": []})
+    for days in (None, 7, 30):
+        api._request.reset_mock()
+        if days is None:
+            await api.get_app_activity("1234567890123456", "windows")
+        else:
+            await api.get_app_activity("1234567890123456", "windows", days=days)
+        params = api._request.await_args.kwargs["params"]
+        begin = datetime.strptime(params["beginTime"], "%Y-%m-%dT%H:%M:%SZ")
+        end = datetime.strptime(params["endTime"], "%Y-%m-%dT%H:%M:%SZ")
+        assert timedelta(0) < end - begin < timedelta(days=7)
+        assert api._request.await_args.kwargs["extra_headers"] == {"Plat-Info": "Windows"}
