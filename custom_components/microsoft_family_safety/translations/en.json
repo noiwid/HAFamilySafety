@@ -92,7 +92,7 @@
           "xbox_link": "Xbox limits, the Xbox lock and Xbox play time then come from the Xbox Family Settings app's service, on their own sign-in, without the web session. Only with Xbox ticked. Usually linked automatically after a sign-in; tick this if the Connection sensor shows xbox_family: not_linked."
         }
       },
-      "xbox_link": {
+      "xbox_link_manual": {
         "title": "Link Xbox Family Settings",
         "description": "1. Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app.\n2. You end up on a blank page whose address starts with `{redirect_prefix}`. Copy that whole address and paste it below within a few minutes.",
         "data": {
@@ -102,6 +102,9 @@
     },
     "error": {
       "xbox_link_failed": "Microsoft did not accept that address. Sign in again with the new link and paste the address straight away."
+    },
+    "progress": {
+      "xbox_link": "Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app. Once Microsoft has accepted the sign-in, the window shows \"Sign-in received\" and can be closed; this step then continues on its own, with nothing to copy. If the sign-in does not finish within 5 minutes, you can paste the address instead."
     }
   },
   "services": {

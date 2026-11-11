@@ -1,6 +1,7 @@
 """Config flow for Microsoft Family Safety integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from ipaddress import ip_address
 from typing import Any
@@ -12,7 +13,7 @@ from yarl import URL
 from homeassistant import config_entries
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE
 import homeassistant.helpers.config_validation as cv
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.network import NoURLAvailableError, get_url
@@ -1449,6 +1450,41 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="native_https_required")
 
 
+#: How long the Xbox link waits for the browser sign-in before offering the
+#: manual paste step instead.
+XBOX_LINK_PROXY_TIMEOUT = 300
+
+
+def _options_browser_hass_url(hass: HomeAssistant, allow_insecure_http: bool) -> str | None:
+    """A browser-reachable Home Assistant URL for the Xbox link proxy.
+
+    Same rule as the main sign-in: HTTPS first, plain HTTP only when the user
+    opted in and the URL is clearly local. Returns None otherwise; the caller
+    then falls back to the manual paste step.
+    """
+    candidates: list[str] = []
+    for kwargs in ({"prefer_external": True}, {"allow_external": False}):
+        try:
+            candidate = get_url(hass, **kwargs)
+        except NoURLAvailableError:
+            continue
+        if candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in candidates:
+        if URL(candidate).scheme == "https":
+            return candidate
+    if allow_insecure_http:
+        for candidate in reversed(candidates):
+            if FamilySafetyConfigFlow._is_local_http_url(URL(candidate)):
+                _LOGGER.warning(
+                    "The Xbox Family Settings sign-in is using an UNENCRYPTED "
+                    "local Home Assistant HTTP proxy at %s",
+                    URL(candidate).host,
+                )
+                return candidate
+    return None
+
+
 class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
     """Handle options for Microsoft Family Safety."""
 
@@ -1458,6 +1494,8 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         self._pending_options: dict[str, Any] = {}
         self._xbox_link_url: str | None = None
         self._xbox_verifier: str | None = None
+        self._xbox_proxy: Any = None
+        self._xbox_link_task: asyncio.Task[None] | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1523,6 +1561,117 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
     async def async_step_xbox_link(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        """Link the Xbox Family Settings sign-in through the native OAuth proxy.
+
+        The user signs in once in the browser, through the same temporary proxy
+        as the main sign-in, which captures the oauth20_desktop.srf code itself:
+        there is no address to copy. The browser callback only shows a close
+        page for an options flow; this step's own progress task notices the
+        captured code. Without a usable Home Assistant URL, or when the sign-in
+        does not complete, the manual paste step takes over.
+        """
+        if self._xbox_link_task is None:
+            from .auth.native_proxy import (
+                AUTH_CALLBACK_PATH,
+                MicrosoftFamilyAuthProxy,
+                register_native_proxy,
+            )
+            from .xbox_family_api import build_authorize_url
+
+            hass_url = _options_browser_hass_url(
+                self.hass,
+                bool(self._pending_options.get(CONF_ALLOW_INSECURE_HTTP_AUTH)),
+            )
+            if hass_url is None:
+                _LOGGER.debug(
+                    "No usable Home Assistant URL for the Xbox link proxy; "
+                    "using the manual paste step"
+                )
+                return await self.async_step_xbox_link_manual()
+            auth_url, self._xbox_verifier = build_authorize_url()
+            callback_url = str(
+                URL(hass_url)
+                .with_path(AUTH_CALLBACK_PATH)
+                .with_query({"flow_id": self.flow_id})
+            )
+            self._xbox_proxy = MicrosoftFamilyAuthProxy(
+                self.hass,
+                callback_url=callback_url,
+                start_url=auth_url,
+                completion_mode="oauth",
+            )
+            register_native_proxy(self.hass, self._xbox_proxy)
+            self._xbox_link_task = self.hass.async_create_task(
+                self._async_wait_xbox_redirect()
+            )
+            return self.async_show_progress(
+                step_id="xbox_link",
+                progress_action="xbox_link",
+                description_placeholders={
+                    "url": str(URL(hass_url).with_path(self._xbox_proxy.access_path))
+                },
+                progress_task=self._xbox_link_task,
+            )
+        return self.async_show_progress_done(next_step_id="finish_xbox_proxy")
+
+    async def _async_wait_xbox_redirect(self) -> None:
+        """Wait until the proxy saw Microsoft's redirect (a code or an error)."""
+        proxy = self._xbox_proxy
+        deadline = self.hass.loop.time() + XBOX_LINK_PROXY_TIMEOUT
+        while proxy is not None and proxy.oauth_redirect_url is None:
+            if self.hass.loop.time() > deadline:
+                _LOGGER.debug("Xbox link proxy timed out waiting for the sign-in")
+                return
+            await asyncio.sleep(1)
+
+    async def async_step_finish_xbox_proxy(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Link from the code the proxy captured, or fall back to the paste step."""
+        from .xbox_family_api import XboxFamilyAPI, XboxFamilyError
+
+        proxy = self._xbox_proxy
+        redirect_url = proxy.oauth_redirect_url if proxy and proxy.complete else None
+        await self._async_close_xbox_proxy()
+        self._xbox_link_task = None
+        if not (redirect_url and self._xbox_verifier):
+            return await self.async_step_xbox_link_manual()
+        # As in the manual step: through the running coordinator's instance, so
+        # the new token is used at once.
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        api = getattr(coordinator, "xbox_family", None) or XboxFamilyAPI(
+            self.hass, self._config_entry.entry_id
+        )
+        try:
+            await api.async_link_from_redirect(redirect_url, self._xbox_verifier, "proxy")
+        except XboxFamilyError as err:
+            _LOGGER.warning("Xbox Family Settings link via the proxy failed: %s", err)
+            return await self.async_step_xbox_link_manual()
+        if coordinator is not None:
+            coordinator.async_xbox_linked()
+        return self.async_create_entry(title="", data=self._pending_options)
+
+    async def _async_close_xbox_proxy(self) -> None:
+        """Close the Xbox link proxy, if one is open."""
+        from .auth.native_proxy import unregister_native_proxy
+
+        proxy, self._xbox_proxy = self._xbox_proxy, None
+        if proxy is None:
+            return
+        try:
+            await unregister_native_proxy(self.hass, proxy)
+        except Exception as err:  # noqa: BLE001 - cleanup only
+            _LOGGER.debug("Could not close the Xbox link proxy cleanly: %s", err)
+
+    @callback
+    def async_remove(self) -> None:
+        """Close the proxy when the dialog is closed during the sign-in."""
+        if self._xbox_proxy is not None:
+            self.hass.async_create_task(self._async_close_xbox_proxy())
+
+    async def async_step_xbox_link_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Link the Xbox Family Settings sign-in by pasting the redirect.
 
         Same manual step as the integration's old "paste the redirect URL":
@@ -1556,7 +1705,7 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         if self._xbox_link_url is None:
             self._xbox_link_url, self._xbox_verifier = build_authorize_url()
         return self.async_show_form(
-            step_id="xbox_link",
+            step_id="xbox_link_manual",
             data_schema=vol.Schema({vol.Required("redirect_url"): str}),
             description_placeholders={
                 "url": self._xbox_link_url,

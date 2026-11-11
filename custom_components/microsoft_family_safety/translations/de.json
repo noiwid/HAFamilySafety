@@ -92,7 +92,7 @@
           "xbox_link": "Xbox-Limits, die Xbox-Sperre und die Xbox-Spielzeit laufen dann über den Dienst der Xbox-Family-Settings-App, mit eigener Anmeldung und ohne die Websitzung. Nur wenn Xbox ausgewählt ist. Die Verknüpfung erfolgt meist automatisch nach einer Anmeldung; aktiviere dies, wenn der Verbindungssensor xbox_family: not_linked anzeigt."
         }
       },
-      "xbox_link": {
+      "xbox_link_manual": {
         "title": "Xbox Family Settings verknüpfen",
         "description": "1. Öffne [diese Microsoft-Anmeldung]({url}) und melde dich mit dem Elternkonto an, das du in der Xbox-Family-Settings-App verwendest.\n2. Du landest auf einer leeren Seite, deren Adresse mit `{redirect_prefix}` beginnt. Kopiere die vollständige Adresse und füge sie innerhalb weniger Minuten unten ein.",
         "data": {
@@ -102,6 +102,9 @@
     },
     "error": {
       "xbox_link_failed": "Microsoft hat diese Adresse nicht akzeptiert. Melde dich mit dem neuen Link erneut an und füge die Adresse sofort ein."
+    },
+    "progress": {
+      "xbox_link": "Öffne [diese Microsoft-Anmeldung]({url}) und melde dich mit dem Elternkonto an, das du in der Xbox-Family-Settings-App verwendest. Sobald Microsoft die Anmeldung angenommen hat, zeigt das Fenster „Sign-in received“ und kann geschlossen werden; dieser Schritt geht dann von selbst weiter, ohne dass du etwas kopieren musst. Ist die Anmeldung nach 5 Minuten nicht abgeschlossen, kannst du stattdessen die Adresse einfügen."
     }
   },
   "services": {

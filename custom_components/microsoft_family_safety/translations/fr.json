@@ -92,7 +92,7 @@
           "xbox_link": "Les limites Xbox, le verrouillage Xbox et le temps de jeu Xbox passent alors par le service de l'application Xbox Family Settings, avec leur propre connexion, sans la session web. Uniquement si Xbox est coché. La liaison se fait en général automatiquement après une connexion ; cochez ceci si le capteur Connexion indique xbox_family: not_linked."
         }
       },
-      "xbox_link": {
+      "xbox_link_manual": {
         "title": "Lier Xbox Family Settings",
         "description": "1. Ouvrez [cette connexion Microsoft]({url}) et connectez-vous avec le compte parent que vous utilisez dans l'application Xbox Family Settings.\n2. Vous arrivez sur une page blanche dont l'adresse commence par `{redirect_prefix}`. Copiez l'adresse complète et collez-la ci-dessous dans les minutes qui suivent.",
         "data": {
@@ -102,6 +102,9 @@
     },
     "error": {
       "xbox_link_failed": "Microsoft n'a pas accepté cette adresse. Reconnectez-vous avec le nouveau lien et collez l'adresse tout de suite."
+    },
+    "progress": {
+      "xbox_link": "Ouvrez [cette connexion Microsoft]({url}) et connectez-vous avec le compte parent que vous utilisez dans l'application Xbox Family Settings. Une fois la connexion acceptée par Microsoft, la fenêtre affiche « Sign-in received » et peut être fermée ; cette étape se poursuit alors d'elle-même, sans rien à copier. Si la connexion n'aboutit pas dans les 5 minutes, vous pourrez coller l'adresse à la place."
     }
   },
   "services": {
