@@ -289,7 +289,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 | Pending Requests | `sensor.{prefix}_pending_requests` | Request count | `requests` |
 | Web Filter | `sensor.{prefix}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge`, `content_settings`, `max_age_rating`, `acquisition_policy` |
 | Websites Visited | `sensor.{prefix}_websites_visited` | Visits in Edge over the last 7 days | `report_available`, `site_count`, `blocked_count`, `sites` (50 most visited: `domain`, `visits`, `last_visit`, `blocked`), `searches` (50 latest search terms, one row per term: `search`, `visits`, `date`, `site`). Read every 30 min; `report_available: false` when Microsoft has no Edge data for the child. `sites` and `searches` are not stored in the history database |
-| Screen Time Policy | `sensor.{prefix}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` … `sunday_allowance`, `*_allowed_intervals`, `daily_restrictions` |
+| Screen Time Policy | `sensor.{prefix}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` … `sunday_allowance`, `*_allowed_intervals`, `daily_restrictions`; with the Xbox Family Settings sign-in linked, also `xbox_monday_allowed_intervals` … `xbox_sunday_allowed_intervals` (the Xbox allowed hours, e.g. `[{begin: "07:00", end: "22:00"}]`) |
 
 ### Sensors — Per Physical Device
 
@@ -312,7 +312,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 |--------|-----------|----------|
 | **Account Lock** | `switch.{prefix}_lock` | **ON = account locked** (all screen time set to 0). Saves quotas before locking, restores on unlock. Persists across restarts. Attribute `has_saved_policy` shows whether a restore point exists. |
 | **Screen Time Limits** | `switch.{prefix}_screen_time_limits` | OFF = the Windows schedule is turned off, every day kept as it is. ON = turned back on. Same switch as in the Family Safety app (before 2.0.20 it rewrote every day to 24 h). |
-| Xbox Screen Time Limits | `switch.{prefix}_xbox_screen_time_limits` | Turns the child's separate Xbox schedule on or off (the days are kept). Once it is on, seven `number.{prefix}_xbox_{day}_limit` entities set the daily Xbox allowance the console enforces. Not created without Xbox among the monitored platforms. |
+| Xbox Screen Time Limits | `switch.{prefix}_xbox_screen_time_limits` | Turns the child's separate Xbox schedule on or off (the days are kept). Once it is on, seven `number.{prefix}_xbox_{day}_limit` entities set the daily Xbox allowance the console enforces; with the Xbox Family Settings sign-in linked, each also shows that day's Xbox allowed hours in its `allowed_intervals` attribute. Not created without Xbox among the monitored platforms. |
 | App Limits | `switch.{prefix}_app_limits` | The "App, feature, and game limits" toggle above the app list. While it is OFF, the per-app time limits are kept but not enforced. |
 | App Block | `switch.{prefix}_app_{appname}` | ON = app blocked. One switch per application. |
 | Platform Lock | `switch.{prefix}_{platform}_lock` | ON = platform locked. Locks one platform (e.g. Windows) through a Microsoft device override. For Windows the integration tries a web-API time override first, then falls back to the mobile API. Use **Account Lock** to lock every platform at once. |
@@ -446,6 +446,37 @@ data:
   start_minute: 0
   end_hour: 20
   end_minute: 30
+```
+
+#### Xbox daily limit and allowed hours
+
+Both services take an optional `platform`: `Windows` (the default, unchanged behaviour) or `Xbox`. With `Xbox` they write the child's Xbox schedule through the Xbox Family Settings service, the one the console enforces:
+
+- `set_screentime_limit` sets the day's Xbox limit and keeps its allowed hours;
+- `set_screentime_intervals` sets the day's Xbox **allowed hours** (the time window the child may play in, like a bedtime) and keeps its limit. The window lies within one day, on the hour or half hour; `end_hour: 24` means midnight.
+
+Xbox must be among the monitored platforms, the Xbox Family Settings sign-in must be linked and the child must match one child of the Xbox family by first and last name. Otherwise the action fails with a message saying which of these is missing, and nothing is written: the Xbox schedule of the Family Safety mobile API is not used as a fallback, because the console no longer enforces it ([#70](https://github.com/noiwid/HAFamilySafety/issues/70)). The allowed hours only apply while the child's Xbox schedule is on (**Xbox Screen Time Limits** switch).
+
+```yaml
+# Xbox allowed hours on Fridays: 16:00 to 21:30
+action: microsoft_family_safety.set_screentime_intervals
+data:
+  account_id: "1234567890123456"
+  platform: Xbox
+  day_of_week: 5
+  start_hour: 16
+  end_hour: 21
+  end_minute: 30
+```
+
+```yaml
+# Xbox limit on Saturdays: 3 hours
+action: microsoft_family_safety.set_screentime_limit
+data:
+  account_id: "1234567890123456"
+  platform: Xbox
+  day_of_week: 6
+  hours: 3
 ```
 
 ### Request Handling

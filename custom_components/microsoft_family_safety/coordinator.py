@@ -959,8 +959,20 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def async_set_screentime_limit(
-        self, child_id: str, day_of_week: int, hours: int, minutes: int
+        self,
+        child_id: str,
+        day_of_week: int,
+        hours: int,
+        minutes: int,
+        platform: str = "Windows",
     ) -> None:
+        if platform == "Xbox":
+            await self.async_set_xbox_screentime_limit(
+                child_id, day_of_week, hours, minutes, require_xapprove=True
+            )
+            return
+        if platform != "Windows":
+            raise ValueError("platform must be Windows or Xbox")
         if not 0 <= day_of_week <= 6:
             raise ValueError("day_of_week must be between 0 and 6")
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
@@ -979,7 +991,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         start_minute: int,
         end_hour: int,
         end_minute: int,
+        platform: str = "Windows",
     ) -> None:
+        if platform == "Xbox":
+            await self.async_set_xbox_allowed_hours(
+                child_id, day_of_week, start_hour, start_minute, end_hour, end_minute
+            )
+            return
+        if platform != "Windows":
+            raise ValueError("platform must be Windows or Xbox")
         if not 0 <= day_of_week <= 6:
             raise ValueError("day_of_week must be between 0 and 6")
         start_total = start_hour * 60 + start_minute
@@ -1089,6 +1109,48 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except XboxFamilyError as err:
             _LOGGER.warning("Xbox Family Settings lookup failed: %s", err)
             return None
+
+    async def _xapprove_xuid_required(self, child_id: str) -> str:
+        """xuid for a write that must go through xapprove, or a clear refusal.
+
+        Used where no other path reaches the console: the Xbox schedule on the
+        Family Safety mobile API accepts writes the console does not enforce.
+        """
+        if not self.xbox_features:
+            raise HomeAssistantError(
+                "Xbox is not enabled for this Microsoft Family Safety entry: tick Xbox "
+                "in the integration options and link the Xbox Family Settings sign-in"
+            )
+        if not self.xbox_family.linked:
+            raise HomeAssistantError(
+                "The Xbox Family Settings sign-in is not linked: link it from the "
+                "integration options"
+            )
+        if not self.xbox_family.usable:
+            raise HomeAssistantError(
+                "Microsoft refused the Xbox Family Settings sign-in: link it again "
+                "from the integration options"
+            )
+        account = next(
+            (a for key, a in self._accounts.items() if str(key) == str(child_id)), None
+        )
+        if account is None:
+            raise HomeAssistantError(f"No child account {child_id} in this family")
+        try:
+            xuid = await self._async_xbox_xuid(account)
+        except XboxFamilyAuthError as err:
+            raise HomeAssistantError(
+                "Microsoft refused the Xbox Family Settings sign-in: link it again "
+                f"from the integration options ({err})"
+            ) from err
+        except XboxFamilyError as err:
+            raise HomeAssistantError(f"Could not look up the child's Xbox account: {err}") from err
+        if xuid is None:
+            raise HomeAssistantError(
+                f"Child account {child_id} could not be matched to an Xbox account: the "
+                "first and last name must match exactly one child in the Xbox family"
+            )
+        return xuid
 
     def _xbox_web_gates(self, xapprove: dict[str, Any] | None) -> tuple[bool, bool]:
         """Whether the web Xbox policy and the web usage report may be read.
@@ -1200,16 +1262,29 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_update_listeners()
 
     async def async_set_xbox_screentime_limit(
-        self, child_id: str, day_of_week: int, hours: int, minutes: int
+        self,
+        child_id: str,
+        day_of_week: int,
+        hours: int,
+        minutes: int,
+        *,
+        require_xapprove: bool = False,
     ) -> None:
-        """Set one day of the Xbox schedule (the one the console enforces)."""
-        if not self.web_api:
-            raise RuntimeError("Web API not initialized")
+        """Set one day of the Xbox schedule (the one the console enforces).
+
+        With ``require_xapprove`` the write is refused instead of falling back
+        to the mobile Xbox schedule when xapprove is not available.
+        """
         if not 0 <= day_of_week <= 6:
             raise ValueError("day_of_week must be between 0 and 6")
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
             raise ValueError("screen-time allowance must be between 0 and 24 hours")
-        xuid = await self._xapprove_xuid_for(child_id)
+        if require_xapprove:
+            xuid: str | None = await self._xapprove_xuid_required(child_id)
+        else:
+            if not self.web_api:
+                raise RuntimeError("Web API not initialized")
+            xuid = await self._xapprove_xuid_for(child_id)
         if xuid is not None:
             try:
                 await self.xbox_family.async_set_day(
@@ -1227,6 +1302,53 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             entry = (policy.get("dailyRestrictions") or {}).get(day)
             if isinstance(entry, dict):
                 entry["allowance"] = f"{hours:02d}:{minutes:02d}:00"
+
+        self._set_xbox_policy_field(child_id, _update)
+        await self.async_request_refresh()
+
+    async def async_set_xbox_allowed_hours(
+        self,
+        child_id: str,
+        day_of_week: int,
+        start_hour: int,
+        start_minute: int,
+        end_hour: int,
+        end_minute: int,
+    ) -> None:
+        """Set one day's Xbox allowed hours, keeping the day's allowance.
+
+        Only through xapprove: the console does not enforce the Xbox schedule
+        of the Family Safety mobile API.
+        """
+        if not 0 <= day_of_week <= 6:
+            raise ValueError("day_of_week must be between 0 and 6")
+        if start_minute not in (0, 30) or end_minute not in (0, 30):
+            raise ValueError("Xbox allowed hours start and end on the hour or half hour")
+        start_total = start_hour * 60 + start_minute
+        end_total = end_hour * 60 + end_minute
+        if not 0 <= start_total < end_total <= 1440:
+            raise ValueError(
+                "Xbox allowed hours must end later the same day than they start "
+                "(24:00 at the latest)"
+            )
+        xuid = await self._xapprove_xuid_required(child_id)
+        try:
+            await self.xbox_family.async_set_day(
+                xuid, day_of_week, intervals=[(start_total, end_total)]
+            )
+        except XboxFamilyError as err:
+            raise HomeAssistantError(f"Could not set the Xbox allowed hours: {err}") from err
+        day = DAY_KEYS[day_of_week]
+
+        def _update(policy: dict) -> None:
+            entry = (policy.get("dailyRestrictions") or {}).get(day)
+            if isinstance(entry, dict):
+                entry["allowedIntervals"] = [
+                    {
+                        "begin": f"{start_total // 60:02d}:{start_total % 60:02d}",
+                        "end": f"{end_total // 60:02d}:{end_total % 60:02d}",
+                    }
+                ]
 
         self._set_xbox_policy_field(child_id, _update)
         await self.async_request_refresh()

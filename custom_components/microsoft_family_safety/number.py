@@ -240,7 +240,19 @@ class FamilySafetyXboxDailyLimitNumber(FamilySafetyDailyLimitNumber):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         policy = (self._get_account_data() or {}).get("xbox_screentime_policy")
-        return {"xbox_schedule_enabled": bool(isinstance(policy, dict) and policy.get("isEnabled"))}
+        attrs: dict[str, Any] = {
+            "xbox_schedule_enabled": bool(isinstance(policy, dict) and policy.get("isEnabled"))
+        }
+        # The day's allowed hours, when read from the Xbox Family Settings service.
+        day_data = (
+            (policy.get("dailyRestrictions") or {}).get(self._day_key)
+            if isinstance(policy, dict) and policy.get("source") == "xapprove"
+            else None
+        )
+        intervals = day_data.get("allowedIntervals") if isinstance(day_data, dict) else None
+        if isinstance(intervals, list):
+            attrs["allowed_intervals"] = intervals
+        return attrs
 
     async def async_set_native_value(self, value: float) -> None:
         await async_check_entity_action(self)

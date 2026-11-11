@@ -191,7 +191,7 @@
     },
     "set_screentime_limit": {
       "name": "Définir la limite de temps d'écran",
-      "description": "Définit l'allocation quotidienne de temps d'écran pour un jour de la semaine.",
+      "description": "Définit l'allocation quotidienne de temps d'écran pour un jour de la semaine, pour Windows ou pour la Xbox.",
       "fields": {
         "account_id": {
           "name": "ID du compte",
@@ -208,12 +208,16 @@
         "minutes": {
           "name": "Minutes",
           "description": "Minutes de temps d'écran supplémentaires."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "Windows (par défaut) ou Xbox. Xbox écrit la limite appliquée par la console, via le service Xbox Family Settings : la Xbox doit faire partie des plateformes surveillées et la connexion Xbox Family Settings doit être liée."
         }
       }
     },
     "set_screentime_intervals": {
       "name": "Définir les plages de temps d'écran",
-      "description": "Définit la plage horaire autorisée pour le temps d'écran un jour donné.",
+      "description": "Définit la plage horaire autorisée pour le temps d'écran un jour donné, pour Windows ou pour la Xbox (les heures autorisées sur Xbox).",
       "fields": {
         "account_id": {
           "name": "ID du compte",
@@ -238,6 +242,10 @@
         "end_minute": {
           "name": "Minute de fin",
           "description": "Minute de fin (0 ou 30)."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "Windows (par défaut) ou Xbox. Xbox définit les heures autorisées appliquées par la console, via le service Xbox Family Settings, et conserve la limite du jour : la Xbox doit faire partie des plateformes surveillées et la connexion Xbox Family Settings doit être liée."
         }
       }
     },
