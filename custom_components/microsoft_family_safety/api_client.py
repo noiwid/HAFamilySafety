@@ -2191,23 +2191,6 @@ class FamilySafetyWebAPI:
         )
         return True
 
-    async def set_screentime_daily_allowance(
-        self,
-        child_id: str,
-        day_of_week: int,
-        hours: int,
-        minutes: int,
-        platform: str = "Windows",
-    ) -> dict | None:
-        day_name = DAY_KEYS[day_of_week]
-        result = await self._request(
-            "PATCH",
-            f"/v4/devicelimits/schedules/{child_id}",
-            json_data={day_name: {"allowance": f"{hours:02d}:{minutes:02d}:00"}},
-            extra_headers={"Plat-Info": platform},
-        )
-        return result if isinstance(result, dict) else None
-
     # App time limits (mobile aggregator, v3/AppLimits/policies), as the
     # Family Safety app sends them since 2026-10 (capture shared on #64):
     # days at the top level, allowance in milliseconds, intervals as
