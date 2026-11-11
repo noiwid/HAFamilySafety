@@ -25,6 +25,7 @@ RUN apt-get update \
         libxrandr2 \
         libgbm1 \
         libasound2 \
+        libatomic1 \
         xvfb \
         x11vnc \
         novnc \
