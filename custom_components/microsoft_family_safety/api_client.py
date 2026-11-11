@@ -2312,28 +2312,40 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else {}
 
-    async def get_app_policy(
-        self, child_id: str, app_id: str, platform: str
-    ) -> dict | None:
-        """Read one app's policy (block state and daily limits).
+    async def get_app_activity(
+        self, child_id: str, platform: str, days: int = 7
+    ) -> list[dict[str, Any]]:
+        """The app activity report's entries for one platform, last ``days`` days.
 
-        The same v3/AppLimits/policies resource the PATCH above writes, which
-        answers with the whole policy: appId, enabled, blockState,
-        appTimeEnforcementPolicy and every day key (null without a limit).
+        The per-app policy cannot be read directly: every GET on
+        v1-v4/AppLimits/policies answers 405. This report is the one source
+        of it: each entry is {appId, displayName, iconUrl, usage, policy,
+        blockState, isLegacyBlocked}, ``policy`` null for an app without a
+        limit. Plat-Info is required (400 "The deviceInfo field is required"
+        without it); times are UTC.
         """
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        begin = end - timedelta(days=days)
         result = await self._request(
             "GET",
-            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            f"/v4/activityReport/appUsage/{child_id}",
+            params={
+                "beginTime": begin.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "endTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
             extra_headers={
                 "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
             },
         )
-        return result if isinstance(result, dict) else None
+        entries = result.get("appActivity") if isinstance(result, dict) else None
+        if not isinstance(entries, list):
+            raise FamilySafetyWebAPIError("App activity report without appActivity")
+        return [entry for entry in entries if isinstance(entry, dict)]
 
     async def write_app_policy(
         self, child_id: str, app_id: str, platform: str, body: dict[str, Any]
     ) -> dict | None:
-        """PATCH a whole app policy as given (app_pause.py builds the body)."""
+        """PATCH an app policy as given (app_pause.py builds the body)."""
         result = await self._request(
             "PATCH",
             f"/v3/AppLimits/policies/{child_id}/{app_id}",
