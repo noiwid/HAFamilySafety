@@ -411,7 +411,7 @@
     },
     "pause_app": {
       "name": "App pausieren",
-      "description": "Windows- oder Xbox-Apps eines Kindes vorübergehend sperren. Die Richtlinie jeder App (ihr tägliches Zeitlimit oder keines) wird vor der ersten Pause gespeichert und bleibt während der Sperre erhalten; resume_app stellt sie wieder her. Eine erneute Pause behält den zuerst gespeicherten Zustand, auch nach einem Neustart. Bereits gesperrte Apps werden übersprungen und nicht verändert. Antwortet mit den pausierten und übersprungenen Apps.",
+      "description": "Windows- oder Xbox-Apps eines Kindes vorübergehend sperren. Die Richtlinie jeder App (ihr tägliches Zeitlimit oder keines) wird vor der ersten Pause bei Microsoft gelesen und gespeichert und bleibt während der Sperre erhalten; resume_app stellt sie wieder her. Bereits gesperrte Apps und Apps, deren Richtlinie nicht lesbar ist, werden nicht pausiert. Eine erneute Pause behält den zuerst gespeicherten Zustand, auch nach einem Neustart; hat ein Elternteil das Limit inzwischen geändert, bleibt die App unverändert. Antwortet mit den pausierten, von einem Elternteil geänderten, übersprungenen und fehlgeschlagenen Apps; schlägt fehl, wenn alle Apps fehlschlagen.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
@@ -425,7 +425,7 @@
     },
     "resume_app": {
       "name": "App fortsetzen",
-      "description": "Von pause_app gesperrte Apps wieder freigeben, mit dem Zeitlimit, das jede vorher hatte (oder keinem), und ihren gespeicherten Zustand verwerfen. Ohne Apps alle pausierten Apps des Kindes. Eine App, die inzwischen jemand anderes freigegeben hat, bleibt unverändert. Antwortet mit den fortgesetzten, freigegebenen und übersprungenen Apps.",
+      "description": "Von pause_app gesperrte Apps wieder freigeben, mit dem Zeitlimit, das jede vorher hatte (oder keinem), und ihren gespeicherten Zustand verwerfen. Ohne Apps alle pausierten Apps des Kindes. Eine App, die inzwischen jemand freigegeben oder geändert hat, bleibt unverändert. Antwortet mit den fortgesetzten, freigegebenen, von einem Elternteil geänderten, übersprungenen und fehlgeschlagenen Apps; schlägt fehl, wenn alle Apps fehlschlagen.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",

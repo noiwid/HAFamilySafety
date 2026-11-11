@@ -462,7 +462,8 @@ class FamilySafetyWebAPI:
                 return None
         text = await resp.text()
         raise FamilySafetyWebAPIError(
-            f"API request failed with status {resp.status}: {text[:200]}"
+            f"API request failed with status {resp.status}: {text[:200]}",
+            status=resp.status,
         )
 
     # ------------------------------------------------------------------
@@ -2463,3 +2464,8 @@ class FamilySafetyWebAPI:
 
 class FamilySafetyWebAPIError(Exception):
     """Exception raised for API errors."""
+
+    def __init__(self, message: str = "", status: int | None = None) -> None:
+        super().__init__(message)
+        #: The HTTP status Microsoft answered, when it answered.
+        self.status = status

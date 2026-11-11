@@ -539,15 +539,19 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_write_app_policy(
         self, account_id: str, app_id: str, platform: str, body: dict[str, Any],
         *, blocked: bool,
-    ) -> None:
-        """Write a whole app policy through the mobile API, then refresh."""
+    ) -> dict | None:
+        """Write a whole app policy through the mobile API, then refresh.
+
+        Returns Microsoft's answer (the policy as it now stands, when given).
+        """
         if not self.web_api:
             raise HomeAssistantError("Mobile API not initialized")
-        await self.web_api.write_app_policy(str(account_id), app_id, platform, body)
+        answer = await self.web_api.write_app_policy(str(account_id), app_id, platform, body)
         app = self.get_application(account_id, app_id)
         if app is not None:
             app.blocked = blocked
         await self.async_request_refresh()
+        return answer
 
     def paused_apps(self, account_id: Any) -> dict[str, str]:
         """app id -> ``ours`` (still blocked by our pause) or ``parent`` (unblocked since)."""
@@ -2078,6 +2082,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts
             self._devices = new_devices
+            # Paused apps of a child no longer in the family can never be
+            # resumed; an empty roster is more likely a failed read.
+            if accounts_data and self.app_pauser.stale_accounts(
+                {str(a) for a in accounts_data}
+            ):
+                self.hass.async_create_task(
+                    self.app_pauser.async_prune({str(a) for a in accounts_data})
+                )
             pending = getattr(self.api, "pending_requests", None) or []
             self._is_retrying_auth = False
             return {"accounts": accounts_data, "devices": devices_data, "pending_requests": pending}

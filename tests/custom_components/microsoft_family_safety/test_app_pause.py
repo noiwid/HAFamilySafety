@@ -10,15 +10,22 @@ from unittest.mock import AsyncMock
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.exceptions import HomeAssistantError
+
 from custom_components.microsoft_family_safety import _register_services, sensor
 from custom_components.microsoft_family_safety.api_client import FamilySafetyWebAPIError
-from custom_components.microsoft_family_safety.app_pause import AppPauser, policy_state
+from custom_components.microsoft_family_safety.app_pause import (
+    AppPauser,
+    _refused,
+    policy_state,
+)
 from custom_components.microsoft_family_safety.const import DAY_KEYS, DOMAIN
 from custom_components.microsoft_family_safety.coordinator import (
     FamilySafetyDataUpdateCoordinator,
 )
 
 CHILD = "1234567890123456"
+OTHER_CHILD = "6543210987654321"
 
 LIMIT_DAY = {
     "allowance": 3600000,
@@ -38,6 +45,10 @@ def _policy(app_id: str, *, limit: bool, block_state: str = "NotBlocked") -> dic
         "alternateAppIds": [],
         **{day: (dict(LIMIT_DAY) if limit else None) for day in DAY_KEYS},
     }
+
+
+def _error(status: int) -> FamilySafetyWebAPIError:
+    return FamilySafetyWebAPIError(f"API request failed with status {status}: x", status=status)
 
 
 class FakeWebAPI:
@@ -60,7 +71,7 @@ class FakeWebAPI:
             raise self.write_error
         self.writes.append((app_id, platform, copy.deepcopy(body)))
         self.policies[app_id] = {**{day: None for day in DAY_KEYS}, **copy.deepcopy(body)}
-        return self.policies[app_id]
+        return copy.deepcopy(self.policies[app_id])
 
 
 class FakeAccount:
@@ -118,6 +129,7 @@ async def test_a_time_limit_is_kept_while_paused_and_put_back(hass, rig):
     paused = await _call(hass, "pause_app", apps=["x:racing", "win32:chat", "x:nope"])
     assert paused["paused"] == ["x:racing"]
     assert paused["skipped"] == {"win32:chat": "already blocked", "x:nope": "unknown app"}
+    assert paused["failed"] == {}
     assert apps["x:racing"].blocked is True
     app_id, platform, body = api.writes[0]
     assert (app_id, platform, body["blockState"]) == ("x:racing", "xbox", "BlockedAlways")
@@ -126,7 +138,8 @@ async def test_a_time_limit_is_kept_while_paused_and_put_back(hass, rig):
 
     resumed = await _call(hass, "resume_app")
     assert resumed == {
-        "account_id": CHILD, "resumed": ["x:racing"], "released": [], "skipped": {},
+        "account_id": CHILD, "resumed": ["x:racing"], "released": [],
+        "changed_by_parent": [], "skipped": {}, "failed": {},
     }
     assert apps["x:racing"].blocked is False
     assert api.policies["x:racing"] == before
@@ -160,19 +173,40 @@ async def test_a_block_microsoft_reports_is_skipped(hass, rig):
 async def test_repeat_pause_keeps_the_first_state_also_after_a_restart(hass, rig):
     coord, apps, api, entry = rig
     await _call(hass, "pause_app", apps=["x:racing"])
-    # The policy now reads as blocked; a second pause must not save that.
-    await _call(hass, "pause_app", apps=["x:racing"])
-    assert len(api.writes) == 2
+    # Still blocked by us: a second pause writes nothing and saves nothing new.
+    again = await _call(hass, "pause_app", apps=["x:racing"])
+    assert again["paused"] == ["x:racing"]
+    assert len(api.writes) == 1
 
     restarted = AppPauser(hass, entry.entry_id)
     await restarted.async_load()
     saved = restarted.saved(CHILD)["x:racing"]
-    assert saved["blockState"] == "NotBlocked"
-    assert saved["days"] == {day: LIMIT_DAY for day in DAY_KEYS}
+    assert saved["prior"]["blockState"] == "NotBlocked"
+    assert saved["prior"]["days"] == {day: LIMIT_DAY for day in DAY_KEYS}
 
     coord.app_pauser = restarted
     await _call(hass, "resume_app", apps=["x:racing"])
     assert api.policies["x:racing"] == _policy("x:racing", limit=True)
+
+
+async def test_a_repeat_pause_after_a_release_blocks_again(hass, rig):
+    coord, apps, api, _ = rig
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    api.policies["x:racing"]["blockState"] = "NotBlocked"  # released in the app
+    result = await coord.async_pause_app(CHILD, ["x:racing"])
+    assert result["paused"] == ["x:racing"]
+    assert api.policies["x:racing"]["blockState"] == "BlockedAlways"
+    assert coord.app_pauser.saved(CHILD)["x:racing"]["prior"]["blockState"] == "NotBlocked"
+
+
+async def test_a_repeat_pause_after_a_parent_change_leaves_it(hass, rig):
+    coord, apps, api, _ = rig
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    api.policies["x:racing"]["monday"] = {**LIMIT_DAY, "allowance": 7200000}
+    result = await coord.async_pause_app(CHILD, ["x:racing"])
+    assert result["changed_by_parent"] == ["x:racing"] and result["paused"] == []
+    assert len(api.writes) == 1
+    assert coord.app_pauser.saved(CHILD) == {}
 
 
 async def test_resume_of_an_app_never_paused_is_skipped(hass, rig):
@@ -182,26 +216,51 @@ async def test_resume_of_an_app_never_paused_is_skipped(hass, rig):
     assert api.writes == []
 
 
-async def test_a_failed_restore_keeps_the_saved_state(hass, rig):
+async def test_a_failed_restore_keeps_the_saved_state_and_fails_the_call(hass, rig):
     coord, _, api, _ = rig
     await _call(hass, "pause_app", apps=["x:racing"])
-    api.write_error = FamilySafetyWebAPIError("API request failed with status 500: x")
-    result = await _call(hass, "resume_app")
-    assert "x:racing" in result["skipped"]
+    api.write_error = _error(500)
+    with pytest.raises(HomeAssistantError, match="x:racing"):
+        await _call(hass, "resume_app")
     assert "x:racing" in coord.app_pauser.saved(CHILD)
+
+
+async def test_a_partial_failure_answers_per_app(hass, rig):
+    coord, _, api, _ = rig
+    await coord.async_pause_app(CHILD, ["x:racing", "appx:paint"])
+    del api.policies["appx:paint"]  # no longer readable
+    result = await _call(hass, "resume_app")
+    assert result["resumed"] == ["x:racing"]
+    assert result["failed"] == {"appx:paint": "policy_unreadable"}
+    assert list(coord.app_pauser.saved(CHILD)) == ["appx:paint"]
 
 
 async def test_a_refused_block_is_forgotten_a_network_failure_is_kept(hass, rig):
     coord, _, api, _ = rig
-    api.write_error = FamilySafetyWebAPIError("API request failed with status 400: bad")
-    result = await coord.async_pause_app(CHILD, ["x:racing"])
-    assert result["paused"] == [] and "x:racing" in result["skipped"]
+    api.write_error = _error(400)
+    with pytest.raises(HomeAssistantError):
+        await coord.async_pause_app(CHILD, ["x:racing"])
     assert coord.app_pauser.saved(CHILD) == {}
 
     # A network failure may have gone through: that one stays resumable.
     api.write_error = asyncio.TimeoutError()
-    await coord.async_pause_app(CHILD, ["x:racing"])
+    with pytest.raises(HomeAssistantError):
+        await coord.async_pause_app(CHILD, ["x:racing"])
     assert "x:racing" in coord.app_pauser.saved(CHILD)
+
+    # It did go through: resume still finds our block and puts the limit back.
+    api.write_error = None
+    api.policies["x:racing"]["blockState"] = "BlockedAlways"
+    result = await coord.async_resume_app(CHILD)
+    assert result["resumed"] == ["x:racing"]
+    assert api.policies["x:racing"] == _policy("x:racing", limit=True)
+
+
+def test_refused_reads_the_http_status():
+    assert _refused(_error(400)) and _refused(_error(404))
+    assert not _refused(_error(500))
+    assert not _refused(FamilySafetyWebAPIError("Mobile API request failed: status 400"))
+    assert not _refused(asyncio.TimeoutError())
 
 
 async def test_an_app_a_parent_unblocked_meanwhile_is_left_alone(hass, rig):
@@ -213,7 +272,9 @@ async def test_an_app_a_parent_unblocked_meanwhile_is_left_alone(hass, rig):
         {"app_id": "x:racing", "app_name": "Racing", "paused": "ours"},
     ]
 
-    apps["x:racing"].blocked = False  # a parent unblocked it in the app
+    # A parent unblocked it in the app.
+    apps["x:racing"].blocked = False
+    api.policies["x:racing"]["blockState"] = "NotBlocked"
     by_id = {a["app_id"]: a["paused"] for a in count.extra_state_attributes["paused_apps"]}
     assert by_id == {"appx:paint": "ours", "x:racing": "parent"}
 
@@ -226,15 +287,57 @@ async def test_an_app_a_parent_unblocked_meanwhile_is_left_alone(hass, rig):
     assert count.extra_state_attributes["paused_apps"] == []
 
 
-async def test_the_activity_report_policy_is_the_fallback(hass, rig):
+async def test_a_lagging_report_does_not_count_as_a_release(hass, rig):
     coord, apps, api, _ = rig
-    api.read_error = FamilySafetyWebAPIError("API request failed with status 404: x")
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    apps["x:racing"].blocked = False  # the polled report lags; Microsoft still blocks
+    result = await coord.async_resume_app(CHILD)
+    assert result["resumed"] == ["x:racing"] and result["released"] == []
+    assert api.policies["x:racing"] == _policy("x:racing", limit=True)
+
+
+async def test_a_limit_a_parent_changed_while_paused_is_kept(hass, rig):
+    coord, apps, api, _ = rig
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    api.policies["x:racing"]["saturday"] = {**LIMIT_DAY, "allowance": 7200000}
+    parents = copy.deepcopy(api.policies["x:racing"])
+    result = await coord.async_resume_app(CHILD)
+    assert result["changed_by_parent"] == ["x:racing"] and result["resumed"] == []
+    assert api.policies["x:racing"] == parents  # nothing written over it
+    assert coord.app_pauser.saved(CHILD) == {}
+
+
+async def test_an_unreadable_live_policy_on_resume_keeps_the_record(hass, rig):
+    coord, _, api, _ = rig
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    api.read_error = _error(503)
+    with pytest.raises(HomeAssistantError, match="policy_unreadable"):
+        await coord.async_resume_app(CHILD)
+    assert "x:racing" in coord.app_pauser.saved(CHILD)
+
+
+async def test_no_pause_without_a_readable_policy(hass, rig):
+    coord, apps, api, _ = rig
+    api.read_error = _error(404)
+    # The activity report's policy is not used: its shape is unknown.
     apps["x:racing"].policy = _policy("x:racing", limit=True)
-    result = await coord.async_pause_app(CHILD, ["x:racing", "appx:paint"])
-    assert result["paused"] == ["x:racing"]
-    # Nothing readable: nothing to put back, so no pause.
-    assert result["skipped"] == {"appx:paint": "app policy unreadable"}
-    assert list(coord.app_pauser.saved(CHILD)) == ["x:racing"]
+    with pytest.raises(HomeAssistantError, match="policy_unreadable"):
+        await _call(hass, "pause_app", apps=["x:racing"])
+    assert api.writes == []
+    assert coord.app_pauser.saved(CHILD) == {}
+
+
+async def test_no_pause_when_a_limit_may_sit_outside_the_day_keys(hass, rig):
+    coord, _, api, _ = rig
+    # enabled with no day keys: a limit in some other shape.
+    api.policies["x:racing"] = {"appId": "x:racing", "enabled": True, "blockState": "NotBlocked"}
+    # A limit under another key.
+    api.policies["appx:paint"] = {
+        **_policy("appx:paint", limit=False), "dailyAllowance": 3600000,
+    }
+    with pytest.raises(HomeAssistantError):
+        await coord.async_pause_app(CHILD, ["x:racing", "appx:paint"])
+    assert api.writes == []
 
 
 async def test_only_windows_and_xbox_apps(hass, rig):
@@ -248,5 +351,33 @@ def test_policy_state_refuses_other_shapes():
     assert policy_state(None) is None
     assert policy_state({"appId": "x:a"}) is None
     assert policy_state({"blockState": "NotBlocked", "monday": "01:00:00"}) is None
+    assert policy_state({"blockState": "NotBlocked"}) is None  # enabled unknown
     state = policy_state(_policy("x:a", limit=False))
     assert state["days"] == {} and state["blockState"] == "NotBlocked"
+
+
+async def test_load_drops_records_of_an_unknown_shape(hass, rig):
+    _, _, _, entry = rig
+    pauser = AppPauser(hass, entry.entry_id)
+    good = {
+        "prior": {"blockState": "NotBlocked", "days": {}},
+        "written": {"blockState": "BlockedAlways", "days": {}},
+        "platform": "xbox",
+    }
+    await pauser._store.async_save({
+        CHILD: {"x:good": good, "x:old": {"blocked": False}},
+        OTHER_CHILD: "junk",
+    })
+    await pauser.async_load()
+    assert pauser.saved(CHILD) == {"x:good": good}
+    assert pauser.saved(OTHER_CHILD) == {}
+
+
+async def test_children_gone_from_the_family_are_pruned(hass, rig):
+    coord, _, _, _ = rig
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    pauser = coord.app_pauser
+    assert pauser.stale_accounts({CHILD}) == set()
+    assert pauser.stale_accounts({OTHER_CHILD}) == {CHILD}
+    await pauser.async_prune({OTHER_CHILD})
+    assert pauser.saved(CHILD) == {}

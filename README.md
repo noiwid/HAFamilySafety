@@ -444,13 +444,13 @@ data:
     - "x:app-id"
 ```
 
-`pause_app` reads each app's policy first and saves it (in Home Assistant's storage, so it survives a restart); a second pause of the same app keeps what the first one saved. Apps that are already blocked are skipped and never touched. `resume_app` writes the saved policy back unblocked; an app that someone unblocked in the meantime (a parent in the Family Safety app) is reported as `released` and left as it is. Both answer with what they did, per app, when called with `response_variable`:
+`pause_app` reads each app's policy from Microsoft first and saves it (in Home Assistant's storage, so it survives a restart); a second pause of the same app keeps what the first one saved. Apps that are already blocked are skipped and never touched, and an app whose policy cannot be read is not paused, since there would be nothing safe to put back. `resume_app` reads the policy again and writes the saved one back unblocked. An app that someone unblocked in the meantime is reported as `released`, and one whose limit or block a parent changed as `changed_by_parent`; both are left as the parent set them. Both services answer with what they did, per app, when called with `response_variable`, and fail when every app failed:
 
 ```yaml
 # pause_app
-{"account_id": "1234567890123456", "paused": ["x:app-id"], "skipped": {"appx:other": "already blocked"}}
+{"account_id": "1234567890123456", "paused": ["x:app-id"], "changed_by_parent": [], "skipped": {"appx:other": "already blocked"}, "failed": {}}
 # resume_app
-{"account_id": "1234567890123456", "resumed": ["x:app-id"], "released": [], "skipped": {}}
+{"account_id": "1234567890123456", "resumed": ["x:app-id"], "released": [], "changed_by_parent": [], "skipped": {}, "failed": {}}
 ```
 
 ### Screen Time
