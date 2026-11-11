@@ -7,7 +7,12 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -39,6 +44,8 @@ from .const import (
     SERVICE_LOCK_ACCOUNT,
     SERVICE_UNLOCK_ACCOUNT,
     SERVICE_REQUEST_REAUTH,
+    SERVICE_PAUSE_APP,
+    SERVICE_RESUME_APP,
     CONF_ALLOWED_USERS,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
@@ -153,6 +160,18 @@ SERVICE_UNLOCK_ACCOUNT_SCHEMA = vol.Schema({
 
 SERVICE_REQUEST_REAUTH_SCHEMA = vol.Schema({})
 
+_APP_IDS = vol.All(cv.ensure_list, [cv.string], vol.Length(min=1))
+
+SERVICE_PAUSE_APP_SCHEMA = vol.Schema({
+    vol.Required("account_id"): cv.string,
+    vol.Required("apps"): _APP_IDS,
+})
+
+SERVICE_RESUME_APP_SCHEMA = vol.Schema({
+    vol.Required("account_id"): cv.string,
+    vol.Optional("apps"): _APP_IDS,
+})
+
 
 def _get_coordinator(
     hass: HomeAssistant, account_id: str | None = None
@@ -182,6 +201,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Load persisted screentime policies (for lock/unlock survival across restarts)
     await coordinator.async_load_saved_screentime()
+    # And the app states pause_app saved, for resume_app.
+    await coordinator.app_pauser.async_load()
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -318,12 +339,41 @@ def _register_services(hass: HomeAssistant) -> None:
             DOMAIN, name, guard_service(hass, make_handler(method, extract)), schema=schema
         )
 
+    # pause_app / resume_app answer with what they did, per app.
+    def make_response_handler(method_name):
+        async def handler(call: ServiceCall) -> ServiceResponse:
+            coordinator = _get_coordinator(hass, call.data["account_id"])
+            if coordinator is None:
+                raise HomeAssistantError("No Microsoft Family Safety coordinator available")
+            try:
+                return await getattr(coordinator, method_name)(
+                    call.data["account_id"], call.data.get("apps")
+                )
+            except HomeAssistantError:
+                raise
+            except Exception as err:  # noqa: BLE001 - report as a service error
+                raise HomeAssistantError(
+                    f"Microsoft Family Safety {call.service} failed: {err}"
+                ) from err
+        return handler
+
+    for name, schema, method in (
+        (SERVICE_PAUSE_APP, SERVICE_PAUSE_APP_SCHEMA, "async_pause_app"),
+        (SERVICE_RESUME_APP, SERVICE_RESUME_APP_SCHEMA, "async_resume_app"),
+    ):
+        hass.services.async_register(
+            DOMAIN, name, guard_service(hass, make_response_handler(method)),
+            schema=schema, supports_response=SupportsResponse.OPTIONAL,
+        )
+
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the Xbox Family Settings refresh token kept for this entry."""
+    """Delete the Xbox Family Settings refresh token and the paused apps kept for this entry."""
+    from .app_pause import AppPauser
     from .xbox_family_api import XboxFamilyAPI
 
     await XboxFamilyAPI(hass, entry.entry_id).async_unlink()
+    await AppPauser(hass, entry.entry_id).async_remove()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

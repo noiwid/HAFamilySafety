@@ -2311,6 +2311,38 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else {}
 
+    async def get_app_policy(
+        self, child_id: str, app_id: str, platform: str
+    ) -> dict | None:
+        """Read one app's policy (block state and daily limits).
+
+        The same v3/AppLimits/policies resource the PATCH above writes, which
+        answers with the whole policy: appId, enabled, blockState,
+        appTimeEnforcementPolicy and every day key (null without a limit).
+        """
+        result = await self._request(
+            "GET",
+            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            extra_headers={
+                "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
+            },
+        )
+        return result if isinstance(result, dict) else None
+
+    async def write_app_policy(
+        self, child_id: str, app_id: str, platform: str, body: dict[str, Any]
+    ) -> dict | None:
+        """PATCH a whole app policy as given (app_pause.py builds the body)."""
+        result = await self._request(
+            "PATCH",
+            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            json_data=body,
+            extra_headers={
+                "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
+            },
+        )
+        return result if isinstance(result, dict) else {}
+
     @staticmethod
     def _website_url(website: str) -> str:
         """Microsoft wants an absolute URL in the exception list (#54).

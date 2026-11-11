@@ -26,6 +26,7 @@ from homeassistant.util import dt as dt_util
 
 from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
 from .api_client import FamilySafetyWebAPI
+from .app_pause import AppPauser
 from .auth.addon_client import AddonCookieClient
 from .xbox_family_api import (
     OVERRIDE_BLOCK,
@@ -221,6 +222,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         #: monotonic time before which no silent Xbox link is attempted again.
         self._xbox_link_retry_at = 0.0
         self._xbox_auth_warned = False
+        #: Apps paused by pause_app, with the state resume_app puts back.
+        self.app_pauser = AppPauser(hass, entry.entry_id)
 
     @property
     def _native_web_auth(self) -> bool:
@@ -511,11 +514,48 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Get a raw pyfamilysafety Application object."""
         account = self._accounts.get(account_id)
         if account is None:
+            # The roster may key accounts by int while services pass a str.
+            account = next(
+                (a for key, a in self._accounts.items() if str(key) == str(account_id)),
+                None,
+            )
+        if account is None:
             return None
         try:
             return account.get_application(app_id)
         except (IndexError, ValueError):
             return None
+
+    async def async_pause_app(self, account_id: str, apps: list[str]) -> dict[str, Any]:
+        """Block apps, saving each one's policy before its first pause (app_pause.py)."""
+        return await self.app_pauser.async_pause(self, account_id, apps)
+
+    async def async_resume_app(
+        self, account_id: str, apps: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Put back what pause_app saved (every paused app of the child by default)."""
+        return await self.app_pauser.async_resume(self, account_id, apps)
+
+    async def async_write_app_policy(
+        self, account_id: str, app_id: str, platform: str, body: dict[str, Any],
+        *, blocked: bool,
+    ) -> None:
+        """Write a whole app policy through the mobile API, then refresh."""
+        if not self.web_api:
+            raise HomeAssistantError("Mobile API not initialized")
+        await self.web_api.write_app_policy(str(account_id), app_id, platform, body)
+        app = self.get_application(account_id, app_id)
+        if app is not None:
+            app.blocked = blocked
+        await self.async_request_refresh()
+
+    def paused_apps(self, account_id: Any) -> dict[str, str]:
+        """app id -> ``ours`` (still blocked by our pause) or ``parent`` (unblocked since)."""
+        result: dict[str, str] = {}
+        for app_id in self.app_pauser.saved(account_id):
+            app = self.get_application(str(account_id), app_id)
+            result[app_id] = "parent" if app is not None and not app.blocked else "ours"
+        return result
 
     async def async_block_app(self, account_id: str, app_id: str) -> None:
         """Block an application."""

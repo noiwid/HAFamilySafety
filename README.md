@@ -126,7 +126,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | **Account Lock** | Lock/unlock a child's entire account with a single switch |
 | **Screen time monitoring** | Track daily usage per child and per device |
 | **Screen time policies** | Adjust daily allowances and allowed time intervals per day — directly from the UI |
-| **App management** | Block/unblock apps, set per-app time limits and windows |
+| **App management** | Block/unblock apps, set per-app time limits and windows, pause apps and resume them with their limits intact |
 | **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
 | **Purchase controls** | Enable/disable ask-to-buy via service call |
 | **Request handling** | Approve or deny pending screen time requests from HA |
@@ -284,7 +284,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 |--------|-----------|-------|----------------|
 | Screen Time | `sensor.{prefix}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `average_screentime`, `date`, `raw_microsoft_minutes`, `last_api_poll`, `update_interval_seconds` |
 | Account Info | `sensor.{prefix}_account_info` | Full name | `user_id`, `first_name`, `surname`, `profile_picture`, `device_count` |
-| Applications | `sensor.{prefix}_applications` | App count | `blocked_count`, `applications` |
+| Applications | `sensor.{prefix}_applications` | App count | `blocked_count`, `applications`, `paused_apps` (apps paused by `pause_app`: `app_id`, `app_name`, `paused`: `ours` while still blocked, `parent` once someone unblocked them) |
 | Balance | `sensor.{prefix}_balance` | Account balance | *(monetary sensor, only if available)* |
 | Pending Requests | `sensor.{prefix}_pending_requests` | Request count | `requests` |
 | Web Filter | `sensor.{prefix}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge`, `content_settings`, `max_age_rating`, `acquisition_policy` |
@@ -347,7 +347,7 @@ One start/end pair per day of the week, editable from the UI with optimistic upd
 
 ## Services
 
-The integration exposes **18 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
+The integration exposes **20 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
 
 ### Account Lock
 
@@ -422,6 +422,35 @@ data:
   app_id: "app-uuid"
   app_name: "Minecraft"
   platform: "windows"
+```
+
+```yaml
+# Pause Windows or Xbox apps for now (blocks them, keeping their time limit)
+service: microsoft_family_safety.pause_app
+data:
+  account_id: "1234567890123456"
+  apps:
+    - "x:app-id"
+    - "appx:app-id"
+```
+
+```yaml
+# Resume paused apps: puts back the time limit (or none) each had before.
+# Leave out apps to resume every paused app of the child.
+service: microsoft_family_safety.resume_app
+data:
+  account_id: "1234567890123456"
+  apps:
+    - "x:app-id"
+```
+
+`pause_app` reads each app's policy first and saves it (in Home Assistant's storage, so it survives a restart); a second pause of the same app keeps what the first one saved. Apps that are already blocked are skipped and never touched. `resume_app` writes the saved policy back unblocked; an app that someone unblocked in the meantime (a parent in the Family Safety app) is reported as `released` and left as it is. Both answer with what they did, per app, when called with `response_variable`:
+
+```yaml
+# pause_app
+{"account_id": "1234567890123456", "paused": ["x:app-id"], "skipped": {"appx:other": "already blocked"}}
+# resume_app
+{"account_id": "1234567890123456", "resumed": ["x:app-id"], "released": [], "skipped": {}}
 ```
 
 ### Screen Time

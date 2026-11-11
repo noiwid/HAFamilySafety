@@ -408,6 +408,34 @@
           "description": "Die zu erlaubende Domain."
         }
       }
+    },
+    "pause_app": {
+      "name": "App pausieren",
+      "description": "Windows- oder Xbox-Apps eines Kindes vorübergehend sperren. Die Richtlinie jeder App (ihr tägliches Zeitlimit oder keines) wird vor der ersten Pause gespeichert und bleibt während der Sperre erhalten; resume_app stellt sie wieder her. Eine erneute Pause behält den zuerst gespeicherten Zustand, auch nach einem Neustart. Bereits gesperrte Apps werden übersprungen und nicht verändert. Antwortet mit den pausierten und übersprungenen Apps.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "apps": {
+          "name": "Apps",
+          "description": "App-IDs, wie sie der Sensor „Applications“ auflistet (x:... für Xbox, appx:... oder win32:... für Windows)."
+        }
+      }
+    },
+    "resume_app": {
+      "name": "App fortsetzen",
+      "description": "Von pause_app gesperrte Apps wieder freigeben, mit dem Zeitlimit, das jede vorher hatte (oder keinem), und ihren gespeicherten Zustand verwerfen. Ohne Apps alle pausierten Apps des Kindes. Eine App, die inzwischen jemand anderes freigegeben hat, bleibt unverändert. Antwortet mit den fortgesetzten, freigegebenen und übersprungenen Apps.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "apps": {
+          "name": "Apps",
+          "description": "Fortzusetzende App-IDs; leer lassen für alle pausierten Apps des Kindes."
+        }
+      }
     }
   }
 }

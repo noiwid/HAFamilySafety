@@ -408,6 +408,34 @@
           "description": "The domain to allow."
         }
       }
+    },
+    "pause_app": {
+      "name": "Pause App",
+      "description": "Block Windows or Xbox apps of a child for now. Each app's policy (its daily time limit, or none) is saved before its first pause and kept while it is blocked; resume_app puts it back. A repeat pause keeps the first saved state, also after a restart. Apps already blocked are skipped and left alone. Answers with the apps paused and skipped.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "apps": {
+          "name": "Apps",
+          "description": "App IDs as the Applications sensor lists them (x:... for Xbox, appx:... or win32:... for Windows)."
+        }
+      }
+    },
+    "resume_app": {
+      "name": "Resume App",
+      "description": "Unblock apps pause_app blocked, putting back the time limit each had before (or none), and forget their saved state. Without apps, every paused app of the child. An app someone unblocked in the meantime is left as it is. Answers with the apps resumed, released and skipped.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "apps": {
+          "name": "Apps",
+          "description": "App IDs to resume; leave empty for every paused app of the child."
+        }
+      }
     }
   }
 }
