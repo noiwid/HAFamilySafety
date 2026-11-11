@@ -83,13 +83,25 @@
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
           "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)",
-          "allowed_users": "Utilisateurs autorisés à piloter Microsoft Family Safety"
+          "allowed_users": "Utilisateurs autorisés à piloter Microsoft Family Safety",
+          "xbox_link": "Lier la connexion Xbox Family Settings"
         },
         "data_description": {
           "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte.",
-          "allowed_users": "Laisser vide pour que tous les utilisateurs puissent utiliser les boutons et réglages (par défaut). Dès que des utilisateurs sont cochés, seuls eux et les administrateurs le peuvent : le compte non administrateur d'un enfant est refusé sur chaque bouton, interrupteur, limite et horaire, et sur les actions microsoft_family_safety. Les automatisations et scripts lancés par Home Assistant ne sont pas concernés. Donnez à l'enfant un compte non administrateur : un administrateur peut modifier cette option."
+          "allowed_users": "Laisser vide pour que tous les utilisateurs puissent utiliser les boutons et réglages (par défaut). Dès que des utilisateurs sont cochés, seuls eux et les administrateurs le peuvent : le compte non administrateur d'un enfant est refusé sur chaque bouton, interrupteur, limite et horaire, et sur les actions microsoft_family_safety. Les automatisations et scripts lancés par Home Assistant ne sont pas concernés. Donnez à l'enfant un compte non administrateur : un administrateur peut modifier cette option.",
+          "xbox_link": "Les limites Xbox, le verrouillage Xbox et le temps de jeu Xbox passent alors par le service de l'application Xbox Family Settings, avec leur propre connexion, sans la session web. Uniquement si Xbox est coché. La liaison se fait en général automatiquement après une connexion ; cochez ceci si le capteur Connexion indique xbox_family: not_linked."
+        }
+      },
+      "xbox_link": {
+        "title": "Lier Xbox Family Settings",
+        "description": "1. Ouvrez [cette connexion Microsoft]({url}) et connectez-vous avec le compte parent que vous utilisez dans l'application Xbox Family Settings.\n2. Vous arrivez sur une page blanche dont l'adresse commence par `{redirect_prefix}`. Copiez l'adresse complète et collez-la ci-dessous dans les minutes qui suivent.",
+        "data": {
+          "redirect_url": "Adresse de la page blanche"
         }
       }
+    },
+    "error": {
+      "xbox_link_failed": "Microsoft n'a pas accepté cette adresse. Reconnectez-vous avec le nouveau lien et collez l'adresse tout de suite."
     }
   },
   "services": {

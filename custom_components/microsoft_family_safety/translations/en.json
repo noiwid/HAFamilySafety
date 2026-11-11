@@ -83,13 +83,25 @@
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
           "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)",
-          "allowed_users": "Users allowed to control Microsoft Family Safety"
+          "allowed_users": "Users allowed to control Microsoft Family Safety",
+          "xbox_link": "Link the Xbox Family Settings sign-in"
         },
         "data_description": {
           "platforms": "Windows, Xbox, Mobile: one lock switch per ticked platform. Ticking Xbox also turns on Xbox play time and the Xbox lock, which need the Microsoft web session (some accounts must renew it with a sign-in every 24 hours). Leave Xbox unticked if the children have no Xbox: the integration then runs on the mobile token only, with a shorter sign-in.",
-          "allowed_users": "Leave empty to let every user use the buttons and settings (default). As soon as users are ticked, only they and the administrators can: a child's non-administrator account is refused on every button, switch, limit and time window, and on the microsoft_family_safety actions. Automations and scripts run by Home Assistant are not affected. Give the child a non-administrator account: an administrator can change this option."
+          "allowed_users": "Leave empty to let every user use the buttons and settings (default). As soon as users are ticked, only they and the administrators can: a child's non-administrator account is refused on every button, switch, limit and time window, and on the microsoft_family_safety actions. Automations and scripts run by Home Assistant are not affected. Give the child a non-administrator account: an administrator can change this option.",
+          "xbox_link": "Xbox limits, the Xbox lock and Xbox play time then come from the Xbox Family Settings app's service, on their own sign-in, without the web session. Only with Xbox ticked. Usually linked automatically after a sign-in; tick this if the Connection sensor shows xbox_family: not_linked."
+        }
+      },
+      "xbox_link": {
+        "title": "Link Xbox Family Settings",
+        "description": "1. Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app.\n2. You end up on a blank page whose address starts with `{redirect_prefix}`. Copy that whole address and paste it below within a few minutes.",
+        "data": {
+          "redirect_url": "Address of the blank page"
         }
       }
+    },
+    "error": {
+      "xbox_link_failed": "Microsoft did not accept that address. Sign in again with the new link and paste the address straight away."
     }
   },
   "services": {

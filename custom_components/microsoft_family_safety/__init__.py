@@ -319,6 +319,13 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the Xbox Family Settings refresh token kept for this entry."""
+    from .xbox_family_api import XboxFamilyAPI
+
+    await XboxFamilyAPI(hass, entry.entry_id).async_unlink()
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
