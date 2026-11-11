@@ -29,6 +29,19 @@ SEARCH = {
         ]}
     ]
 }
+# Real shape (#65): one row per URL variant, the term inside an object.
+VIDEO_SEARCH = {
+    "searched": [
+        {"domain": "video.example", "searches": [
+            {"search": {"url": "https://video.example/r?q=cats", "searchTerm": "cats"},
+             "date": "2026-11-10T08:00:00", "visitCount": 3},
+            {"search": {"url": "https://m.video.example/r?q=cats#searching",
+                        "searchTerm": "cats"},
+             "date": "2026-11-11T08:00:00", "visitCount": 2},
+            {"search": {"url": "https://video.example/r"}, "date": "2026-11-11T09:00:00"},
+        ]}
+    ]
+}
 
 
 def test_summary_sorts_and_trims_the_report() -> None:
@@ -74,3 +87,11 @@ async def test_report_request_uses_a_boolean_allow_status() -> None:
     assert web_call.kwargs["params"]["allowStatus"] == "true"
     assert web_call.kwargs["params"]["beginTime"].endswith("Z")
     assert "allowStatus" not in search_call.kwargs["params"]
+
+
+def test_search_objects_are_grouped_by_term() -> None:
+    searches = summarize_web_activity(WEB, VIDEO_SEARCH)["searches"]
+    assert searches == [{
+        "search": "cats", "visits": 3,
+        "date": "2026-11-11T08:00:00", "site": "video.example",
+    }]

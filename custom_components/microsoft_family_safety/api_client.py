@@ -185,14 +185,34 @@ def summarize_web_activity(web: Any, search: Any) -> dict[str, Any]:
                     "blocked": status == "blocked",
                 })
     sites.sort(key=lambda s: s["visits"], reverse=True)
-    searches = [
-        {"search": item.get("search"), "date": item.get("date"), "site": group.get("domain")}
-        for group in search.get("searched") or []
-        if isinstance(group, dict)
-        for item in group.get("searches") or []
-        if isinstance(item, dict) and item.get("search")
-    ]
-    searches.sort(key=lambda s: s["date"] or "", reverse=True)
+    # One row per URL variant of a term: grouped by term like the Family
+    # dashboard, which shows the highest visitCount and the latest date (#65).
+    terms: dict[str, dict[str, Any]] = {}
+    for group in search.get("searched") or []:
+        if not isinstance(group, dict):
+            continue
+        for item in group.get("searches") or []:
+            if not isinstance(item, dict):
+                continue
+            term = item.get("search")
+            if isinstance(term, dict):
+                term = term.get("searchTerm")
+            if not isinstance(term, str) or not term.strip():
+                continue
+            row = {
+                "search": term,
+                "visits": int(item.get("visitCount") or 1),
+                "date": item.get("date"),
+                "site": group.get("domain"),
+            }
+            prev = terms.get(term)
+            if prev is None:
+                terms[term] = row
+                continue
+            prev["visits"] = max(prev["visits"], row["visits"])
+            if (row["date"] or "") > (prev["date"] or ""):
+                prev["date"], prev["site"] = row["date"], row["site"]
+    searches = sorted(terms.values(), key=lambda s: s["date"] or "", reverse=True)
     return {
         "report_available": available,
         "total_visits": sum(s["visits"] for s in sites),
