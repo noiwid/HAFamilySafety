@@ -193,13 +193,17 @@
       "name": "Set Screen Time Limit",
       "description": "Set the daily screen time allowance for a specific day of the week.",
       "fields": {
+        "platform": {
+          "name": "Platform",
+          "description": "Schedule to change. Omitted = Windows."
+        },
         "account_id": {
           "name": "Account ID",
           "description": "The user ID of the child account."
         },
         "day_of_week": {
           "name": "Day of Week",
-          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)."
+          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday). Required unless today_only is set."
         },
         "hours": {
           "name": "Hours",
@@ -208,20 +212,28 @@
         "minutes": {
           "name": "Minutes",
           "description": "Additional minutes of screen time."
+        },
+        "today_only": {
+          "name": "Today only",
+          "description": "Change today only. The previous value is put back at local midnight, unless it was changed again in the meantime. day_of_week can be left out."
         }
       }
     },
     "set_screentime_intervals": {
       "name": "Set Screen Time Intervals",
-      "description": "Set the allowed time window for screen time on a specific day.",
+      "description": "Set the allowed time window for screen time on a specific day. Xbox allowed hours are not supported yet.",
       "fields": {
+        "platform": {
+          "name": "Platform",
+          "description": "Schedule to change. Omitted = Windows."
+        },
         "account_id": {
           "name": "Account ID",
           "description": "The user ID of the child account."
         },
         "day_of_week": {
           "name": "Day of Week",
-          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday)."
+          "description": "Day of week (0=Sunday, 1=Monday, ..., 6=Saturday). Required unless today_only is set."
         },
         "start_hour": {
           "name": "Start Hour",
@@ -238,6 +250,10 @@
         "end_minute": {
           "name": "End Minute",
           "description": "End minute (0 or 30)."
+        },
+        "today_only": {
+          "name": "Today only",
+          "description": "Change today only. The previous value is put back at local midnight, unless it was changed again in the meantime. day_of_week can be left out."
         }
       }
     },
@@ -406,6 +422,20 @@
         "website": {
           "name": "Website",
           "description": "The domain to allow."
+        }
+      }
+    },
+    "restore_today_only": {
+      "name": "Restore Today-Only Changes",
+      "description": "Put back now the values replaced by today-only screen time changes, instead of at midnight. Values changed again in the meantime are kept.",
+      "fields": {
+        "account_id": {
+          "name": "Account ID",
+          "description": "The user ID of the child account."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "Only this schedule. Omitted = every platform."
         }
       }
     }

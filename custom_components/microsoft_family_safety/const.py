@@ -26,6 +26,8 @@ DEFAULT_TIMEOUT: Final = 30
 CONF_PLATFORMS: Final = "platforms"
 AVAILABLE_PLATFORMS: Final = ["Windows", "Xbox", "Mobile"]
 DEFAULT_PLATFORMS: Final = ["Windows"]
+#: Platforms whose daily schedule the screen-time actions can write.
+SCREENTIME_PLATFORMS: Final = ["Windows", "Xbox"]
 # Xbox usage and the Xbox lock still need the Family web session, which some
 # accounts must renew with an interactive sign-in every 24 h (#52). Off = the
 # entry runs on the mobile refresh token only: no web sign-in, no stored
@@ -118,6 +120,7 @@ SERVICE_SET_ACQUISITION_POLICY: Final = "set_acquisition_policy"
 SERVICE_LOCK_ACCOUNT: Final = "lock_account"
 SERVICE_UNLOCK_ACCOUNT: Final = "unlock_account"
 SERVICE_REQUEST_REAUTH: Final = "request_reauth"
+SERVICE_RESTORE_TODAY_ONLY: Final = "restore_today_only"
 
 ALL_SERVICES: Final = [
     SERVICE_BLOCK_APP,
@@ -139,6 +142,7 @@ ALL_SERVICES: Final = [
     SERVICE_LOCK_ACCOUNT,
     SERVICE_UNLOCK_ACCOUNT,
     SERVICE_REQUEST_REAUTH,
+    SERVICE_RESTORE_TODAY_ONLY,
 ]
 
 # Platforms

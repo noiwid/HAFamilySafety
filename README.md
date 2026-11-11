@@ -126,6 +126,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | **Account Lock** | Lock/unlock a child's entire account with a single switch |
 | **Screen time monitoring** | Track daily usage per child and per device |
 | **Screen time policies** | Adjust daily allowances and allowed time intervals per day — directly from the UI |
+| **Today-only changes** | Give more (or less) time or other allowed hours for today only; the weekly values come back at midnight |
 | **App management** | Block/unblock apps, set per-app time limits and windows |
 | **Web filtering** | Block/unblock domains, toggle content filtering, set PEGI age ratings |
 | **Purchase controls** | Enable/disable ask-to-buy via service call |
@@ -289,7 +290,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 | Pending Requests | `sensor.{prefix}_pending_requests` | Request count | `requests` |
 | Web Filter | `sensor.{prefix}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge`, `content_settings`, `max_age_rating`, `acquisition_policy` |
 | Websites Visited | `sensor.{prefix}_websites_visited` | Visits in Edge over the last 7 days | `report_available`, `site_count`, `blocked_count`, `sites` (50 most visited: `domain`, `visits`, `last_visit`, `blocked`), `searches` (50 latest search terms, one row per term: `search`, `visits`, `date`, `site`). Read every 30 min; `report_available: false` when Microsoft has no Edge data for the child. `sites` and `searches` are not stored in the history database |
-| Screen Time Policy | `sensor.{prefix}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` … `sunday_allowance`, `*_allowed_intervals`, `daily_restrictions` |
+| Screen Time Policy | `sensor.{prefix}_screen_time_policy` | enabled / disabled / unknown | `monday_allowance` … `sunday_allowance`, `*_allowed_intervals`, `daily_restrictions`, `today_only` (pending today-only changes, see [Screen Time](#screen-time)) |
 
 ### Sensors — Per Physical Device
 
@@ -446,6 +447,84 @@ data:
   start_minute: 0
   end_hour: 20
   end_minute: 30
+```
+
+Both actions take an optional `platform`: `Windows` (default) or `Xbox`.
+With `Xbox`, `set_screentime_limit` writes the separate Xbox schedule the
+console enforces (through Xbox Family Settings when it is linked, else the
+mobile API). Xbox allowed hours cannot be set by `set_screentime_intervals`
+yet; such a call is refused.
+
+#### Today only
+
+Microsoft's limits are weekly: a change to Monday's limit applies to every
+Monday. Add `today_only: true` to change today only, for a day off school, a
+half day or a bonus day. `day_of_week` can then be left out (if given, it must
+be today's).
+
+```yaml
+# 3 h on the Xbox today, back to the usual limit at midnight
+action: microsoft_family_safety.set_screentime_limit
+data:
+  account_id: "1234567890123456"
+  platform: Xbox
+  hours: 3
+  today_only: true
+```
+
+```yaml
+# Windows allowed until 23:00 today only
+action: microsoft_family_safety.set_screentime_intervals
+data:
+  account_id: "1234567890123456"
+  start_hour: 7
+  end_hour: 23
+  today_only: true
+```
+
+How it behaves:
+
+- Today's current value is read from Microsoft first and kept; only the fields
+  you change are kept (limit and allowed hours separately). The call is refused,
+  before anything is written, when today's value cannot be read.
+- At the next local midnight (Home Assistant's time zone) the kept value is
+  written back. If Home Assistant was not running at midnight, it is written at
+  the first poll after the restart.
+- It is written back only while the day still holds the value set here. If a
+  parent changed it in the meantime (in the Family Safety app, or with a normal
+  call or entity for that day), the parent's value stays.
+- A second today-only call on the same day keeps the value from before the
+  first one, so midnight always returns to the usual schedule.
+- A normal call (without `today_only`) for the same weekday and platform cancels
+  the pending restore of the field it sets: that value is meant to last.
+- A change that still cannot be written back after 7 days (for example while
+  Microsoft is unreachable) is dropped.
+
+To put the usual values back before midnight:
+
+```yaml
+action: microsoft_family_safety.restore_today_only
+data:
+  account_id: "1234567890123456"
+  platform: Xbox  # optional; omitted = every platform
+```
+
+Pending changes are shown in the `today_only` attribute of
+`sensor.{prefix}_screen_time_policy`, by platform (empty when nothing is
+pending):
+
+```yaml
+today_only:
+  Windows:
+    date: "2026-11-11"
+    restores_at: "2026-11-12T00:00:00+01:00"
+    allowed_hours: [{start: "07:00", end: "23:00"}]
+    restore_allowed_hours: [{start: "07:00", end: "21:00"}]
+  Xbox:
+    date: "2026-11-11"
+    restores_at: "2026-11-12T00:00:00+01:00"
+    limit_minutes: 180
+    restore_limit_minutes: 120
 ```
 
 ### Request Handling

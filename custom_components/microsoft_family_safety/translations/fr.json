@@ -193,13 +193,17 @@
       "name": "Définir la limite de temps d'écran",
       "description": "Définit l'allocation quotidienne de temps d'écran pour un jour de la semaine.",
       "fields": {
+        "platform": {
+          "name": "Plateforme",
+          "description": "Planning à modifier. Vide = Windows."
+        },
         "account_id": {
           "name": "ID du compte",
           "description": "L'identifiant utilisateur du compte enfant."
         },
         "day_of_week": {
           "name": "Jour de la semaine",
-          "description": "Jour de la semaine (0 = dimanche, 1 = lundi, ..., 6 = samedi)."
+          "description": "Jour de la semaine (0 = dimanche, 1 = lundi, ..., 6 = samedi). Obligatoire sauf avec today_only."
         },
         "hours": {
           "name": "Heures",
@@ -208,20 +212,28 @@
         "minutes": {
           "name": "Minutes",
           "description": "Minutes de temps d'écran supplémentaires."
+        },
+        "today_only": {
+          "name": "Aujourd'hui seulement",
+          "description": "Modifie uniquement aujourd'hui. La valeur précédente est rétablie à minuit (heure locale), sauf si elle a été modifiée entre-temps. day_of_week peut alors être omis."
         }
       }
     },
     "set_screentime_intervals": {
       "name": "Définir les plages de temps d'écran",
-      "description": "Définit la plage horaire autorisée pour le temps d'écran un jour donné.",
+      "description": "Définit la plage horaire autorisée pour le temps d'écran un jour donné. Les plages horaires de la Xbox ne sont pas encore prises en charge.",
       "fields": {
+        "platform": {
+          "name": "Plateforme",
+          "description": "Planning à modifier. Vide = Windows."
+        },
         "account_id": {
           "name": "ID du compte",
           "description": "L'identifiant utilisateur du compte enfant."
         },
         "day_of_week": {
           "name": "Jour de la semaine",
-          "description": "Jour de la semaine (0 = dimanche, 1 = lundi, ..., 6 = samedi)."
+          "description": "Jour de la semaine (0 = dimanche, 1 = lundi, ..., 6 = samedi). Obligatoire sauf avec today_only."
         },
         "start_hour": {
           "name": "Heure de début",
@@ -238,6 +250,10 @@
         "end_minute": {
           "name": "Minute de fin",
           "description": "Minute de fin (0 ou 30)."
+        },
+        "today_only": {
+          "name": "Aujourd'hui seulement",
+          "description": "Modifie uniquement aujourd'hui. La valeur précédente est rétablie à minuit (heure locale), sauf si elle a été modifiée entre-temps. day_of_week peut alors être omis."
         }
       }
     },
@@ -406,6 +422,20 @@
         "website": {
           "name": "Site web",
           "description": "Le domaine à autoriser."
+        }
+      }
+    },
+    "restore_today_only": {
+      "name": "Annuler les changements du jour",
+      "description": "Rétablit maintenant, plutôt qu'à minuit, les valeurs remplacées par des changements « aujourd'hui seulement ». Les valeurs modifiées entre-temps sont conservées.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "platform": {
+          "name": "Plateforme",
+          "description": "Uniquement ce planning. Vide = toutes les plateformes."
         }
       }
     }

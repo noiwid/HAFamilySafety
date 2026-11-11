@@ -120,6 +120,15 @@ set_screentime_limit:
   name: Set Screen Time Limit
   description: Set the daily screen time allowance for a specific day of the week.
   fields:
+    platform:
+      name: Platform
+      description: Schedule to change. Omitted = Windows.
+      default: Windows
+      selector:
+        select:
+          options:
+            - Windows
+            - Xbox
     account_id:
       name: Account ID
       description: The user ID of the child account.
@@ -128,8 +137,7 @@ set_screentime_limit:
         text:
     day_of_week:
       name: Day of Week
-      description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday."
-      required: true
+      description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday. Required unless today_only is set."
       selector:
         number:
           min: 0
@@ -155,11 +163,26 @@ set_screentime_limit:
           max: 59
           step: 15
           unit_of_measurement: minutes
+    today_only:
+      name: Today only
+      description: Change today only. The previous value is put back at local midnight, unless it was changed again in the meantime. day_of_week can be left out.
+      default: false
+      selector:
+        boolean:
 
 set_screentime_intervals:
   name: Set Screen Time Intervals
-  description: Set the allowed time window for screen time on a specific day.
+  description: Set the allowed time window for screen time on a specific day. Xbox allowed hours are not supported yet.
   fields:
+    platform:
+      name: Platform
+      description: Schedule to change. Omitted = Windows.
+      default: Windows
+      selector:
+        select:
+          options:
+            - Windows
+            - Xbox
     account_id:
       name: Account ID
       description: The user ID of the child account.
@@ -168,8 +191,7 @@ set_screentime_intervals:
         text:
     day_of_week:
       name: Day of Week
-      description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday."
-      required: true
+      description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday. Required unless today_only is set."
       selector:
         number:
           min: 0
@@ -211,6 +233,12 @@ set_screentime_intervals:
           min: 0
           max: 30
           step: 30
+    today_only:
+      name: Today only
+      description: Change today only. The previous value is put back at local midnight, unless it was changed again in the meantime. day_of_week can be left out.
+      default: false
+      selector:
+        boolean:
 
 set_app_time_limit:
   name: Set App Time Limit
@@ -440,3 +468,22 @@ unlock_account:
 request_reauth:
   name: Request Reauthentication
   description: Start the Microsoft sign-in flow now, for example from a dashboard button, instead of waiting for the integration to detect an expired session.
+
+restore_today_only:
+  name: Restore Today-Only Changes
+  description: Put back now the values replaced by today-only screen time changes, instead of at midnight. Values changed again in the meantime are kept.
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account.
+      required: true
+      selector:
+        text:
+    platform:
+      name: Platform
+      description: Only this schedule. Omitted = every platform.
+      selector:
+        select:
+          options:
+            - Windows
+            - Xbox

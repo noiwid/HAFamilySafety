@@ -193,13 +193,17 @@
       "name": "Bildschirmzeit-Limit setzen",
       "description": "Das tägliche Bildschirmzeit-Kontingent für einen Wochentag setzen.",
       "fields": {
+        "platform": {
+          "name": "Plattform",
+          "description": "Zu ändernder Zeitplan. Leer = Windows."
+        },
         "account_id": {
           "name": "Konto-ID",
           "description": "Die Benutzer-ID des Kinderkontos."
         },
         "day_of_week": {
           "name": "Wochentag",
-          "description": "Wochentag (0=Sonntag, 1=Montag, ..., 6=Samstag)."
+          "description": "Wochentag (0=Sonntag, 1=Montag, ..., 6=Samstag). Pflicht, außer bei today_only."
         },
         "hours": {
           "name": "Stunden",
@@ -208,20 +212,28 @@
         "minutes": {
           "name": "Minuten",
           "description": "Zusätzliche Minuten."
+        },
+        "today_only": {
+          "name": "Nur heute",
+          "description": "Nur für heute ändern. Der vorherige Wert wird um Mitternacht (Ortszeit) wiederhergestellt, sofern er nicht zwischenzeitlich erneut geändert wurde. day_of_week kann dann entfallen."
         }
       }
     },
     "set_screentime_intervals": {
       "name": "Bildschirmzeit-Fenster setzen",
-      "description": "Das erlaubte Zeitfenster für Bildschirmzeit an einem Wochentag setzen.",
+      "description": "Das erlaubte Zeitfenster für Bildschirmzeit an einem Wochentag setzen. Erlaubte Zeiten für die Xbox werden noch nicht unterstützt.",
       "fields": {
+        "platform": {
+          "name": "Plattform",
+          "description": "Zu ändernder Zeitplan. Leer = Windows."
+        },
         "account_id": {
           "name": "Konto-ID",
           "description": "Die Benutzer-ID des Kinderkontos."
         },
         "day_of_week": {
           "name": "Wochentag",
-          "description": "Wochentag (0=Sonntag, 1=Montag, ..., 6=Samstag)."
+          "description": "Wochentag (0=Sonntag, 1=Montag, ..., 6=Samstag). Pflicht, außer bei today_only."
         },
         "start_hour": {
           "name": "Startstunde",
@@ -238,6 +250,10 @@
         "end_minute": {
           "name": "Endminute",
           "description": "Endminute (0 oder 30)."
+        },
+        "today_only": {
+          "name": "Nur heute",
+          "description": "Nur für heute ändern. Der vorherige Wert wird um Mitternacht (Ortszeit) wiederhergestellt, sofern er nicht zwischenzeitlich erneut geändert wurde. day_of_week kann dann entfallen."
         }
       }
     },
@@ -406,6 +422,20 @@
         "website": {
           "name": "Website",
           "description": "Die zu erlaubende Domain."
+        }
+      }
+    },
+    "restore_today_only": {
+      "name": "Änderungen für heute zurücksetzen",
+      "description": "Die durch Nur-heute-Änderungen ersetzten Werte jetzt statt um Mitternacht wiederherstellen. Zwischenzeitlich erneut geänderte Werte bleiben erhalten.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "platform": {
+          "name": "Plattform",
+          "description": "Nur dieser Zeitplan. Leer = alle Plattformen."
         }
       }
     }

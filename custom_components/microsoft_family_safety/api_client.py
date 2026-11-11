@@ -2110,6 +2110,29 @@ class FamilySafetyWebAPI:
             return None
         return self._convert_mobile_schedule(schedule)
 
+    async def get_mobile_day(
+        self, child_id: str, day_of_week: int, platform: str = "Windows"
+    ) -> dict[str, Any]:
+        """One day of a platform's schedule as Microsoft holds it right now.
+
+        Returns ``{"limit": minutes, "allowed_hours": 48 half-hour slots}``.
+        Never served from the poll cache: the caller compares it with what it
+        wrote. Leaves ``mobile_schedule_ok`` alone (that flag is the poll's).
+        """
+        payload = await self._get_mobile_schedules(child_id)
+        schedule = self._mobile_platform_schedule(payload, platform)
+        if schedule is None:
+            raise FamilySafetyWebAPIError(f"No {platform} schedule in the mobile response")
+        day = (schedule.get("dailyRestrictions") or {}).get(DAY_KEYS[day_of_week])
+        if not isinstance(day, dict):
+            raise FamilySafetyWebAPIError(
+                f"No {DAY_KEYS[day_of_week]} in the {platform} schedule"
+            )
+        return {
+            "limit": int(day.get("allowance") or 0) // 60_000,
+            "allowed_hours": self._intervals_to_slots(day.get("allottedIntervals") or []),
+        }
+
     async def set_mobile_xbox_screentime_allowance(
         self, child_id: str, day_of_week: int, hours: int, minutes: int
     ) -> bool:
