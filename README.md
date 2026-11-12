@@ -350,12 +350,14 @@ One start/end pair per day of the week, editable from the UI with optimistic upd
 
 The integration exposes **18 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
 
-Every service that acts on one child takes the child either as `account_id` (the Microsoft user ID, shown in the `user_id` attribute of the child's entities) or as `entity_id`: any Microsoft Family Safety entity of that child or of one of its devices. The account is looked up from the entity, so automations need no hard-coded ID. A list of entities is accepted as long as they all belong to the same child. When both are given, `account_id` wins.
+Every service that acts on one child takes the child either as `account_id` (the Microsoft user ID, shown in the `user_id` attribute of the child's entities) or as `entity_id`: any Microsoft Family Safety entity of that child or of one of its devices. `device_id` works the same way: the child's Microsoft Family Safety device or one of its physical devices. The account is looked up from the entity or device, so automations need no hard-coded ID. Lists are accepted as long as everything in them belongs to the same child. When `account_id` is given, it wins.
+
+These can go under `data:` or under `target:`. A `target:` may name entities and devices only: `area_id`, `floor_id` and `label_id` are refused, since an area can hold several children's devices.
 
 ```yaml
 # Same as account_id: "1234567890123456", read from the child's lock switch
 service: microsoft_family_safety.lock_account
-data:
+target:
   entity_id: switch.firstname_lock
 ```
 
