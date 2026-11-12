@@ -146,7 +146,7 @@ deny_request:
 
 set_screentime_limit:
   name: Set Screen Time Limit
-  description: Set the daily screen time allowance for a specific day of the week.
+  description: Set the daily screen time allowance for a specific day of the week, for Windows or for the Xbox.
   fields:
     account_id:
       name: Account ID
@@ -190,10 +190,19 @@ set_screentime_limit:
           max: 59
           step: 15
           unit_of_measurement: minutes
+    platform:
+      name: Platform
+      description: "Windows (default) or Xbox. Xbox writes the limit the console enforces, through the Xbox Family Settings service: Xbox must be among the monitored platforms with the Xbox Family Settings sign-in linked."
+      default: "Windows"
+      selector:
+        select:
+          options:
+            - "Windows"
+            - "Xbox"
 
 set_screentime_intervals:
   name: Set Screen Time Intervals
-  description: Set the allowed time window for screen time on a specific day.
+  description: Set the allowed time window for screen time on a specific day, for Windows or for the Xbox (the Xbox allowed hours).
   fields:
     account_id:
       name: Account ID
@@ -253,6 +262,15 @@ set_screentime_intervals:
           min: 0
           max: 30
           step: 30
+    platform:
+      name: Platform
+      description: "Windows (default) or Xbox. Xbox sets the allowed hours the console enforces, through the Xbox Family Settings service, and keeps the day's limit: Xbox must be among the monitored platforms with the Xbox Family Settings sign-in linked."
+      default: "Windows"
+      selector:
+        select:
+          options:
+            - "Windows"
+            - "Xbox"
 
 set_app_time_limit:
   name: Set App Time Limit

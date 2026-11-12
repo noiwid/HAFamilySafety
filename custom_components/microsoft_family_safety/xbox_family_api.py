@@ -209,6 +209,9 @@ class XboxFamilyAPI:
         self._family: list[dict[str, Any]] | None = None
         self._family_at: datetime | None = None
         self._lock = asyncio.Lock()
+        #: Day writes read the day, change it and send it back: one at a time,
+        #: so a second write does not send back the day the first one changed.
+        self._day_lock = asyncio.Lock()
         self.state = "not_linked"
         self.last_error: str | None = None
         self.last_success: str | None = None
@@ -511,51 +514,69 @@ class XboxFamilyAPI:
         day_of_week: int,
         *,
         minutes: int | None = None,
+        intervals: list[tuple[int, int]] | None = None,
         enabled: bool | None = None,
     ) -> None:
-        """PATCH one day, keeping its time windows (and the allowance when not given).
+        """PATCH one day, keeping what is not given from the current schedule.
 
-        The app sends one day per PATCH with ``isEnabled``; the same body with
-        another ``isEnabled`` turns the whole Xbox schedule on or off.
+        ``minutes`` is the day's allowance, ``intervals`` its allowed time
+        windows as (begin, end) minutes after midnight (end up to 1440). The
+        app sends one whole day per PATCH with ``isEnabled``; the same body
+        with another ``isEnabled`` turns the whole Xbox schedule on or off.
         """
-        current = await self.async_get_schedule(xuid)
-        day = next(
-            (
-                d
-                for d in current.get("dailyRestrictions") or []
-                if d.get("dayOfWeek") == day_of_week
-            ),
-            None,
-        )
-        if day is None:
-            raise XboxFamilyError(f"xapprove schedule has no day {day_of_week}")
-        allowance = _hm(day.get("allowance")) if minutes is None else int(minutes)
+        if intervals is not None:
+            for begin, end in intervals:
+                if not 0 <= begin < end <= 1440:
+                    raise ValueError(f"invalid Xbox time window {begin}-{end}")
+        async with self._day_lock:
+            current = await self.async_get_schedule(xuid)
+            day = next(
+                (
+                    d
+                    for d in current.get("dailyRestrictions") or []
+                    if d.get("dayOfWeek") == day_of_week
+                ),
+                None,
+            )
+            if day is None:
+                raise XboxFamilyError(f"xapprove schedule has no day {day_of_week}")
+            allowance = _hm(day.get("allowance")) if minutes is None else int(minutes)
+            if intervals is None:
+                intervals = [
+                    (_hm(i.get("begin")), _hm(i.get("end")))
+                    for i in day.get("allowedIntervals") or []
+                    if isinstance(i, dict)
+                ]
 
-        def _hm_obj(total: int, *, days: bool) -> dict[str, int]:
-            obj = {"hour": total // 60 % 24 if days else total // 60, "minute": total % 60}
-            if days:
-                obj = {"days": total // 1440, **obj}
-            return obj
+            def _hm_obj(total: int, *, days: bool) -> dict[str, int]:
+                # Times of day in the shape the GET returns: midnight at the end
+                # of the day is {"days": 0, "hour": 24, "minute": 0}. A window
+                # from 07:00 sent with {"days": 1, "hour": 0} as its end is
+                # refused with 400 "The payload was not valid".
+                obj = {"hour": total // 60, "minute": total % 60}
+                if days:
+                    obj = {"days": 0, **obj}
+                return obj
 
-        body = {
-            "isEnabled": current.get("isEnabled", True) if enabled is None else bool(enabled),
-            "dailyRestrictions": [
-                {
-                    "dayOfWeek": day_of_week,
-                    "allowance": _hm_obj(allowance, days=False),
-                    "allowedIntervals": [
-                        {
-                            "begin": _hm_obj(_hm(i.get("begin")), days=True),
-                            "end": _hm_obj(_hm(i.get("end")), days=True),
-                        }
-                        for i in day.get("allowedIntervals") or []
-                    ],
-                }
-            ],
-        }
-        await self._request(
-            "PATCH", f"{_XAPPROVE}/v1/user/{xuid}/settings/screentime", json_body=body
-        )
+            body = {
+                "isEnabled": current.get("isEnabled", True) if enabled is None else bool(enabled),
+                "dailyRestrictions": [
+                    {
+                        "dayOfWeek": day_of_week,
+                        "allowance": _hm_obj(allowance, days=False),
+                        "allowedIntervals": [
+                            {
+                                "begin": _hm_obj(begin, days=True),
+                                "end": _hm_obj(end, days=True),
+                            }
+                            for begin, end in intervals
+                        ],
+                    }
+                ],
+            }
+            await self._request(
+                "PATCH", f"{_XAPPROVE}/v1/user/{xuid}/settings/screentime", json_body=body
+            )
 
     async def async_create_override(
         self, xuid: str, override_type: int, valid_until: datetime

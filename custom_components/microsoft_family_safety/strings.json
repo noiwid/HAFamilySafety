@@ -207,7 +207,7 @@
     },
     "set_screentime_limit": {
       "name": "Set Screen Time Limit",
-      "description": "Set the daily screen time allowance for a specific day of the week.",
+      "description": "Set the daily screen time allowance for a specific day of the week, for Windows or for the Xbox.",
       "fields": {
         "account_id": {
           "name": "Account ID",
@@ -228,12 +228,16 @@
         "minutes": {
           "name": "Minutes",
           "description": "Additional minutes of screen time."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "Windows (default) or Xbox. Xbox writes the limit the console enforces, through the Xbox Family Settings service: Xbox must be among the monitored platforms with the Xbox Family Settings sign-in linked."
         }
       }
     },
     "set_screentime_intervals": {
       "name": "Set Screen Time Intervals",
-      "description": "Set the allowed time window for screen time on a specific day.",
+      "description": "Set the allowed time window for screen time on a specific day, for Windows or for the Xbox (the Xbox allowed hours).",
       "fields": {
         "account_id": {
           "name": "Account ID",
@@ -262,6 +266,10 @@
         "end_minute": {
           "name": "End Minute",
           "description": "End minute (0 or 30)."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "Windows (default) or Xbox. Xbox sets the allowed hours the console enforces, through the Xbox Family Settings service, and keeps the day's limit: Xbox must be among the monitored platforms with the Xbox Family Settings sign-in linked."
         }
       }
     },

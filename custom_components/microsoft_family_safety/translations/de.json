@@ -207,7 +207,7 @@
     },
     "set_screentime_limit": {
       "name": "Bildschirmzeit-Limit setzen",
-      "description": "Das tägliche Bildschirmzeit-Kontingent für einen Wochentag setzen.",
+      "description": "Das tägliche Bildschirmzeit-Kontingent für einen Wochentag setzen, für Windows oder für die Xbox.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
@@ -228,12 +228,16 @@
         "minutes": {
           "name": "Minuten",
           "description": "Zusätzliche Minuten."
+        },
+        "platform": {
+          "name": "Plattform",
+          "description": "Windows (Standard) oder Xbox. Xbox setzt das Limit, das die Konsole durchsetzt, über den Dienst „Xbox Family Settings“: Xbox muss unter den überwachten Plattformen ausgewählt und die Anmeldung für Xbox Family Settings verknüpft sein."
         }
       }
     },
     "set_screentime_intervals": {
       "name": "Bildschirmzeit-Fenster setzen",
-      "description": "Das erlaubte Zeitfenster für Bildschirmzeit an einem Wochentag setzen.",
+      "description": "Das erlaubte Zeitfenster für Bildschirmzeit an einem Wochentag setzen, für Windows oder für die Xbox (die erlaubten Xbox-Zeiten).",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
@@ -262,6 +266,10 @@
         "end_minute": {
           "name": "Endminute",
           "description": "Endminute (0 oder 30)."
+        },
+        "platform": {
+          "name": "Plattform",
+          "description": "Windows (Standard) oder Xbox. Xbox setzt die erlaubten Zeiten, die die Konsole durchsetzt, über den Dienst „Xbox Family Settings“ und behält das Tageslimit bei: Xbox muss unter den überwachten Plattformen ausgewählt und die Anmeldung für Xbox Family Settings verknüpft sein."
         }
       }
     },

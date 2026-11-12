@@ -716,6 +716,20 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
                         )
                         if isinstance(intervals, list):
                             attrs[f"{day_name.lower()}_allowed_intervals"] = intervals
+        # The Xbox allowed hours, e.g. [{"begin": "07:00", "end": "22:00"}]. Only
+        # those read from the Xbox Family Settings service, which the console
+        # enforces.
+        xbox = account_data.get("xbox_screentime_policy")
+        xbox_daily = (
+            xbox.get("dailyRestrictions")
+            if isinstance(xbox, dict) and xbox.get("source") == "xapprove"
+            else None
+        )
+        if isinstance(xbox_daily, dict):
+            for day_name, day_data in xbox_daily.items():
+                intervals = day_data.get("allowedIntervals") if isinstance(day_data, dict) else None
+                if isinstance(intervals, list):
+                    attrs[f"xbox_{day_name.lower()}_allowed_intervals"] = intervals
         return attrs
 
 

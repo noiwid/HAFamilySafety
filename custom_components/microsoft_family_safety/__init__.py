@@ -85,6 +85,7 @@ SERVICE_SET_SCREENTIME_LIMIT_SCHEMA = child_schema({
     vol.Required("day_of_week"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
     vol.Required("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
+    vol.Optional("platform", default="Windows"): vol.In(["Windows", "Xbox"]),
 })
 
 SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = child_schema({
@@ -94,6 +95,7 @@ SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = child_schema({
     # 24 = midnight at the end of the day (with end_minute 0).
     vol.Required("end_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("end_minute", default=0): vol.In([0, 30]),
+    vol.Optional("platform", default="Windows"): vol.In(["Windows", "Xbox"]),
 })
 
 SERVICE_SET_APP_TIME_LIMIT_SCHEMA = child_schema({
@@ -238,13 +240,17 @@ def _register_services(hass: HomeAssistant) -> None:
          lambda d: (d["request_id"],)),
         (SERVICE_SET_SCREENTIME_LIMIT, SERVICE_SET_SCREENTIME_LIMIT_SCHEMA,
          "async_set_screentime_limit",
-         lambda d: (d["account_id"], d["day_of_week"], d["hours"], d.get("minutes", 0))),
+         lambda d: (
+             d["account_id"], d["day_of_week"], d["hours"], d.get("minutes", 0),
+             d.get("platform", "Windows"),
+         )),
         (SERVICE_SET_SCREENTIME_INTERVALS, SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA,
          "async_set_screentime_intervals",
          lambda d: (
              d["account_id"], d["day_of_week"],
              d["start_hour"], d.get("start_minute", 0),
              d["end_hour"], d.get("end_minute", 0),
+             d.get("platform", "Windows"),
          )),
         (SERVICE_SET_APP_TIME_LIMIT, SERVICE_SET_APP_TIME_LIMIT_SCHEMA,
          "async_set_app_time_limit",
