@@ -8,7 +8,7 @@
 # prefix) and title (free text, shown in the header). The connection pill next to
 # the title is clickable and opens the integration page to reauthenticate; tapping
 # the header itself toggles the account lock.
-# See examples/dashboard.yaml and README 'Dashboard card'.
+# See the README section 'Dashboard card (decluttering template)'.
 
 decluttering_templates:
   fs_child:

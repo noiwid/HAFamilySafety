@@ -51,7 +51,7 @@ This **breaks dashboards, automations, scripts and templates** that reference th
    ```bash
    grep -rn "switch\.<name>_lock\|number\.<name>_.*_limit\|time\.<name>_" config/
    ```
-   Don't forget **dashboard YAML**, **automations**, **scripts**, **scenes** and **template sensors**. The example dashboard in [`examples/dashboard.yaml`](examples/dashboard.yaml) already uses the prefixed IDs.
+   Don't forget **dashboard YAML**, **automations**, **scripts**, **scenes** and **template sensors**.
 
 > Note the device-name prefix is not identical across platforms: sensors, numbers and time entities are prefixed with *first name + surname*, while switches and buttons are prefixed with the *first name only*.
 
@@ -132,6 +132,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | **Purchase controls** | Enable/disable ask-to-buy via service call |
 | **Request handling** | Approve or deny pending screen time requests from HA |
 | **Connection diagnostics** | A dedicated sensor reports whether the mobile API and the web session are healthy |
+| **Dashboard cards** | A per-child card with sheets for every setting, and screen time cards shared with Google Family Link, served by the integration ([details](#dashboard-cards)) |
 | **Optimistic updates** | UI values update instantly when changing limits or intervals (reverts on failure) |
 
 ---
@@ -520,7 +521,7 @@ data:
     - "x:app-id"
 ```
 
-`pause_app` first reads each app's policy (from Microsoft's app activity report) and saves it in Home Assistant's storage, so it survives a restart. An app with a time limit is blocked with its limit kept stored (a plain `block_app` would wipe the limit); an app without one is blocked like `block_app` does. A second pause of the same app keeps what the first one saved. Apps that are already blocked are skipped and never touched, and an app whose policy cannot be read is not paused, since there would be nothing safe to put back. `resume_app` reads the policy again and writes the saved one back unblocked. An app that someone unblocked in the meantime is reported as `released`, and one whose limit or block a parent changed as `changed_by_parent`; both are left as the parent set them. The app's block switch and `unblock_app` resume a paused app the same way (its limit comes back), and `block_app` on a paused app keeps it paused with its limit stored. An unblock never wipes a Windows or Xbox app's limit either: an app that is already unblocked is left as it is, and a blocked app with a limit is unblocked with its limit kept; an app that cannot be read is not unblocked. Saved states stay until resumed or until the integration entry is removed. Both services answer with what they did, per app, when called with `response_variable`, and fail when every app failed:
+`pause_app` first reads each app's policy (from Microsoft's app activity report) and saves it in Home Assistant's storage, so it survives a restart. An app with a time limit is blocked with its limit kept stored; an app without one is blocked like `block_app` does. A second pause of the same app keeps what the first one saved. Apps that are already blocked are skipped and never touched, and an app whose policy cannot be read is not paused, since there would be nothing safe to put back. `resume_app` reads the policy again and writes the saved one back unblocked. An app that someone unblocked in the meantime is reported as `released`, and one whose limit or block a parent changed as `changed_by_parent`; both are left as the parent set them. The app's block switch and `unblock_app` resume a paused app the same way (its limit comes back), and `block_app` on a paused app keeps it paused with its limit stored. `block_app` and `unblock_app` never wipe a Windows or Xbox app's limit either: an app already in the requested state is left as it is, an app with a limit is blocked or unblocked with its limit kept, and an app that cannot be read is not touched. Mobile apps still go through the plain block and unblock, which can lose their limit. Saved states stay until resumed or until the integration entry is removed. Both services answer with what they did, per app, when called with `response_variable`, and fail when every app failed:
 
 ```yaml
 # pause_app
@@ -800,9 +801,88 @@ automation:
           entity_id: switch.firstname_lock
 ```
 
-### Dashboard card
+### Dashboard cards
 
-A clean per-child panel is available as a [decluttering-card](https://github.com/custom-cards/decluttering-card) template, so you drop one card per child and only change a few variables. It includes:
+The integration ships its own dashboard cards. Nothing to install from the Marketplace and no resource to add: they appear in **Add card** as soon as the integration is loaded. Search for "Family Safety" or "Screen time".
+
+![Example dashboard](https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/dashboard.png)
+
+*Left: the Family Safety card. Right: the two screen time cards (today, then the last 14 days), below a custom Xbox panel.*
+
+| Card | What it shows |
+|------|---------------|
+| `custom:familysafety-card` | Everything about one child, with every action one tap away |
+| `custom:parental-screen-time-card` | Today's screen time of the chosen devices: total, time per device, limit, time left, locks, hourly chart |
+| `custom:parental-screen-time-history-card` | One bar per day over the last days (14 by default) |
+
+#### Family Safety card
+
+```yaml
+type: custom:familysafety-card
+device: <device id of "Firstname Lastname (Family Safety)">
+```
+
+Pick the child's **Firstname Lastname (Family Safety)** device in the card editor; the card finds the child's entities by itself. It shows:
+
+- A header with whether Windows may be used right now, the time left today, and when downtime starts or ends
+- Tiles for the account lock, the Windows lock, the Xbox lock (when the Xbox features are on) and the web settings
+- The pending request, with Approve and Deny
+- The apps: today's use, all installed apps, limited apps and blocked apps, each with an icon for its rule (blocked, paused, limited)
+- The websites visited over 7 days, with **+** to add one or several domains to the allowed or blocked list
+- The weekly limits, Windows and Xbox
+
+Each line opens a sheet whose Save button calls the integration's services directly:
+
+| Sheet | Choices |
+|-------|---------|
+| Application | No limit, limited (minutes per day, optionally within allowed hours), paused (blocked now, its limit comes back on resume), blocked |
+| Website | Always allowed, always blocked, removed from the lists |
+| Web and content | Web filter, age rating, ask to buy |
+| Lock | Whole account, Windows or Xbox for a set time, Xbox extra time |
+| Day | Daily limit and allowed hours, Windows or Xbox |
+| Settings (gear) | Screen time limits, Xbox limits and app limits switches, connection state, sign in again, link to the integration options |
+
+<p>
+<img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/sheet-app.png" alt="Application sheet" width="260">
+<img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/sheet-website.png" alt="Add a website sheet" width="260">
+<img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/sheet-settings.png" alt="Settings sheet" width="260">
+</p>
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `device` | | The child's Family Safety device (required unless `child` is given) |
+| `title` | the child's name | Card title |
+| `show_tiles`, `show_request`, `show_apps`, `show_websites`, `show_week` | `true` | Set one to `false` to hide that section: the tiles, the pending request, the apps, the websites, the weekly limits (switches in the card editor) |
+| `language` | Home Assistant's | `en` or `fr` |
+| `entities` | found from `device` | Override one entity by role, e.g. `entities: {lock: switch.my_lock}`. Roles: `screen_time`, `applications`, `websites`, `web_filter`, `pending_requests`, `allowed_now`, `time_remaining`, `downtime`, `lock`, `windows_lock`, `xbox_lock`, `limits`, `xbox_limits`, `app_limits` |
+| `child` | | Instead of `device`, give every entity by role yourself (`screen_time` is required) |
+| `schedule` | found from `device` | The entity id prefix of the daily limit and time entities, e.g. `firstname_lastname_family_safety_firstname` |
+| `connection` | `sensor.microsoft_family_safety_connection` | The connection sensor shown in the settings sheet |
+
+The card follows the access rules of the integration: a user left out of [who can control the integration](#who-can-control-the-integration) sees the card but gets an error on Save.
+
+#### Screen time cards
+
+```yaml
+type: custom:parental-screen-time-card
+devices:
+  - <device id of the child's PC>
+  - <device id of the child's Xbox>
+history: true   # adds the daily history card below
+```
+
+These two cards are shared with [Google Family Link for Home Assistant](https://github.com/noiwid/HAFamilyLink): one card can add up a child's PC and Xbox from Family Safety and phone from Family Link. Each device brings its time, and for a PC or an Xbox the child's limit, time left and lock on that platform. A limit, time left or lock shared by several devices is counted once.
+
+- Choose the **PC or the Xbox**, not the child's *Firstname Lastname (Family Safety)* device: its time is the total of the PC and the Xbox, so the card refuses it rather than count the time twice.
+- A device can be given as `{device: <id>, name: Laptop}` to rename it, or `{entity: sensor.desktop_example_screen_time}` to name it by one of its entities.
+- `entities:` adds any other time sensor in minutes; `sources:` does the same with a name and a limit entity.
+- Other options: `title`, `language` (`en`, `fr`), `chart: false` (no hourly chart), `days` (history card, 14 by default).
+
+The charts read Home Assistant's long-term statistics of the time sensors: no helper, template sensor or chart card is needed.
+
+### Dashboard card (decluttering template)
+
+A per-child panel built from Marketplace cards is also available as a [decluttering-card](https://github.com/custom-cards/decluttering-card) template, so you drop one card per child and only change a few variables. It includes:
 
 - A header with the day's progress bar and allowed window, plus a clickable connection-health pill (opens the integration to re-authenticate)
 - Screen time used, blocked-app count, pending-request count
@@ -810,10 +890,7 @@ A clean per-child panel is available as a [decluttering-card](https://github.com
 - Lock, Windows-lock and screen-time-limits switches
 - Today's top apps, and the weekly limits grid (tap to edit the limit, hold to edit the window)
 
-Two files:
-
-- [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) — the `fs_child` template only.
-- [`examples/dashboard.yaml`](examples/dashboard.yaml) — a full example view instantiating it with placeholder entities.
+One file: [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml), the `fs_child` template.
 
 **Required Marketplace dashboard cards:** `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
 

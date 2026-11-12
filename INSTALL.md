@@ -169,6 +169,7 @@ An entry runs in native mode as soon as it has a natively captured web session, 
 3. Check the **Connection** diagnostic sensor. It should read `connected`, with `screentime_policy_source: mobile_v4`. `degraded` means the mobile API works but the Family web session does not: only the Xbox play time and the Xbox lock are affected. Without Xbox the web session is not used and the sensor shows `xbox_features: false`.
 4. Go to **Settings > Devices & Services > Entities** and search for your child's name. You should see sensors, switches, buttons, 7 number entities (daily limits) and 14 time entities (7 start + 7 end).
 5. If entities show "unavailable," wait up to one update interval (default 5 minutes) for the first data pull.
+6. Add the **Microsoft Family Safety** card to a dashboard (see [Dashboard cards](#dashboard-cards)) to see the child's time, apps, websites and limits in one place.
 
 > Entity IDs are prefixed with the device name, e.g. `number.firstname_lastname_family_safety_firstname_sunday_limit`. See the [README](README.md#breaking-changes).
 
@@ -231,9 +232,11 @@ For the web session (Xbox ticked): the account page session lapses about once a 
 2. Find **Microsoft Family Safety** -- it shows a **Reauthenticate** button. You can also call the `microsoft_family_safety.request_reauth` service to start the flow without waiting, for example from a dashboard button.
 3. Follow the same sign-in steps (answer **Yes** to "Stay signed in?" with Xbox ticked). The mobile refresh token is renewed, and the Family web session too when Xbox is ticked.
 
-### Dashboard card
+### Dashboard cards
 
-A ready-made per-child card ships in [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) (decluttering template) with a full example view in [`examples/dashboard.yaml`](examples/dashboard.yaml). It needs the Marketplace dashboard cards `decluttering-card`, `button-card`, `vertical-stack-in-card`, `card-mod` and `mushroom`. See the README section *Dashboard card* for the variables to fill in.
+The integration serves its own cards: `custom:familysafety-card` (one per child) and the screen time cards `custom:parental-screen-time-card` / `custom:parental-screen-time-history-card`. They need no Marketplace card and no resource: open a dashboard, **Add card**, and search for "Family Safety" or "Screen time". If they are missing from the list, reload the browser page once after updating the integration. For the screen time cards, choose the child's PC or Xbox, not the child's *Family Safety* device (the card refuses it, its time is the total of the others). See the README section [Dashboard cards](README.md#dashboard-cards).
+
+The older decluttering template [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) still works and needs the Marketplace cards listed in the README.
 
 ### Debug Logging
 
