@@ -55,7 +55,7 @@ def test_summary_sorts_and_trims_the_report() -> None:
     ]
     assert summary["sites"][1] == {
         "domain": "example.com", "visits": 3,
-        "last_visit": "2026-11-08T11:36:00", "blocked": False,
+        "last_visit": "2026-11-08T11:36:00+00:00", "blocked": False,
     }
     assert [s["search"] for s in summary["searches"]] == ["newer", "older"]
 
@@ -93,5 +93,5 @@ def test_search_objects_are_grouped_by_term() -> None:
     searches = summarize_web_activity(WEB, VIDEO_SEARCH)["searches"]
     assert searches == [{
         "search": "cats", "visits": 3,
-        "date": "2026-11-11T08:00:00", "site": "video.example",
+        "date": "2026-11-11T08:00:00+00:00", "site": "video.example",
     }]

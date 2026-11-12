@@ -87,6 +87,12 @@ def _parse_iso_utc(value: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _utc_iso(value: Any) -> Any:
+    """Give the activity report's naive UTC times an explicit offset (#65)."""
+    parsed = _parse_iso_utc(value) if value else None
+    return parsed.isoformat() if parsed else value
+
+
 def strip_bot_manager_cookies(cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Return ``cookies`` without Akamai Bot Manager entries (see the note above)."""
     if not cookies:
@@ -181,7 +187,7 @@ def summarize_web_activity(web: Any, search: Any) -> dict[str, Any]:
                 sites.append({
                     "domain": entry["domain"],
                     "visits": int(entry.get("totalCountOfVisitsToDomain") or 0),
-                    "last_visit": entry.get("lastVisitToDomain"),
+                    "last_visit": _utc_iso(entry.get("lastVisitToDomain")),
                     "blocked": status == "blocked",
                 })
     sites.sort(key=lambda s: s["visits"], reverse=True)
@@ -213,6 +219,8 @@ def summarize_web_activity(web: Any, search: Any) -> dict[str, Any]:
             if (row["date"] or "") > (prev["date"] or ""):
                 prev["date"], prev["site"] = row["date"], row["site"]
     searches = sorted(terms.values(), key=lambda s: s["date"] or "", reverse=True)
+    for row in searches:
+        row["date"] = _utc_iso(row["date"])
     return {
         "report_available": available,
         "total_visits": sum(s["visits"] for s in sites),
