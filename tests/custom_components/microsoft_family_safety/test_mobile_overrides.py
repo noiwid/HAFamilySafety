@@ -461,3 +461,35 @@ async def test_first_poll_without_the_document_affects_only_that_child(answer):
     await other.update()
     assert other.blocked_platforms == ["Windows"]
     assert other.roster_errors == {}
+
+
+REFRESH_FAILED = "authentication failed: the refresh token was rejected"
+
+
+async def test_token_refresh_failure_on_the_target_read_is_a_ha_error(coordinator):
+    """perform_refresh raises HttpException; the lock fails as a HomeAssistantError."""
+    from pyfamilysafety.exceptions import HttpException
+
+    web = coordinator.web_api
+    web.get_mobile_device_overrides = AsyncMock(side_effect=HttpException(REFRESH_FAILED))
+    with pytest.raises(HomeAssistantError, match="nothing was sent: authentication failed"):
+        await coordinator.async_lock_platform(CHILD, "Windows")
+    assert web.posts == []
+
+
+async def test_token_refresh_failure_after_the_post_is_a_ha_error(coordinator):
+    from pyfamilysafety.exceptions import HttpException
+
+    web = coordinator.web_api
+    web.applies = False
+    web.post_error = HttpException(REFRESH_FAILED)
+    reads = web.get_mobile_device_overrides
+
+    async def refresh_fails_after_the_first_read(child_id):
+        if web.reads >= 1:
+            raise HttpException(REFRESH_FAILED)
+        return await reads(child_id)
+
+    web.get_mobile_device_overrides = refresh_fails_after_the_first_read
+    with pytest.raises(HomeAssistantError, match="could not be read back .*authentication failed"):
+        await coordinator.async_lock_platform(CHILD, "Windows")

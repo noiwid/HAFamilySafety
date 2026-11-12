@@ -898,6 +898,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     #: Pauses (seconds) before the reads that judge a write whose own answer
     #: is unusable (an error such as HTTP 500, or no overrides document).
     _MOBILE_READBACK_DELAYS: tuple[float, ...] = (0.0, 3.0, 3.0)
+    #: What a mobile overrides request can fail with: an error answer, no
+    #: answer in time, or (HttpException) a token refresh that failed after a
+    #: 401/403, which the mobile client does not wrap.
+    _MOBILE_REQUEST_ERRORS = (FamilySafetyWebAPIError, HttpException, asyncio.TimeoutError)
 
     def _remember_mobile_write(self, child: str, state: Any, platform: str) -> None:
         """Keep the platform's entry of a state our write left (see above)."""
@@ -960,7 +964,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             reply = await self.web_api.set_mobile_device_override(
                 child, target, override_type, until
             )
-        except (FamilySafetyWebAPIError, asyncio.TimeoutError) as err:
+        except self._MOBILE_REQUEST_ERRORS as err:
             write_error = err
         if write_error is None and is_overrides_document(reply):
             self._remember_mobile_write(child, reply, target)
@@ -972,7 +976,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await asyncio.sleep(delay)
             try:
                 answer = await self.web_api.get_mobile_device_overrides(child)
-            except (FamilySafetyWebAPIError, asyncio.TimeoutError) as err:
+            except self._MOBILE_REQUEST_ERRORS as err:
                 read_error = err
                 continue
             if not is_overrides_document(answer):
@@ -1017,7 +1021,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             entry = mobile_platform_entry(
                 await self._async_read_mobile_overrides(child), platform
             )
-        except (FamilySafetyWebAPIError, asyncio.TimeoutError) as err:
+        except self._MOBILE_REQUEST_ERRORS as err:
             raise HomeAssistantError(
                 f"Could not read the {platform} overrides, so nothing was sent: "
                 f"{_describe_error(err)}"
