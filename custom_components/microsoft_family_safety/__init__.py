@@ -193,13 +193,11 @@ _OPTIONAL_RESPONSE_SERVICES = frozenset({
 
 _APP_IDS = vol.All(cv.ensure_list, [cv.string], vol.Length(min=1))
 
-SERVICE_PAUSE_APP_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_PAUSE_APP_SCHEMA = child_schema({
     vol.Required("apps"): _APP_IDS,
 })
 
-SERVICE_RESUME_APP_SCHEMA = vol.Schema({
-    vol.Required("account_id"): cv.string,
+SERVICE_RESUME_APP_SCHEMA = child_schema({
     vol.Optional("apps"): _APP_IDS,
 })
 
@@ -421,12 +419,14 @@ def _register_services(hass: HomeAssistant) -> None:
     # pause_app / resume_app answer with what they did, per app.
     def make_response_handler(method_name):
         async def handler(call: ServiceCall) -> ServiceResponse:
-            coordinator = _get_coordinator(hass, call.data["account_id"])
+            # account_id, or any entity / device of the child, like the other services
+            account_id = resolve_account_id(hass, dict(call.data))
+            coordinator = _get_coordinator(hass, account_id)
             if coordinator is None:
                 raise HomeAssistantError("No Microsoft Family Safety coordinator available")
             try:
                 return await getattr(coordinator, method_name)(
-                    call.data["account_id"], call.data.get("apps")
+                    account_id, call.data.get("apps")
                 )
             except HomeAssistantError:
                 raise

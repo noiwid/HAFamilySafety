@@ -669,10 +669,17 @@ pause_app:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     apps:
       name: Apps
       description: "App IDs as the Applications sensor lists them (x:... for Xbox, appx:... or win32:... for Windows)."
@@ -687,10 +694,17 @@ resume_app:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     apps:
       name: Apps
       description: App IDs to resume; leave empty for every paused app of the child.

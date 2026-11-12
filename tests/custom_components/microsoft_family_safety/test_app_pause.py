@@ -729,3 +729,27 @@ async def test_activity_report_range_stays_under_seven_days() -> None:
         end = datetime.strptime(params["endTime"], "%Y-%m-%dT%H:%M:%SZ")
         assert timedelta(0) < end - begin < timedelta(days=7)
         assert api._request.await_args.kwargs["extra_headers"] == {"Plat-Info": "Windows"}
+
+
+async def test_pause_and_resume_take_the_child_by_entity(hass, rig, monkeypatch):
+    """Like every other per-child service, an entity of the child is enough (the card calls it so)."""
+    import custom_components.microsoft_family_safety as integration
+
+    seen = []
+
+    def resolve(_hass, data):
+        seen.append(data.get("entity_id"))
+        return CHILD
+
+    monkeypatch.setattr(integration, "resolve_account_id", resolve)
+    entity = ["sensor.firstname_screen_time"]
+    paused = await hass.services.async_call(
+        DOMAIN, "pause_app", {"entity_id": entity[0], "apps": ["x:racing"]},
+        blocking=True, return_response=True,
+    )
+    assert paused["paused"] == ["x:racing"]
+    resumed = await hass.services.async_call(
+        DOMAIN, "resume_app", {"entity_id": entity[0]}, blocking=True, return_response=True,
+    )
+    assert resumed["resumed"] == ["x:racing"]
+    assert seen == [entity, entity]

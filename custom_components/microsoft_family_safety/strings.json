@@ -554,6 +554,10 @@
           "name": "Account ID",
           "description": "The user ID of the child account."
         },
+        "entity_id": {
+          "name": "Child entity",
+          "description": "Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID."
+        },
         "apps": {
           "name": "Apps",
           "description": "App IDs as the Applications sensor lists them (x:... for Xbox, appx:... or win32:... for Windows)."
@@ -567,6 +571,10 @@
         "account_id": {
           "name": "Account ID",
           "description": "The user ID of the child account."
+        },
+        "entity_id": {
+          "name": "Child entity",
+          "description": "Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID."
         },
         "apps": {
           "name": "Apps",

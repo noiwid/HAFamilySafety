@@ -554,6 +554,10 @@
           "name": "Konto-ID",
           "description": "Die Benutzer-ID des Kinderkontos."
         },
+        "entity_id": {
+          "name": "Entität des Kindes",
+          "description": "Eine beliebige Microsoft-Family-Safety-Entität des Kindes (oder eines seiner Geräte), statt der Konto-ID."
+        },
         "apps": {
           "name": "Apps",
           "description": "App-IDs, wie sie der Sensor „Applications“ auflistet (x:... für Xbox, appx:... oder win32:... für Windows)."
@@ -567,6 +571,10 @@
         "account_id": {
           "name": "Konto-ID",
           "description": "Die Benutzer-ID des Kinderkontos."
+        },
+        "entity_id": {
+          "name": "Entität des Kindes",
+          "description": "Eine beliebige Microsoft-Family-Safety-Entität des Kindes (oder eines seiner Geräte), statt der Konto-ID."
         },
         "apps": {
           "name": "Apps",

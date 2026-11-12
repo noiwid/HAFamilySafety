@@ -554,6 +554,10 @@
           "name": "ID du compte",
           "description": "L'identifiant utilisateur du compte enfant."
         },
+        "entity_id": {
+          "name": "Entité de l'enfant",
+          "description": "N'importe quelle entité Microsoft Family Safety de l'enfant (ou de l'un de ses appareils), à la place de l'identifiant du compte."
+        },
         "apps": {
           "name": "Applications",
           "description": "Identifiants des applications tels que le capteur Applications les liste (x:... pour Xbox, appx:... ou win32:... pour Windows)."
@@ -567,6 +571,10 @@
         "account_id": {
           "name": "ID du compte",
           "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "entity_id": {
+          "name": "Entité de l'enfant",
+          "description": "N'importe quelle entité Microsoft Family Safety de l'enfant (ou de l'un de ses appareils), à la place de l'identifiant du compte."
         },
         "apps": {
           "name": "Applications",
