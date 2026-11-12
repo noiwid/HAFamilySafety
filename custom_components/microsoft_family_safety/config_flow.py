@@ -145,6 +145,58 @@ def _wants_xbox(platforms: Any) -> bool:
     return any(str(p).lower() == "xbox" for p in (platforms or []))
 
 
+def _is_local_http_url(url: URL) -> bool:
+    """Return True only for HTTP URLs that are clearly local/private."""
+    if url.scheme != "http" or not url.host:
+        return False
+    host = url.host.lower().rstrip(".")
+    if host in {"localhost", "homeassistant", "homeassistant.local"} or host.endswith(".local"):
+        return True
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback or address.is_link_local
+
+
+def _browser_hass_url(hass: HomeAssistant, allow_insecure_http: bool) -> str:
+    """Return a browser-reachable HA URL for a temporary sign-in proxy.
+
+    Used by the main sign-in and by the Xbox link. HTTPS is always preferred.
+    Plain HTTP is permitted only when the user explicitly opted in and the URL
+    is clearly local/private. Raises ``NativeAuthLocalHttpRequired`` when the
+    opt-in is on but no URL is local, ``NativeAuthHttpsRequired`` otherwise.
+    """
+    candidates: list[str] = []
+    for kwargs in ({"prefer_external": True}, {"allow_external": False}):
+        try:
+            candidate = get_url(hass, **kwargs)
+        except NoURLAvailableError:
+            continue
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if URL(candidate).scheme == "https":
+            return candidate
+
+    if allow_insecure_http:
+        for candidate in reversed(candidates):
+            url = URL(candidate)
+            if _is_local_http_url(url):
+                _LOGGER.warning(
+                    "Microsoft Family Safety authentication is using an "
+                    "UNENCRYPTED local Home Assistant HTTP proxy at %s. "
+                    "Microsoft credentials and session data are not protected "
+                    "against interception on the local network.",
+                    url.host,
+                )
+                return candidate
+        raise NativeAuthLocalHttpRequired
+
+    raise NativeAuthHttpsRequired
+
+
 class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Microsoft Family Safety."""
 
@@ -199,57 +251,9 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             f"No existing config entry is associated with {self.source!r} flow"
         )
 
-    @staticmethod
-    def _is_local_http_url(url: URL) -> bool:
-        """Return True only for HTTP URLs that are clearly local/private."""
-        if url.scheme != "http" or not url.host:
-            return False
-        host = url.host.lower().rstrip(".")
-        if host in {"localhost", "homeassistant", "homeassistant.local"} or host.endswith(".local"):
-            return True
-        try:
-            address = ip_address(host)
-        except ValueError:
-            return False
-        return address.is_private or address.is_loopback or address.is_link_local
-
     def _browser_hass_url(self) -> str:
-        """Return a browser-reachable HA URL for the temporary auth proxy.
-
-        HTTPS is always preferred. Plain HTTP is permitted only when the user
-        explicitly opted in and the URL is clearly local/private.
-        """
-        candidates: list[str] = []
-        for kwargs in (
-            {"prefer_external": True},
-            {"allow_external": False},
-        ):
-            try:
-                candidate = get_url(self.hass, **kwargs)
-            except NoURLAvailableError:
-                continue
-            if candidate not in candidates:
-                candidates.append(candidate)
-
-        for candidate in candidates:
-            if URL(candidate).scheme == "https":
-                return candidate
-
-        if self._allow_insecure_http_auth:
-            for candidate in reversed(candidates):
-                url = URL(candidate)
-                if self._is_local_http_url(url):
-                    _LOGGER.warning(
-                        "Microsoft Family Safety authentication is using an "
-                        "UNENCRYPTED local Home Assistant HTTP proxy at %s. "
-                        "Microsoft credentials and session data are not protected "
-                        "against interception on the local network.",
-                        url.host,
-                    )
-                    return candidate
-            raise NativeAuthLocalHttpRequired
-
-        raise NativeAuthHttpsRequired
+        """Return a browser-reachable HA URL for the temporary auth proxy."""
+        return _browser_hass_url(self.hass, self._allow_insecure_http_auth)
 
     async def _detect_legacy_auth(self) -> None:
         """Detect an optional legacy Playwright auth source without blocking setup."""
@@ -1456,33 +1460,15 @@ XBOX_LINK_PROXY_TIMEOUT = 300
 
 
 def _options_browser_hass_url(hass: HomeAssistant, allow_insecure_http: bool) -> str | None:
-    """A browser-reachable Home Assistant URL for the Xbox link proxy.
+    """The Home Assistant URL for the Xbox link proxy, or None.
 
-    Same rule as the main sign-in: HTTPS first, plain HTTP only when the user
-    opted in and the URL is clearly local. Returns None otherwise; the caller
-    then falls back to the manual paste step.
+    Same rule as the main sign-in (``_browser_hass_url``). None sends the
+    caller to the manual paste step.
     """
-    candidates: list[str] = []
-    for kwargs in ({"prefer_external": True}, {"allow_external": False}):
-        try:
-            candidate = get_url(hass, **kwargs)
-        except NoURLAvailableError:
-            continue
-        if candidate not in candidates:
-            candidates.append(candidate)
-    for candidate in candidates:
-        if URL(candidate).scheme == "https":
-            return candidate
-    if allow_insecure_http:
-        for candidate in reversed(candidates):
-            if FamilySafetyConfigFlow._is_local_http_url(URL(candidate)):
-                _LOGGER.warning(
-                    "The Xbox Family Settings sign-in is using an UNENCRYPTED "
-                    "local Home Assistant HTTP proxy at %s",
-                    URL(candidate).host,
-                )
-                return candidate
-    return None
+    try:
+        return _browser_hass_url(hass, allow_insecure_http)
+    except (NativeAuthHttpsRequired, NativeAuthLocalHttpRequired):
+        return None
 
 
 class FamilySafetyOptionsFlow(config_entries.OptionsFlow):

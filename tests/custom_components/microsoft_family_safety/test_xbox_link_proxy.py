@@ -24,7 +24,10 @@ from custom_components.microsoft_family_safety.auth.native_proxy import (
     _is_native_options_flow,
 )
 from custom_components.microsoft_family_safety.config_flow import (
+    FamilySafetyConfigFlow,
     FamilySafetyOptionsFlow,
+    NativeAuthHttpsRequired,
+    NativeAuthLocalHttpRequired,
     _options_browser_hass_url,
 )
 from custom_components.microsoft_family_safety.const import DOMAIN
@@ -71,6 +74,31 @@ def test_https_is_used_and_plain_http_only_when_allowed_and_local(hass) -> None:
         assert _options_browser_hass_url(hass, True) == "http://homeassistant.local:8123"
     with patch(f"{CONFIG_FLOW}.get_url", return_value="http://ha.example.com"):
         assert _options_browser_hass_url(hass, True) is None
+
+
+@pytest.mark.parametrize(
+    ("url", "allow_http", "expected"),
+    [
+        ("https://ha.example", False, "https://ha.example"),
+        ("http://192.0.2.10:8123", False, NativeAuthHttpsRequired),
+        ("http://homeassistant.local:8123", True, "http://homeassistant.local:8123"),
+        ("http://ha.example.com", True, NativeAuthLocalHttpRequired),
+    ],
+)
+def test_the_main_sign_in_and_the_xbox_link_share_the_rule(
+    hass, url, allow_http, expected
+) -> None:
+    flow = FamilySafetyConfigFlow()
+    flow.hass = hass
+    flow._allow_insecure_http_auth = allow_http
+    with patch(f"{CONFIG_FLOW}.get_url", return_value=url):
+        if isinstance(expected, str):
+            assert flow._browser_hass_url() == expected
+            assert _options_browser_hass_url(hass, allow_http) == expected
+        else:
+            with pytest.raises(expected):
+                flow._browser_hass_url()
+            assert _options_browser_hass_url(hass, allow_http) is None
 
 
 async def test_no_usable_url_goes_to_the_manual_paste_step(hass) -> None:
