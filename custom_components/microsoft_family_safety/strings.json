@@ -104,7 +104,7 @@
       "xbox_link_failed": "Microsoft did not accept that address. Sign in again with the new link and paste the address straight away."
     },
     "progress": {
-      "xbox_link": "Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app. Once Microsoft has accepted the sign-in, the window shows \"Sign-in received\" and can be closed; this step then continues on its own, with nothing to copy. If the sign-in does not finish within 5 minutes, you can paste the address instead. A passkey can't be used here, because the sign-in runs through Home Assistant's address rather than Microsoft's: if Microsoft offers one, choose **Sign in another way** and use your password or a code."
+      "xbox_link": "Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app. Once Microsoft has accepted the sign-in, the window shows \"Sign-in received\" and can be closed; this step then continues on its own, with nothing to copy. If the sign-in does not finish within 10 minutes, you can paste the address instead. A passkey can't be used here, because the sign-in runs through Home Assistant's address rather than Microsoft's: if Microsoft offers one, choose **Sign in another way** and use your password or a code."
     }
   },
   "services": {

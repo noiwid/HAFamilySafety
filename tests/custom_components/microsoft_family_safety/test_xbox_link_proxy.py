@@ -139,6 +139,15 @@ async def test_the_wait_gives_up_after_the_timeout(hass) -> None:
         await flow._async_wait_xbox_redirect()
 
 
+def test_the_wait_lasts_as_long_as_the_proxy() -> None:
+    """A parent still busy with a second factor must not be switched to the paste
+    step (which closes the proxy) while the sign-in is still open."""
+    from custom_components.microsoft_family_safety import config_flow
+    from custom_components.microsoft_family_safety.auth import native_proxy
+
+    assert config_flow.XBOX_LINK_PROXY_TIMEOUT == native_proxy._PROXY_LIFETIME_SECONDS
+
+
 async def test_after_the_wait_the_flow_moves_to_the_finish_step(hass) -> None:
     flow = _flow(hass)
     flow._xbox_link_task = SimpleNamespace(done=lambda: True)  # the re-entry after the wait

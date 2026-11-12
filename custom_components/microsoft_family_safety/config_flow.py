@@ -27,6 +27,7 @@ from homeassistant.helpers.selector import (
 from ._httpx_web_adapter import apply_httpx_web_transport_patch
 from ._httpx_web_tuning import apply_httpx_web_tuning_patch
 from .const import (
+    AUTH_PROXY_LIFETIME_SECONDS,
     CONF_ALLOWED_USERS,
     CONF_XBOX_FEATURES,
     CONF_XBOX_LINK,
@@ -1455,8 +1456,10 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 #: How long the Xbox link waits for the browser sign-in before offering the
-#: manual paste step instead.
-XBOX_LINK_PROXY_TIMEOUT = 300
+#: manual paste step instead: as long as the proxy stays open, so a parent
+#: still busy with a second factor is not switched to the paste step while
+#: the sign-in is open.
+XBOX_LINK_PROXY_TIMEOUT = AUTH_PROXY_LIFETIME_SECONDS
 
 
 def _options_browser_hass_url(hass: HomeAssistant, allow_insecure_http: bool) -> str | None:

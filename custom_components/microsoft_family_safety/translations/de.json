@@ -104,7 +104,7 @@
       "xbox_link_failed": "Microsoft hat diese Adresse nicht akzeptiert. Melde dich mit dem neuen Link erneut an und füge die Adresse sofort ein."
     },
     "progress": {
-      "xbox_link": "Öffne [diese Microsoft-Anmeldung]({url}) und melde dich mit dem Elternkonto an, das du in der Xbox-Family-Settings-App verwendest. Sobald Microsoft die Anmeldung angenommen hat, zeigt das Fenster „Sign-in received“ und kann geschlossen werden; dieser Schritt geht dann von selbst weiter, ohne dass du etwas kopieren musst. Ist die Anmeldung nach 5 Minuten nicht abgeschlossen, kannst du stattdessen die Adresse einfügen. Ein Passkey funktioniert hier nicht, weil die Anmeldung über die Adresse von Home Assistant läuft und nicht über die von Microsoft: Bietet Microsoft einen an, wähle **Andere Möglichkeiten zum Anmelden** und melde dich mit Passwort oder Code an."
+      "xbox_link": "Öffne [diese Microsoft-Anmeldung]({url}) und melde dich mit dem Elternkonto an, das du in der Xbox-Family-Settings-App verwendest. Sobald Microsoft die Anmeldung angenommen hat, zeigt das Fenster „Sign-in received“ und kann geschlossen werden; dieser Schritt geht dann von selbst weiter, ohne dass du etwas kopieren musst. Ist die Anmeldung nach 10 Minuten nicht abgeschlossen, kannst du stattdessen die Adresse einfügen. Ein Passkey funktioniert hier nicht, weil die Anmeldung über die Adresse von Home Assistant läuft und nicht über die von Microsoft: Bietet Microsoft einen an, wähle **Andere Möglichkeiten zum Anmelden** und melde dich mit Passwort oder Code an."
     }
   },
   "services": {

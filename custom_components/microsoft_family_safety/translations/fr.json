@@ -104,7 +104,7 @@
       "xbox_link_failed": "Microsoft n'a pas accepté cette adresse. Reconnectez-vous avec le nouveau lien et collez l'adresse tout de suite."
     },
     "progress": {
-      "xbox_link": "Ouvrez [cette connexion Microsoft]({url}) et connectez-vous avec le compte parent que vous utilisez dans l'application Xbox Family Settings. Une fois la connexion acceptée par Microsoft, la fenêtre affiche « Sign-in received » et peut être fermée ; cette étape se poursuit alors d'elle-même, sans rien à copier. Si la connexion n'aboutit pas dans les 5 minutes, vous pourrez coller l'adresse à la place. Une clé d'accès (passkey) ne peut pas être utilisée ici, car la connexion passe par l'adresse de Home Assistant et non par celle de Microsoft : si Microsoft en propose une, choisissez **Autres façons de se connecter** et utilisez votre mot de passe ou un code."
+      "xbox_link": "Ouvrez [cette connexion Microsoft]({url}) et connectez-vous avec le compte parent que vous utilisez dans l'application Xbox Family Settings. Une fois la connexion acceptée par Microsoft, la fenêtre affiche « Sign-in received » et peut être fermée ; cette étape se poursuit alors d'elle-même, sans rien à copier. Si la connexion n'aboutit pas dans les 10 minutes, vous pourrez coller l'adresse à la place. Une clé d'accès (passkey) ne peut pas être utilisée ici, car la connexion passe par l'adresse de Home Assistant et non par celle de Microsoft : si Microsoft en propose une, choisissez **Autres façons de se connecter** et utilisez votre mot de passe ou un code."
     }
   },
   "services": {
