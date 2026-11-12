@@ -1,16 +1,16 @@
 {
   "domain": "microsoft_family_safety",
   "name": "Microsoft Family Safety",
+  "after_dependencies": [
+    "frontend",
+    "websocket_api"
+  ],
   "codeowners": [
     "@noiwid"
   ],
   "config_flow": true,
   "dependencies": [
     "http"
-  ],
-  "after_dependencies": [
-    "frontend",
-    "websocket_api"
   ],
   "documentation": "https://github.com/noiwid/HAFamilySafety",
   "integration_type": "hub",
