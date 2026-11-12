@@ -403,10 +403,11 @@ block_website:
           integration: microsoft_family_safety
     website:
       name: Website
-      description: The domain to block (e.g., "example.com").
+      description: 'The domain to block (e.g., "example.com"), or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed.'
       required: true
       selector:
         text:
+          multiple: true
 
 allow_website:
   name: Allow Website
@@ -427,10 +428,11 @@ allow_website:
           integration: microsoft_family_safety
     website:
       name: Website
-      description: The domain to allow (e.g., "example.com").
+      description: 'The domain to allow (e.g., "example.com"), or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed.'
       required: true
       selector:
         text:
+          multiple: true
 
 remove_website:
   name: Remove Website
@@ -451,10 +453,11 @@ remove_website:
           integration: microsoft_family_safety
     website:
       name: Website
-      description: The domain to remove.
+      description: The domain to remove, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed.
       required: true
       selector:
         text:
+          multiple: true
 
 toggle_web_filter:
   name: Toggle Web Filter
@@ -570,3 +573,21 @@ unlock_account:
 request_reauth:
   name: Request Reauthentication
   description: Start the Microsoft sign-in flow now, for example from a dashboard button, instead of waiting for the integration to detect an expired session.
+
+get_sites:
+  name: Get Sites
+  description: "Return the child's blocked and allowed websites exactly as Microsoft stores them (absolute URLs), and whether the web filter is on. Call it with a response variable."
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
+      selector:
+        text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety

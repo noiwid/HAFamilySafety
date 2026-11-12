@@ -1628,6 +1628,20 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else None
 
+    async def get_web_restrictions(self, child_id: str) -> dict:
+        """The child's web restrictions from the mobile API, with the site lists.
+
+        ``exceptions=true`` is what makes Microsoft include the blocked and
+        allowed websites (``exceptions``: ``{"website", "allowed"}``); without
+        it the list comes back empty. Raises when Microsoft answers no data.
+        """
+        result = await self._request(
+            "GET", f"/v1/WebRestrictions/{child_id}", params={"exceptions": "true"}
+        )
+        if not isinstance(result, dict):
+            raise FamilySafetyWebAPIError("WebRestrictions read returned no data")
+        return result
+
     async def get_device_overrides(self, child_id: str) -> dict | None:
         """Get device/platform overrides, preferring the current web route."""
         if self._web_cookies:
@@ -2325,8 +2339,9 @@ class FamilySafetyWebAPI:
         ``{"op": "Add", "path": "/exceptions", "value": {"website": url,
         "allowed": false}}``; ``allowed: true`` puts it on the allowed list
         instead. The write answers 204 and the Family Safety app shows the
-        site right away, but the mobile ``GET /v1/WebRestrictions`` still
-        returns ``exceptions: []`` for it, so do not read back through it.
+        site right away. Read it back with get_web_restrictions: the mobile
+        ``GET /v1/WebRestrictions`` lists the sites only when asked with
+        ``?exceptions=true`` (without it, ``exceptions`` is always empty).
         Confirmed on a real account on 2026-10-27.
         """
         result = await self._request(

@@ -7,7 +7,7 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -39,6 +39,7 @@ from .const import (
     SERVICE_LOCK_ACCOUNT,
     SERVICE_UNLOCK_ACCOUNT,
     SERVICE_REQUEST_REAUTH,
+    SERVICE_GET_SITES,
     CONF_ALLOWED_USERS,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
@@ -114,12 +115,15 @@ SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA = child_schema({
     vol.Optional("platform", default="windows"): vol.In(["windows", "xbox", "mobile"]),
 })
 
+# One site, or several (a list) applied one after the other.
+_WEBSITES = vol.All(cv.ensure_list, [cv.string], vol.Length(min=1))
+
 SERVICE_BLOCK_WEBSITE_SCHEMA = child_schema({
-    vol.Required("website"): cv.string,
+    vol.Required("website"): _WEBSITES,
 })
 
 SERVICE_REMOVE_WEBSITE_SCHEMA = child_schema({
-    vol.Required("website"): cv.string,
+    vol.Required("website"): _WEBSITES,
 })
 
 SERVICE_TOGGLE_WEB_FILTER_SCHEMA = child_schema({
@@ -139,6 +143,11 @@ SERVICE_LOCK_ACCOUNT_SCHEMA = child_schema({})
 SERVICE_UNLOCK_ACCOUNT_SCHEMA = child_schema({})
 
 SERVICE_REQUEST_REAUTH_SCHEMA = vol.Schema({})
+
+SERVICE_GET_SITES_SCHEMA = child_schema({})
+
+#: Services that answer with data instead of changing anything.
+_RESPONSE_SERVICES = frozenset({SERVICE_GET_SITES})
 
 
 def _get_coordinator(
@@ -285,10 +294,12 @@ def _register_services(hass: HomeAssistant) -> None:
          lambda d: (d["account_id"],)),
         (SERVICE_REQUEST_REAUTH, SERVICE_REQUEST_REAUTH_SCHEMA, "async_request_reauth",
          lambda d: ()),
+        (SERVICE_GET_SITES, SERVICE_GET_SITES_SCHEMA, "async_get_sites",
+         lambda d: (d["account_id"],)),
     ]
 
     def make_handler(method_name, extract_args, per_child):
-        async def handler(call: ServiceCall) -> None:
+        async def handler(call: ServiceCall) -> dict | None:
             data = dict(call.data)
             if per_child:
                 # account_id as before, or any entity of the child.
@@ -297,7 +308,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if coordinator is None:
                 raise HomeAssistantError("No Microsoft Family Safety coordinator available")
             try:
-                await getattr(coordinator, method_name)(*extract_args(data))
+                result = await getattr(coordinator, method_name)(*extract_args(data))
             except HomeAssistantError:
                 raise
             except Exception as err:  # noqa: BLE001 - report as a service error
@@ -306,6 +317,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 raise HomeAssistantError(
                     f"Microsoft Family Safety {call.service} failed: {err}"
                 ) from err
+            return result if call.service in _RESPONSE_SERVICES else None
         return handler
 
     for name, schema, method, extract in services:
@@ -317,6 +329,9 @@ def _register_services(hass: HomeAssistant) -> None:
         hass.services.async_register(
             DOMAIN, name, guard_service(hass, make_handler(method, extract, per_child)),
             schema=schema,
+            supports_response=(
+                SupportsResponse.ONLY if name in _RESPONSE_SERVICES else SupportsResponse.NONE
+            ),
         )
 
 

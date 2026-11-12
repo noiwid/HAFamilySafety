@@ -148,6 +148,41 @@ def _ms_to_minutes(milliseconds: int | float | None) -> int:
     return int(milliseconds / 60000)
 
 
+def _web_enabled(web: Any) -> bool | None:
+    """The on/off of a web restrictions answer (Microsoft spells it "enabled")."""
+    if not isinstance(web, dict):
+        return None
+    value = web.get("enabled", web.get("isEnabled", web.get("IsEnabled")))
+    return value if isinstance(value, bool) else None
+
+
+def _stored_site_lists(web: Any) -> tuple[list[str], list[str]] | None:
+    """(blocked, allowed) exactly as Microsoft stores them; None if unreadable.
+
+    From ``exceptions`` (``{"website", "allowed"}``), else from
+    ``blockedSites`` / ``allowedSites``.
+    """
+    if not isinstance(web, dict):
+        return None
+    exceptions = web.get("exceptions", web.get("Exceptions"))
+    if isinstance(exceptions, list) and exceptions:
+        blocked: list[str] = []
+        allowed: list[str] = []
+        for item in exceptions:
+            if not isinstance(item, dict):
+                continue
+            site = item.get("website") or item.get("Website")
+            if isinstance(site, str) and site:
+                (allowed if item.get("allowed", item.get("Allowed")) else blocked).append(site)
+        return blocked, allowed
+    if isinstance(exceptions, list) or "blockedSites" in web or "allowedSites" in web:
+        return (
+            [s for s in web.get("blockedSites") or [] if isinstance(s, str)],
+            [s for s in web.get("allowedSites") or [] if isinstance(s, str)],
+        )
+    return None
+
+
 class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch and coordinate Microsoft Family Safety state."""
 
@@ -1416,28 +1451,82 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_update_listeners()
         await self.async_request_refresh()
 
-    async def async_block_website(self, child_id: str, website: str) -> None:
-        if not self.web_api:
-            raise RuntimeError("Web API not initialized")
-        await self.web_api.block_website(child_id, website)
-        await self.async_request_refresh()
+    async def _async_change_websites(
+        self, service: str, child_id: str, websites: str | list[str]
+    ) -> None:
+        """Send one website change per site (each is its own PATCH).
 
-    async def async_remove_website(self, child_id: str, website: str) -> None:
+        Every site is tried, also after one fails, and a failure fails the
+        call naming the sites done and the sites failed, so a caller knows
+        exactly which ones to retry.
+        """
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
-        await self.web_api.remove_website(child_id, website)
-        await self.async_request_refresh()
+        write = getattr(self.web_api, service)
+        sites = [websites] if isinstance(websites, str) else list(websites)
+        done: list[str] = []
+        failed: dict[str, str] = {}
+        for site in dict.fromkeys(s.strip() for s in sites if s and s.strip()):
+            try:
+                await write(child_id, site)
+            except Exception as err:  # noqa: BLE001 - reported with the others
+                failed[site] = str(err)[:200]
+            else:
+                done.append(site)
+        if done:
+            await self.async_request_refresh()
+        if failed:
+            raise HomeAssistantError(
+                f"{service}: {len(failed)} of {len(done) + len(failed)} site(s) failed. "
+                f"Done: {', '.join(done) or 'none'}. Failed: "
+                + "; ".join(f"{site} ({error})" for site, error in failed.items())
+            )
 
-    async def async_allow_website(self, child_id: str, website: str) -> None:
+    async def async_block_website(self, child_id: str, website: str | list[str]) -> None:
+        await self._async_change_websites("block_website", child_id, website)
+
+    async def async_remove_website(self, child_id: str, website: str | list[str]) -> None:
+        await self._async_change_websites("remove_website", child_id, website)
+
+    async def async_allow_website(self, child_id: str, website: str | list[str]) -> None:
+        await self._async_change_websites("allow_website", child_id, website)
+
+    async def async_get_sites(self, account_id: str) -> dict[str, Any]:
+        """The child's blocked and allowed websites as Microsoft stores them."""
         if not self.web_api:
-            raise RuntimeError("Web API not initialized")
-        await self.web_api.allow_website(child_id, website)
-        await self.async_request_refresh()
+            raise HomeAssistantError("Web API not initialized")
+        account_id = str(account_id)
+        try:
+            web = await self.web_api.get_web_restrictions(account_id)
+        except Exception as err:  # noqa: BLE001 - reported as the service error
+            raise HomeAssistantError(
+                f"Could not read the child's websites from Microsoft: {err}"
+            ) from err
+        lists = _stored_site_lists(web)
+        if lists is None:
+            raise HomeAssistantError(
+                "Microsoft's answer has no list of blocked and allowed websites."
+            )
+        return {
+            "account_id": account_id,
+            "blocked": lists[0],
+            "allowed": lists[1],
+            "filter_enabled": _web_enabled(web),
+        }
+
+    def web_filter_enabled(self, account_id: Any) -> bool | None:
+        """Whether the child's web filter (Microsoft Edge) is on; None if unknown."""
+        return _web_enabled((self.account_data(account_id) or {}).get("web_browsing"))
 
     async def async_toggle_web_filter(self, child_id: str, enabled: bool) -> None:
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
         await self.web_api.toggle_web_filter(child_id, enabled)
+        # Show the new state at once; the next read confirms it.
+        account = self.account_data(child_id)
+        if isinstance(account, dict) and isinstance(account.get("web_browsing"), dict):
+            account["web_browsing"] = {**account["web_browsing"], "enabled": bool(enabled)}
+            self.async_update_listeners()
         await self.async_request_refresh()
 
     async def async_set_age_rating(self, child_id: str, age: int) -> None:

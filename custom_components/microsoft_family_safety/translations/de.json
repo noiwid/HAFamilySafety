@@ -358,7 +358,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "Die Domain."
+          "description": "Die Domain oder eine Liste von Domains. Jede Website wird versucht; schlägt eine fehl, schlägt der Aufruf fehl und nennt die erledigten und die fehlgeschlagenen Websites."
         }
       }
     },
@@ -376,7 +376,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "Die Domain."
+          "description": "Die Domain oder eine Liste von Domains. Jede Website wird versucht; schlägt eine fehl, schlägt der Aufruf fehl und nennt die erledigten und die fehlgeschlagenen Websites."
         }
       }
     },
@@ -480,7 +480,21 @@
         },
         "website": {
           "name": "Website",
-          "description": "Die zu erlaubende Domain."
+          "description": "Die zu erlaubende Domain oder eine Liste von Domains. Jede Website wird versucht; schlägt eine fehl, schlägt der Aufruf fehl und nennt die erledigten und die fehlgeschlagenen Websites."
+        }
+      }
+    },
+    "get_sites": {
+      "name": "Websites abrufen",
+      "description": "Gibt die gesperrten und erlaubten Websites des Kindes genau so zurück, wie Microsoft sie speichert (absolute URLs), und ob der Webfilter eingeschaltet ist. Mit einer Antwortvariable aufrufen.",
+      "fields": {
+        "account_id": {
+          "name": "Konto-ID",
+          "description": "Die Benutzer-ID des Kinderkontos. Gib diese oder eine Entität des Kindes an."
+        },
+        "entity_id": {
+          "name": "Entität des Kindes",
+          "description": "Eine beliebige Microsoft-Family-Safety-Entität des Kindes (oder eines seiner Geräte), statt der Konto-ID."
         }
       }
     }
