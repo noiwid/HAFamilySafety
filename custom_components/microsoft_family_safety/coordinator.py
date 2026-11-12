@@ -35,7 +35,7 @@ from ._pyfamilysafety_compat import (
     is_stale_roster_error,
 )
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
-from .app_pause import AppPauser
+from .app_pause import AppPauser, app_limit_today
 from .mobile_overrides import (
     MOBILE_OVERRIDE_BLOCK,
     MOBILE_OVERRIDE_CANCEL,
@@ -2690,7 +2690,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         today = dt_util.now().date().isoformat()
         raw_ms = int(account.today_screentime_usage or 0)
         raw_minutes = _ms_to_minutes(raw_ms)
-        polled_at = dt_util.now().isoformat()
+        now = dt_util.now()
+        polled_at = now.isoformat()
 
         # Expose Microsoft's current aggregate directly.  Do not clamp the
         # value to a locally remembered maximum: Home Assistant's recorder and
@@ -2721,6 +2722,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "blocked": app.blocked,
                     "icon": app.icon,
                     "usage_minutes": round(app.usage, 1) if app.usage else 0,
+                    # From the activity report this poll already read (each
+                    # entry carries the app policy): no extra Microsoft call.
+                    **app_limit_today(getattr(app, "policy", None), now),
                 }
                 for app in account.applications
             ],

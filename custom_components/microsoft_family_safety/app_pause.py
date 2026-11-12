@@ -50,6 +50,7 @@ App ids are Microsoft's, with the platform prefix (``x:`` Xbox, ``appx:`` and
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -100,6 +101,58 @@ def _limit_days(policy: dict[str, Any]) -> dict[str, Any] | None:
             return None
         days[key] = value
     return days
+
+
+def _clock_24h(value: Any) -> str | None:
+    """"07:00:00 PM" (Microsoft's 12-hour format) as "19:00", None if unreadable."""
+    if not isinstance(value, str):
+        return None
+    clock, _, suffix = value.strip().partition(" ")
+    try:
+        hours, minutes = (int(part) for part in clock.split(":")[:2])
+    except ValueError:
+        return None
+    suffix = suffix.strip().upper()
+    if suffix in ("AM", "PM"):
+        if not 1 <= hours <= 12:
+            return None
+        hours = hours % 12 + (12 if suffix == "PM" else 0)
+    if not (0 <= hours < 24 and 0 <= minutes < 60):
+        return None
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def app_limit_today(policy: Any, now: datetime) -> dict[str, Any]:
+    """Today's limit of an app policy from the activity report.
+
+    ``limit_minutes`` is today's allowance, None when the app has no limit of
+    its own today. ``limit_start`` / ``limit_end`` ("HH:MM", 24-hour, from
+    the first interval) only when the limit has an allowed window, and
+    ``limit_enabled`` only when the policy says. The day is ``now``'s, in the
+    DAY_KEYS order, falling back to the weekday/weekend and everyday keys.
+    """
+    result: dict[str, Any] = {"limit_minutes": None}
+    if not isinstance(policy, dict):
+        return result
+    if isinstance(policy.get("enabled"), bool):
+        result["limit_enabled"] = policy["enabled"]
+    today = DAY_KEYS[(now.weekday() + 1) % 7]
+    group = "weekend" if today in ("saturday", "sunday") else "weekday"
+    day = next(
+        (policy[key] for key in (today, group, "everyday") if isinstance(policy.get(key), dict)),
+        None,
+    )
+    allowance = day.get("allowance") if day else None
+    if not isinstance(allowance, (int, float)) or isinstance(allowance, bool):
+        return result
+    result["limit_minutes"] = round(allowance / 60000)
+    intervals = day.get("intervals")
+    if day.get("intervalsEnabled") and isinstance(intervals, list) and intervals:
+        first = intervals[0] if isinstance(intervals[0], dict) else {}
+        start, end = _clock_24h(first.get("start")), _clock_24h(first.get("end"))
+        if start and end:
+            result["limit_start"], result["limit_end"] = start, end
+    return result
 
 
 def read_entry(entry: Any) -> dict[str, Any] | None:

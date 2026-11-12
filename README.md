@@ -287,7 +287,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 |--------|-----------|-------|----------------|
 | Screen Time | `sensor.{prefix}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `average_screentime`, `date`, `raw_microsoft_minutes`, `last_api_poll`, `update_interval_seconds` |
 | Account Info | `sensor.{prefix}_account_info` | Full name | `user_id`, `first_name`, `surname`, `profile_picture`, `device_count` |
-| Applications | `sensor.{prefix}_applications` | App count | `blocked_count`, `applications`, `paused_apps` (apps paused by `pause_app`: `app_id`, `app_name`, `paused`: `ours` while still blocked, `parent` once someone unblocked them) |
+| Applications | `sensor.{prefix}_applications` | App count | `blocked_count`, `applications` (each app: `app_id`, `app_name`, `blocked`, `icon`, `usage_minutes`, plus today's `limit_minutes`, null without a limit, `limit_start` / `limit_end` as "HH:MM" when the limit has an allowed window, and `limit_enabled`; not recorded in history), `paused_apps` (apps paused by `pause_app`: `app_id`, `app_name`, `paused`: `ours` while still blocked, `parent` once someone unblocked them) |
 | Balance | `sensor.{prefix}_balance` | Account balance | *(monetary sensor, only if available)* |
 | Pending Requests | `sensor.{prefix}_pending_requests` | Request count | `requests` |
 | Web Filter | `sensor.{prefix}_web_filter` | enabled / disabled / unknown | `blockedSites`, `allowedSites`, `contentRatingAge`, `content_settings`, `max_age_rating`, `acquisition_policy` |

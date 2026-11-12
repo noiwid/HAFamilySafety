@@ -481,6 +481,9 @@ class FamilySafetyApplicationCountSensor(FamilySafetyAccountSensor):
 
     _attr_icon = "mdi:apps"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    # The per-app list (usage changes every poll, plus the limits) would be
+    # written to the recorder on every update; the state keeps the count.
+    _unrecorded_attributes = frozenset({"applications"})
 
     def __init__(
         self,
