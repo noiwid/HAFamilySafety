@@ -116,12 +116,26 @@ async def test_allowance_write_keeps_the_intervals(api):
     }]
 
 
-async def test_midnight_end_is_the_next_day(api):
+async def test_midnight_end_is_hour_24_as_microsoft_writes_it(api):
+    await api.async_set_day(XUID, 0, intervals=[(7 * 60, 1440)])
+    (body,) = _patch_bodies(api)
+    assert body["dailyRestrictions"][0]["allowedIntervals"] == [{
+        "begin": {"days": 0, "hour": 7, "minute": 0},
+        "end": {"days": 0, "hour": 24, "minute": 0},
+    }]
+    # And it reads back as 24:00.
+    policy = schedule_to_policy(api.schedule)
+    assert policy["dailyRestrictions"]["sunday"]["allowedIntervals"] == [
+        {"begin": "07:00", "end": "24:00"}
+    ]
+
+
+async def test_a_whole_day_window_is_sent_as_microsoft_reads_it(api):
     await api.async_set_day(XUID, 0, intervals=[(0, 1440)])
     (body,) = _patch_bodies(api)
     assert body["dailyRestrictions"][0]["allowedIntervals"] == [{
         "begin": {"days": 0, "hour": 0, "minute": 0},
-        "end": {"days": 1, "hour": 0, "minute": 0},
+        "end": {"days": 0, "hour": 24, "minute": 0},
     }]
     # And it reads back as 24:00.
     policy = schedule_to_policy(api.schedule)

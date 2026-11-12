@@ -549,9 +549,13 @@ class XboxFamilyAPI:
                 ]
 
             def _hm_obj(total: int, *, days: bool) -> dict[str, int]:
-                obj = {"hour": total // 60 % 24 if days else total // 60, "minute": total % 60}
+                # Times of day in the shape the GET returns: midnight at the end
+                # of the day is {"days": 0, "hour": 24, "minute": 0}. A window
+                # from 07:00 sent with {"days": 1, "hour": 0} as its end is
+                # refused with 400 "The payload was not valid".
+                obj = {"hour": total // 60, "minute": total % 60}
                 if days:
-                    obj = {"days": total // 1440, **obj}
+                    obj = {"days": 0, **obj}
                 return obj
 
             body = {
