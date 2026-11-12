@@ -403,7 +403,7 @@ block_website:
           integration: microsoft_family_safety
     website:
       name: Website
-      description: 'The domain to block (e.g., "example.com"), or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed.'
+      description: 'The domain to block (e.g., "example.com"), or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed. Asked for a response, it answers the sites done.'
       required: true
       selector:
         text:
@@ -428,7 +428,7 @@ allow_website:
           integration: microsoft_family_safety
     website:
       name: Website
-      description: 'The domain to allow (e.g., "example.com"), or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed.'
+      description: 'The domain to allow (e.g., "example.com"), or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed. Asked for a response, it answers the sites done.'
       required: true
       selector:
         text:
@@ -453,7 +453,7 @@ remove_website:
           integration: microsoft_family_safety
     website:
       name: Website
-      description: The domain to remove, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed.
+      description: The domain to remove, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed. Asked for a response, it answers the sites done.
       required: true
       selector:
         text:

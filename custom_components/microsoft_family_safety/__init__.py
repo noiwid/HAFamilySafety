@@ -148,6 +148,10 @@ SERVICE_GET_SITES_SCHEMA = child_schema({})
 
 #: Services that answer with data instead of changing anything.
 _RESPONSE_SERVICES = frozenset({SERVICE_GET_SITES})
+# Answer {"done": [...], "failed": [...]} when asked for a response.
+_OPTIONAL_RESPONSE_SERVICES = frozenset({
+    SERVICE_BLOCK_WEBSITE, SERVICE_ALLOW_WEBSITE, SERVICE_REMOVE_WEBSITE,
+})
 
 
 def _get_coordinator(
@@ -317,7 +321,11 @@ def _register_services(hass: HomeAssistant) -> None:
                 raise HomeAssistantError(
                     f"Microsoft Family Safety {call.service} failed: {err}"
                 ) from err
-            return result if call.service in _RESPONSE_SERVICES else None
+            if call.service in _RESPONSE_SERVICES or (
+                call.service in _OPTIONAL_RESPONSE_SERVICES and call.return_response
+            ):
+                return result
+            return None
         return handler
 
     for name, schema, method, extract in services:
@@ -330,7 +338,9 @@ def _register_services(hass: HomeAssistant) -> None:
             DOMAIN, name, guard_service(hass, make_handler(method, extract, per_child)),
             schema=schema,
             supports_response=(
-                SupportsResponse.ONLY if name in _RESPONSE_SERVICES else SupportsResponse.NONE
+                SupportsResponse.ONLY if name in _RESPONSE_SERVICES
+                else SupportsResponse.OPTIONAL if name in _OPTIONAL_RESPONSE_SERVICES
+                else SupportsResponse.NONE
             ),
         )
 

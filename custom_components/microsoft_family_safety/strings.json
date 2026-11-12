@@ -358,7 +358,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "The domain to block, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed."
+          "description": "The domain to block, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed. Asked for a response, it answers the sites done."
         }
       }
     },
@@ -376,7 +376,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "The domain to remove, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed."
+          "description": "The domain to remove, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed. Asked for a response, it answers the sites done."
         }
       }
     },
@@ -480,7 +480,7 @@
         },
         "website": {
           "name": "Website",
-          "description": "The domain to allow, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed."
+          "description": "The domain to allow, or a list of domains. Every site is tried; when one fails, the call fails naming the sites done and the sites failed. Asked for a response, it answers the sites done."
         }
       }
     },

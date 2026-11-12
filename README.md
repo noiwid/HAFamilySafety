@@ -541,9 +541,14 @@ data:
   website:
     - "example.com"
     - "example.net"
+response_variable: result
 ```
 
-Each site is its own request to Microsoft. Every site in the list is tried, also after one fails; if any fails, the call fails with a message naming the sites that were done and the sites that failed (with Microsoft's error), so an automation can retry just those.
+Each site is its own request to Microsoft. The same site given twice (`example.com`, `https://example.com`, `EXAMPLE.com`) is sent once, and a list with no site left after blanks are dropped is refused. Every site in the list is tried, also after one fails; if any fails, the call fails with a message naming the sites that were done and the sites that failed (with Microsoft's error), so an automation can retry just those. The response is optional; asked for, a successful call answers the sites done:
+
+```yaml
+{"done": ["example.com", "example.net"], "failed": []}
+```
 
 ```yaml
 # Toggle web content filtering

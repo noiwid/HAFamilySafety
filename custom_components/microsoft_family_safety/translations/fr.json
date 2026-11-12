@@ -358,7 +358,7 @@
         },
         "website": {
           "name": "Site web",
-          "description": "Le domaine à bloquer, ou une liste de domaines. Chaque site est essayé ; si l'un échoue, l'appel échoue en indiquant les sites traités et ceux en échec."
+          "description": "Le domaine à bloquer, ou une liste de domaines. Chaque site est essayé ; si l'un échoue, l'appel échoue en indiquant les sites traités et ceux en échec. Avec une réponse demandée, il indique les sites traités."
         }
       }
     },
@@ -376,7 +376,7 @@
         },
         "website": {
           "name": "Site web",
-          "description": "Le domaine à retirer, ou une liste de domaines. Chaque site est essayé ; si l'un échoue, l'appel échoue en indiquant les sites traités et ceux en échec."
+          "description": "Le domaine à retirer, ou une liste de domaines. Chaque site est essayé ; si l'un échoue, l'appel échoue en indiquant les sites traités et ceux en échec. Avec une réponse demandée, il indique les sites traités."
         }
       }
     },
@@ -480,7 +480,7 @@
         },
         "website": {
           "name": "Site web",
-          "description": "Le domaine à autoriser, ou une liste de domaines. Chaque site est essayé ; si l'un échoue, l'appel échoue en indiquant les sites traités et ceux en échec."
+          "description": "Le domaine à autoriser, ou une liste de domaines. Chaque site est essayé ; si l'un échoue, l'appel échoue en indiquant les sites traités et ceux en échec. Avec une réponse demandée, il indique les sites traités."
         }
       }
     },

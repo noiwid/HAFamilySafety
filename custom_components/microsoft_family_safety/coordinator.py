@@ -19,7 +19,11 @@ from yarl import URL
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -1453,20 +1457,31 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_change_websites(
         self, service: str, child_id: str, websites: str | list[str]
-    ) -> None:
+    ) -> dict[str, list[str]]:
         """Send one website change per site (each is its own PATCH).
 
         Every site is tried, also after one fails, and a failure fails the
         call naming the sites done and the sites failed, so a caller knows
-        exactly which ones to retry.
+        exactly which ones to retry. On success the answer lists the sites
+        done (``failed`` is then empty).
         """
         if not self.web_api:
             raise RuntimeError("Web API not initialized")
         write = getattr(self.web_api, service)
-        sites = [websites] if isinstance(websites, str) else list(websites)
+        given = [websites] if isinstance(websites, str) else list(websites)
+        # One change per site as Microsoft stores it: "example.com",
+        # "https://example.com" and "EXAMPLE.com" are the same site, and the
+        # first spelling given is the one sent.
+        sites: dict[str, str] = {}
+        for site in given:
+            site = str(site or "").strip()
+            if site:
+                sites.setdefault(FamilySafetyWebAPI._website_url(site).lower(), site)
+        if not sites:
+            raise ServiceValidationError(f"{service}: give at least one website.")
         done: list[str] = []
         failed: dict[str, str] = {}
-        for site in dict.fromkeys(s.strip() for s in sites if s and s.strip()):
+        for site in sites.values():
             try:
                 await write(child_id, site)
             except Exception as err:  # noqa: BLE001 - reported with the others
@@ -1481,15 +1496,22 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 f"Done: {', '.join(done) or 'none'}. Failed: "
                 + "; ".join(f"{site} ({error})" for site, error in failed.items())
             )
+        return {"done": done, "failed": []}
 
-    async def async_block_website(self, child_id: str, website: str | list[str]) -> None:
-        await self._async_change_websites("block_website", child_id, website)
+    async def async_block_website(
+        self, child_id: str, website: str | list[str]
+    ) -> dict[str, list[str]]:
+        return await self._async_change_websites("block_website", child_id, website)
 
-    async def async_remove_website(self, child_id: str, website: str | list[str]) -> None:
-        await self._async_change_websites("remove_website", child_id, website)
+    async def async_remove_website(
+        self, child_id: str, website: str | list[str]
+    ) -> dict[str, list[str]]:
+        return await self._async_change_websites("remove_website", child_id, website)
 
-    async def async_allow_website(self, child_id: str, website: str | list[str]) -> None:
-        await self._async_change_websites("allow_website", child_id, website)
+    async def async_allow_website(
+        self, child_id: str, website: str | list[str]
+    ) -> dict[str, list[str]]:
+        return await self._async_change_websites("allow_website", child_id, website)
 
     async def async_get_sites(self, account_id: str) -> dict[str, Any]:
         """The child's blocked and allowed websites as Microsoft stores them."""
