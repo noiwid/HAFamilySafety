@@ -55,7 +55,8 @@ that surface on Home Assistant, especially on Python 3.14:
    name "Windows" (Microsoft now also lists it as "Desktop"). The replacement
    reads the ``/v4`` route with ``Plat-Info: ALL`` that the Family Safety app
    and current pyfamilysafety use, and decides what is locked with
-   ``mobile_overrides``.
+   ``mobile_overrides``. An answer without the platforms list keeps the last
+   known locks instead of reading as "nothing locked".
 
 This module patches those paths while keeping token values out of the log.
 """
@@ -88,6 +89,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .mobile_overrides import (
     MOBILE_OVERRIDES_PATH,
     MOBILE_OVERRIDES_PLAT_INFO,
+    is_overrides_document,
     mobile_blocked_platforms,
     mobile_lock_of,
 )
@@ -786,8 +788,21 @@ def _patch_v4_overrides_read() -> bool:
             USER_ID=self.user_id,
         )
         state = response.get("json") if isinstance(response, dict) else None
-        if not isinstance(state, dict):
-            state = {}
+        if not is_overrides_document(state):
+            # An HTML page, an empty body or any other answer without the
+            # platforms list says nothing about the locks: reading it as "no
+            # locks" would show a locked child as unlocked. Keep the last
+            # known state; with none yet, fail this update.
+            if self.blocked_platforms is None:
+                raise HttpException(
+                    "The device-limits overrides answer has no platform list"
+                )
+            _LOGGER.warning(
+                "The device-limits overrides answer for %s has no platform list; "
+                "keeping the last known locks",
+                self.user_id,
+            )
+            return
         self.blocked_platforms = mobile_blocked_platforms(state)
         for entry in state.get("lockablePlatforms") or []:
             if not isinstance(entry, dict):

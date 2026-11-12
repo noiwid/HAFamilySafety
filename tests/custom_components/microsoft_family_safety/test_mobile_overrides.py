@@ -9,6 +9,7 @@ is never reported as an unlock.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -302,3 +303,58 @@ async def test_lagging_poll_does_not_undo_our_write(coordinator):
     coordinator._mobile_writes[key] = (written - timedelta(minutes=3), entry)
     assert coordinator._merge_blocked_platforms(stale) == ["Windows"]
     assert key not in coordinator._mobile_writes
+
+
+async def test_post_timeout_is_judged_by_reads(coordinator):
+    """A POST that times out may still have been applied: read back."""
+    web = coordinator.web_api
+    web.post_error = asyncio.TimeoutError()
+    await coordinator.async_lock_platform(CHILD, "Windows")
+    assert web.reads == 2  # the target, then a read that shows the lock
+    assert coordinator._accounts[CHILD].blocked_platforms == ["Windows"]
+
+
+async def test_post_timeout_not_applied_raises(coordinator):
+    web = coordinator.web_api
+    web.post_error = asyncio.TimeoutError()
+    web.applies = False
+    with pytest.raises(HomeAssistantError, match="no answer in time"):
+        await coordinator.async_lock_platform(CHILD, "Windows")
+    assert web.reads == 1 + 3
+
+
+async def test_no_answer_body_and_no_read_raises(coordinator):
+    """No document from the POST and three failed reads: not a success."""
+    web = coordinator.web_api
+    web.empty_answer = True
+    reads = web.get_mobile_device_overrides
+
+    async def later_reads_fail(child_id):
+        if web.reads >= 1:
+            web.reads += 1
+            raise FamilySafetyWebAPIError("down")
+        return await reads(child_id)
+
+    web.get_mobile_device_overrides = later_reads_fail
+    with pytest.raises(HomeAssistantError, match="without saying what changed"):
+        await coordinator.async_lock_platform(CHILD, "Windows")
+    assert web.reads == 1 + 3
+    coordinator.async_request_refresh.assert_awaited()
+
+
+@pytest.mark.parametrize("answer", [None, "<html></html>", {}, {"error": "x"}, []])
+async def test_poll_without_the_document_keeps_the_last_locks(answer):
+    from pyfamilysafety.account import Account
+    from pyfamilysafety.exceptions import HttpException
+
+    compat._patch_v4_overrides_read()
+    device = MagicMock(device_id="abc")
+    account = MagicMock(user_id=CHILD, devices=[device], blocked_platforms=["Windows"])
+    account._api.send_request = AsyncMock(return_value={"json": answer})
+    await Account._get_overrides(account)
+    assert account.blocked_platforms == ["Windows"]
+    device.update_blocked_status.assert_not_called()
+    # Nothing known yet: fail the update rather than read "unlocked".
+    account.blocked_platforms = None
+    with pytest.raises(HttpException):
+        await Account._get_overrides(account)
