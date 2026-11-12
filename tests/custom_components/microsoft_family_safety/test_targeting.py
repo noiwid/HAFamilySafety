@@ -185,6 +185,34 @@ async def test_a_device_without_a_child_is_refused(hass, coordinator) -> None:
     coordinator.async_lock_account.assert_not_awaited()
 
 
+@pytest.mark.parametrize("device_id", ["", "None", ["", " none "]])
+async def test_a_blank_device_is_no_child(hass, coordinator, device_id) -> None:
+    # What a template that rendered nothing gives, as for account_id.
+    with pytest.raises(vol.Invalid, match="Give the child"):
+        await _lock(hass, device_id=device_id)
+    await _lock(hass, device_id=device_id, account_id=CHILD)
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+async def test_a_blank_device_beside_a_real_one_is_ignored(hass, coordinator) -> None:
+    await _lock(hass, device_id=["", _device(hass, CHILD)])
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+@pytest.mark.parametrize("by", ["entity_id", "device_id"])
+async def test_a_child_before_the_first_update_is_not_known_yet(
+    hass, coordinator, by
+) -> None:
+    coordinator.data = None
+    target = (
+        _entity(hass, "switch.alex_lock", CHILD) if by == "entity_id"
+        else _device(hass, CHILD)
+    )
+    with pytest.raises(ServiceValidationError, match="does not know its child accounts yet"):
+        await _lock(hass, **{by: target})
+    coordinator.async_lock_account.assert_not_awaited()
+
+
 async def test_a_device_and_an_entity_of_two_children_are_refused(hass, coordinator) -> None:
     with pytest.raises(ServiceValidationError, match="different"):
         await _lock_target(

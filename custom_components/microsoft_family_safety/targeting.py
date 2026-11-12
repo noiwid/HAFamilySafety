@@ -37,12 +37,20 @@ TARGET_FIELDS: dict[Any, Any] = {
 }
 
 
+def _given(value: Any) -> str:
+    """The id as given; "" for a template that rendered nothing ("" or "None")."""
+    value = str(value or "").strip()
+    return "" if value.lower() == "none" else value
+
+
 def _has_target(data: dict[str, Any]) -> dict[str, Any]:
-    account_id = str(data.get(ATTR_ACCOUNT_ID) or "").strip()
-    # A template that rendered nothing gives "" or "None": no account.
-    if account_id.lower() == "none":
-        account_id = ""
-    if not account_id and not data.get(ATTR_ENTITY_ID) and not data.get(ATTR_DEVICE_ID):
+    account_id = _given(data.get(ATTR_ACCOUNT_ID))
+    device_ids = [d for d in map(_given, data.get(ATTR_DEVICE_ID) or []) if d]
+    if device_ids:
+        data[ATTR_DEVICE_ID] = device_ids
+    else:
+        data.pop(ATTR_DEVICE_ID, None)
+    if not account_id and not data.get(ATTR_ENTITY_ID) and not device_ids:
         raise vol.Invalid(
             "Give the child: account_id, or entity_id / device_id of one of its "
             "Microsoft Family Safety entities or devices"
@@ -90,6 +98,17 @@ def _account_from_device(
     return None
 
 
+def _not_loaded_yet(accounts: set[str]) -> ServiceValidationError | None:
+    """The error to give when no child is known yet (before the first poll)."""
+    if accounts:
+        return None
+    return ServiceValidationError(
+        "Microsoft Family Safety does not know its child accounts yet (it is still "
+        "loading, or its last update failed). Try again once it has loaded, or pass "
+        "account_id."
+    )
+
+
 def account_from_entity(hass: HomeAssistant, entity_id: str) -> str:
     """The account id behind one of this integration's entities."""
     entry = er.async_get(hass).async_get(entity_id)
@@ -98,8 +117,8 @@ def account_from_entity(hass: HomeAssistant, entity_id: str) -> str:
             f"{entity_id} is not a Microsoft Family Safety entity. Select an "
             "entity of the child, or pass account_id."
         )
+    accounts, devices = _known_accounts(hass)
     if entry.device_id:
-        accounts, devices = _known_accounts(hass)
         account = _account_from_device(hass, entry.device_id, accounts, devices)
         if account is not None:
             return account
@@ -107,6 +126,8 @@ def account_from_entity(hass: HomeAssistant, entity_id: str) -> str:
     user_id = state.attributes.get(ATTR_USER_ID) if state else None
     if user_id not in (None, ""):
         return str(user_id)
+    if (error := _not_loaded_yet(accounts)) is not None:
+        raise error
     raise ServiceValidationError(
         f"{entity_id} does not belong to a child account (it is, for example, "
         "the connection sensor). Select an entity of the child, or pass account_id."
@@ -125,6 +146,8 @@ def account_from_device(hass: HomeAssistant, device_id: str) -> str:
     account = _account_from_device(hass, device_id, accounts, devices)
     if account is not None:
         return account
+    if (error := _not_loaded_yet(accounts)) is not None:
+        raise error
     raise ServiceValidationError(
         f"Device {device.name_by_user or device.name or device_id} does not belong "
         "to a child account (it is, for example, the connection device). Select a "
