@@ -183,8 +183,9 @@ class FamilySafetyXboxDailyLimitNumber(FamilySafetyDailyLimitNumber):
 
     On accounts where the Xbox has its own schedule ("PerDeviceType"), the
     console enforces that schedule and the Windows limits above do not reach
-    it. Read and written through the mobile API. Idea and entity design from
-    PR #61 by JohnMcLear.
+    it. Written through the Xbox Family Settings service (xapprove) only:
+    without it the write is refused, as the console ignores the Xbox schedule
+    of the mobile API. Idea and entity design from PR #61 by JohnMcLear.
     """
 
     _attr_icon = "mdi:microsoft-xbox"

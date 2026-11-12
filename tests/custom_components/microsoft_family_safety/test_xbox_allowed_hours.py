@@ -324,12 +324,79 @@ async def test_xapprove_failure_is_reported_and_cache_unchanged(coordinator):
     assert friday["allowedIntervals"] == [{"begin": "07:00", "end": "22:00"}]
 
 
-async def test_xbox_limit_entity_still_falls_back_when_not_linked(coordinator):
-    # The number entity keeps its behaviour: without xapprove it writes the
-    # mobile Xbox schedule as before. Only the services refuse.
-    coordinator.xbox_family.linked = False
-    await coordinator.async_set_xbox_screentime_limit(CHILD, 1, 1, 0)
-    coordinator.web_api.set_mobile_xbox_screentime_allowance.assert_awaited_once_with(CHILD, 1, 1, 0)
+def _break_xapprove(coordinator, setup):
+    if setup == "not_linked":
+        coordinator.xbox_family.linked = False
+    elif setup == "refused":
+        coordinator.xbox_family.usable = False
+    elif setup == "lookup_failed":
+        coordinator.xbox_family.async_child_xuid.side_effect = XboxFamilyError("503")
+    elif setup == "unmatched":
+        coordinator.xbox_family.async_child_xuid.return_value = None
+
+
+XAPPROVE_MISSING = [
+    ("not_linked", "not linked"),
+    ("refused", "refused"),
+    ("lookup_failed", "Could not look up"),
+    ("unmatched", "could not be matched"),
+]
+
+
+@pytest.mark.parametrize(("setup", "message"), XAPPROVE_MISSING)
+async def test_xbox_limit_entity_refuses_without_xapprove(coordinator, setup, message):
+    # The console ignores the mobile Xbox schedule (#70): a write there would
+    # report success and change nothing, so the number entity refuses instead.
+    coordinator.web_api.set_mobile_schedule_enabled = AsyncMock()
+    _break_xapprove(coordinator, setup)
+    _entity_data(coordinator)
+    number = FamilySafetyXboxDailyLimitNumber(
+        coordinator, coordinator.entry, CHILD, 1, "monday", "Monday"
+    )
+    number.hass = coordinator.hass
+    number.async_write_ha_state = MagicMock()
+    with pytest.raises(HomeAssistantError, match=message):
+        await number.async_set_native_value(60)
+    coordinator.xbox_family.async_set_day.assert_not_called()
+    coordinator.web_api.set_mobile_xbox_screentime_allowance.assert_not_called()
+    monday = coordinator.data["accounts"][CHILD]["xbox_screentime_policy"]["dailyRestrictions"]["monday"]
+    assert monday["allowance"] == "01:15:00"  # cache untouched
+    assert number.native_value == 75  # no optimistic value left behind
+
+
+async def test_xbox_limit_entity_writes_through_xapprove(coordinator):
+    _entity_data(coordinator)
+    number = FamilySafetyXboxDailyLimitNumber(
+        coordinator, coordinator.entry, CHILD, 1, "monday", "Monday"
+    )
+    number.hass = coordinator.hass
+    number.async_write_ha_state = MagicMock()
+    await number.async_set_native_value(90)
+    coordinator.xbox_family.async_set_day.assert_awaited_once_with(XUID, 1, minutes=90)
+    coordinator.web_api.set_mobile_xbox_screentime_allowance.assert_not_called()
+
+
+@pytest.mark.parametrize(("setup", "message"), XAPPROVE_MISSING)
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_xbox_schedule_switch_refuses_without_xapprove(
+    coordinator, setup, message, enabled
+):
+    # Same for the on/off switch of the Xbox schedule: never the mobile one.
+    coordinator.web_api.set_mobile_schedule_enabled = AsyncMock()
+    _break_xapprove(coordinator, setup)
+    with pytest.raises(HomeAssistantError, match=message):
+        await coordinator.async_set_xbox_schedule_enabled(CHILD, enabled)
+    coordinator.xbox_family.async_set_day.assert_not_called()
+    coordinator.web_api.set_mobile_schedule_enabled.assert_not_called()
+    assert coordinator.data["accounts"][CHILD]["xbox_screentime_policy"]["isEnabled"] is True
+
+
+async def test_xbox_schedule_switch_goes_to_xapprove(coordinator):
+    coordinator.web_api.set_mobile_schedule_enabled = AsyncMock()
+    await coordinator.async_set_xbox_schedule_enabled(CHILD, False)
+    assert coordinator.xbox_family.async_set_day.await_args.kwargs == {"enabled": False}
+    coordinator.web_api.set_mobile_schedule_enabled.assert_not_called()
+    assert coordinator.data["accounts"][CHILD]["xbox_screentime_policy"]["isEnabled"] is False
 
 
 # --- services -------------------------------------------------------------------
