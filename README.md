@@ -714,7 +714,7 @@ Microsoft's mobile API sometimes answers `Family.UnableToFindTargetResource` / `
 
 ### Diagnostics
 
-**Settings > Devices & services > Microsoft Family Safety > ⋮ > Download diagnostics** gives the entry options, the connection state (as on the connection sensor) and the last polled data, each app list reduced to a count. Tokens, cookies, names, pictures, device names, e-mail addresses, the account balance, the website lists and the websites visited are removed, and account, device and Xbox user ids are replaced by `account_1`, `device_1`, `xbox_user_1`. Attach it to an issue together with a debug log.
+**Settings > Devices & services > Microsoft Family Safety > ⋮ > Download diagnostics** gives the entry options, the connection state (as on the connection sensor) and the last polled data, each app list reduced to a count. Tokens, cookies, names, pictures, device names, e-mail addresses, the account balance, the website lists and the websites visited are removed, and account, device and Xbox user ids are replaced by `account_1`, `device_1`, `xbox_user_1` (the parent's ids by `parent`, `xbox_parent`). Attach it to an issue together with a debug log.
 
 ### Debug logging
 

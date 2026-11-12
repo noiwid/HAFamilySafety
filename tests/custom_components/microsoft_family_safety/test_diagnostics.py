@@ -90,3 +90,49 @@ async def test_diagnostics_without_a_running_coordinator(hass):
     text = json.dumps(result)
     assert "refresh-secret" not in text and PARENT not in text
     assert "connection" not in result
+
+
+PARENT_XUID = "2533274800000099"
+
+
+async def test_parent_xuid_in_an_xbox_error_is_aliased(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data={"refresh_token": "refresh-secret"})
+    entry.add_to_hass(hass)
+    coord = FamilySafetyDataUpdateCoordinator(hass, entry)
+    coord.xbox_family._parent_xuid = PARENT_XUID
+    coord.xbox_family.last_error = f"GET /family/memberXuid({PARENT_XUID}) answered 403"
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+
+    result = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert PARENT_XUID not in json.dumps(result)
+    assert result["connection"]["xbox_family_last_error"] == (
+        "GET /family/memberXuid(xbox_parent) answered 403"
+    )
+
+
+async def test_ids_are_aliased_before_the_first_poll_succeeds(hass):
+    entry = MockConfigEntry(domain=DOMAIN, data={"refresh_token": "refresh-secret"})
+    entry.add_to_hass(hass)
+    coord = FamilySafetyDataUpdateCoordinator(hass, entry)
+    coord.data = None
+    coord._accounts = {int(CHILD): object()}
+    coord._xbox_xuids = {"6543210987650000": XUID}
+    real_state = coord.connection_state
+
+    def connection_state():
+        return {
+            **real_state(),
+            "web_api_last_endpoint": f"/api/v1/users/{CHILD}/screentime",
+            "roster_errors": {"6543210987650000": ["/xbox/policy"]},
+        }
+
+    coord.connection_state = connection_state
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+
+    result = await async_get_config_entry_diagnostics(hass, entry)
+
+    text = json.dumps(result)
+    assert CHILD not in text and "6543210987650000" not in text
+    assert result["connection"]["web_api_last_endpoint"] == "/api/v1/users/account_1/screentime"
+    assert result["connection"]["roster_errors"] == {"account_2": ["/xbox/policy"]}

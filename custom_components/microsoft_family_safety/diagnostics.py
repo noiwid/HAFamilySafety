@@ -1,10 +1,11 @@
 """Diagnostics for Microsoft Family Safety, with credentials and personal data removed.
 
 Tokens, cookies, e-mail addresses, names and browsing data are redacted by
-key. Account, device and Xbox user ids, and the parent's user id, are replaced
-by stable aliases ("account_1", "device_1", "xbox_user_1", "parent") wherever
-they appear, also inside dictionary keys and longer strings (an endpoint
-path), so the structure stays readable without identifying anyone.
+key. Account, device and Xbox user ids, and the parent's user and Xbox ids,
+are replaced by stable aliases ("account_1", "device_1", "xbox_user_1",
+"parent", "xbox_parent") wherever they appear, also inside dictionary keys and
+longer strings (an endpoint path, an error), so the structure stays readable
+without identifying anyone.
 """
 from __future__ import annotations
 
@@ -72,13 +73,29 @@ _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 def _aliases(entry: ConfigEntry, data: dict[str, Any], coordinator: Any) -> dict[str, str]:
     """Ids -> aliases, longest first so that none is replaced inside another."""
     aliases: dict[str, str] = {}
-    for index, account_id in enumerate((data.get("accounts") or {}), start=1):
-        aliases[str(account_id)] = f"account_{index}"
+    xuids = getattr(coordinator, "_xbox_xuids", None) or {}
+    # The roster and the Xbox matches as well as the last poll: when the first
+    # poll failed, ids still show up in connection_state() strings.
+    accounts = dict.fromkeys(
+        str(key)
+        for source in (
+            data.get("accounts") or {},
+            getattr(coordinator, "_accounts", None) or {},
+            xuids,
+        )
+        for key in source
+    )
+    for index, account_id in enumerate(accounts, start=1):
+        aliases[account_id] = f"account_{index}"
     for index, device_id in enumerate((data.get("devices") or {}), start=1):
         aliases.setdefault(str(device_id), f"device_{index}")
-    xuids = getattr(coordinator, "_xbox_xuids", None) or {}
     for index, xuid in enumerate(sorted({str(x) for x in xuids.values() if x}), start=1):
         aliases.setdefault(xuid, f"xbox_user_{index}")
+    xbox_family = getattr(coordinator, "xbox_family", None)
+    parent_xuid = getattr(xbox_family, "_parent_xuid", None)
+    if parent_xuid:
+        # In xbox_family_last_error when the family lookup fails.
+        aliases.setdefault(str(parent_xuid), "xbox_parent")
     parent = entry.data.get(CONF_AUTH_USER_ID)
     if parent:
         aliases.setdefault(str(parent), "parent")
