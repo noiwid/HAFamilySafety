@@ -20,6 +20,7 @@ from yarl import URL
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -391,7 +392,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 use_refresh_token=True,
                 experimental=True,
             )
-            self.web_api = FamilySafetyWebAPI(self.api.api.authenticator)
+            self.web_api = FamilySafetyWebAPI(
+                self.api.api.authenticator,
+                session=async_get_clientsession(self.hass),
+            )
             # Match the browser that created the session: Microsoft answers
             # (and names its pages) in this language.
             lang = self.hass.config.language or "en"

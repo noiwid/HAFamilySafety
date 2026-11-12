@@ -228,8 +228,14 @@ class FamilySafetyWebAPI:
 
     WEB_API_BASE = "https://account.microsoft.com"
 
-    def __init__(self, authenticator) -> None:
+    def __init__(
+        self, authenticator, session: aiohttp.ClientSession | None = None
+    ) -> None:
         self._authenticator = authenticator
+        #: Home Assistant's shared session (async_get_clientsession) for the
+        #: mobile API, which needs no cookies. Without one (tests, scripts) a
+        #: private session is created and closed by close().
+        self._shared_session = session
         self._session: aiohttp.ClientSession | None = None
         self._web_cookies: list[dict[str, Any]] | None = None
         self._web_csrf: str | None = None
@@ -385,11 +391,15 @@ class FamilySafetyWebAPI:
         self._web_cookies = exported
         return True
 
+    #: Per-request timeout of the mobile API (the shared session has none).
+    _MOBILE_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10)
+
     async def _ensure_session(self) -> None:
+        if self._shared_session is not None and not self._shared_session.closed:
+            self._session = self._shared_session
+            return
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30, connect=10)
-            )
+            self._session = aiohttp.ClientSession(timeout=self._MOBILE_TIMEOUT)
 
     async def _ensure_auth(self) -> None:
         """Use the single pyfamilysafety authenticator for mobile API auth.
@@ -435,7 +445,8 @@ class FamilySafetyWebAPI:
 
         async def do_request() -> dict | list | None:
             async with self._session.request(
-                method, url, headers=headers, json=json_data, params=params
+                method, url, headers=headers, json=json_data, params=params,
+                timeout=self._MOBILE_TIMEOUT,
             ) as resp:
                 return await self._handle_response(resp)
 
@@ -2404,7 +2415,11 @@ class FamilySafetyWebAPI:
         return result if isinstance(result, dict) else None
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
+        if (
+            self._session
+            and self._session is not self._shared_session
+            and not self._session.closed
+        ):
             await self._session.close()
         if self._web_session and not self._web_session.closed:
             await self._web_session.close()
