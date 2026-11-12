@@ -342,6 +342,44 @@ async def test_no_answer_body_and_no_read_raises(coordinator):
     coordinator.async_request_refresh.assert_awaited()
 
 
+def _read_backs_answer(web, answer):
+    """The target read gives the document; every read after it gives ``answer``."""
+    reads = web.get_mobile_device_overrides
+
+    async def later_reads(child_id):
+        if web.reads >= 1:
+            web.reads += 1
+            return answer
+        return await reads(child_id)
+
+    web.get_mobile_device_overrides = later_reads
+
+
+@pytest.mark.parametrize("answer", [{}, {"error": "x"}])
+async def test_unlock_read_back_without_the_document_is_not_a_success(coordinator, answer):
+    """{} lists no lock, but it is not Microsoft saying the Cancel applied."""
+    web = coordinator.web_api
+    web.overrides = [{"overrideType": "BlockUntil", "validUntil": _iso(dt_util.utcnow() + timedelta(hours=1))}]
+    web.post_error = FamilySafetyWebAPIError(ERROR_500)
+    web.applies = False
+    coordinator._accounts[CHILD].blocked_platforms = ["Windows"]
+    _read_backs_answer(web, answer)
+    with pytest.raises(HomeAssistantError, match="could not be read back"):
+        await coordinator.async_unlock_platform(CHILD, "Windows")
+    assert web.reads == 1 + 3
+    assert coordinator._accounts[CHILD].blocked_platforms == ["Windows"]
+
+
+@pytest.mark.parametrize("answer", [{}, {"error": "x"}])
+async def test_lock_read_back_without_the_document_is_not_read(coordinator, answer):
+    web = coordinator.web_api
+    web.post_error = asyncio.TimeoutError()
+    _read_backs_answer(web, answer)
+    with pytest.raises(HomeAssistantError, match="could not be read back"):
+        await coordinator.async_lock_platform(CHILD, "Windows")
+    assert web.reads == 1 + 3
+
+
 @pytest.mark.parametrize("answer", [None, "<html></html>", {}, {"error": "x"}, []])
 async def test_poll_without_the_document_keeps_the_last_locks(answer):
     from pyfamilysafety.account import Account

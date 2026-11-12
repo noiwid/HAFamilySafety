@@ -949,7 +949,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         applied, or no document) the overrides are read up to
         len(_MOBILE_READBACK_DELAYS) times, stopping at the first read for
         which ``settled`` holds; ``state`` is then the last read (None, with
-        ``read_error``, when no read succeeded). A state from the POST answer,
+        ``read_error``, when no read succeeded). A read that answers no
+        overrides document (``{}``, an error object) counts as a failed read.
+        A state from the POST answer,
         or a settled read, is remembered for _MOBILE_WRITE_GRACE.
         """
         write_error: Exception | None = None
@@ -969,10 +971,18 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if delay:
                 await asyncio.sleep(delay)
             try:
-                state = await self.web_api.get_mobile_device_overrides(child)
+                answer = await self.web_api.get_mobile_device_overrides(child)
             except (FamilySafetyWebAPIError, asyncio.TimeoutError) as err:
                 read_error = err
                 continue
+            if not is_overrides_document(answer):
+                # {} or an error object lists no lock: never a settled unlock,
+                # nor the state when no read gives the document.
+                read_error = FamilySafetyWebAPIError(
+                    "the read answered no overrides document"
+                )
+                continue
+            state = answer
             read_error = None
             if settled(state):
                 self._remember_mobile_write(child, state, target)
