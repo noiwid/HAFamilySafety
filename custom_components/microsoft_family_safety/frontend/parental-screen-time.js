@@ -156,12 +156,16 @@ class ScreenTimeCard extends Base {
 		const total = sum(used);
 		const limits = live.map((s) => this._num(s.limit) + (this._num(s.bonus) || 0));
 		const allLimited = live.length && limits.every((v) => v > 0);
-		const limit = allLimited ? sum(limits) : NaN;
-		const left = allLimited ? sum(live.map((s, i) => { const r = this._num(s.remaining); return isNaN(r) ? Math.max(0, limits[i] - (this._num(s.used) || 0)) : r; })) : NaN;
+		// a limit, a remaining time or a lock of the child can be shared by several devices: it counts once
+		const first = (key) => { const seen = new Set(); return live.map((s) => !s[key] || (!seen.has(s[key]) && !!seen.add(s[key]))); };
+		const ownLimit = first('limit'), ownLeft = first('remaining'), ownLock = first('lock');
+		const limit = allLimited ? sum(limits.filter((_, i) => ownLimit[i])) : NaN;
+		// shortcut: a shared limit without a remaining entity is reduced by the first device's time only, fine while every shared limit comes with its remaining entity
+		const left = allLimited ? sum(live.map((s, i) => { const r = this._num(s.remaining); return isNaN(r) ? (ownLimit[i] ? Math.max(0, limits[i] - (this._num(s.used) || 0)) : 0) : ownLeft[i] ? r : 0; })) : NaN;
 		const pct = limit > 0 ? Math.min(100, (total / limit) * 100) : 0;
 		const col = pct >= 100 ? 'var(--error-color)' : pct >= 80 ? 'var(--warning-color)' : 'var(--accent-color)';
 		const next = live.map((s) => s.next && this._hass.states[s.next]).find((st) => st && !['unknown', 'unavailable'].includes(st.state));
-		const tiles = live.filter((s) => s.lock && this._hass.states[s.lock]).map((s) => {
+		const tiles = live.filter((s, i) => ownLock[i] && s.lock && this._hass.states[s.lock]).map((s) => {
 			const locked = this._hass.states[s.lock].state === s.lockedWhen;
 			const c = locked ? 'var(--error-color)' : 'var(--success-color)';
 			const r = this._num(s.remaining);
