@@ -568,7 +568,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_set_app_blocked(account_id, app_id, True)
 
     async def async_unblock_app(self, account_id: str, app_id: str) -> None:
-        """Unblock an application (a paused one is resumed, its limit put back)."""
+        """Unblock an application without wiping its limit (a paused one is resumed)."""
         if await self.app_pauser.async_unblock(self, account_id, app_id):
             await self.async_request_refresh()
             return

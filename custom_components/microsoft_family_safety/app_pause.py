@@ -35,6 +35,12 @@ limit. So:
   an app whose pause is no longer in force (released, or changed by a
   parent) forgets the pause and blocks it as usual, so a later resume_app
   does not undo that block.
+* An unblock never wipes a limit either. An app that is not paused (any
+  more) is read live: already unblocked, nothing is written; blocked with a
+  limit, its policy is written back with ``NotBlocked`` and the same day
+  keys. Only an app without a limit (or with one that cannot be written
+  back) gets the plain unblock_app write. An app that cannot be read is not
+  unblocked.
 * Saved states are kept until resumed or until the config entry is removed,
   not pruned when a child is missing from one roster read.
 
@@ -479,34 +485,75 @@ class AppPauser:
         self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
         app_id: str,
     ) -> bool:
-        """Unblock a paused app by resuming it, so its limit comes back.
+        """Unblock an app without wiping its limit.
 
-        unblock_app's body has no day keys and would wipe it. True when done
-        (resumed, or someone unblocked it already, also a concurrent resume).
-        False when the app is not paused, or a parent changed it since and it
-        is still blocked: the caller unblocks it as usual. Raises
-        HomeAssistantError, keeping the saved state, when it cannot be read
-        or written back.
+        unblock_app's body has no day keys and would wipe it. A paused app is
+        resumed, so its saved limit comes back. Any other app (never paused,
+        resumed meanwhile, or changed by a parent and still blocked) is read
+        live: already unblocked, nothing is written; blocked with a limit,
+        its policy is written back unblocked with the same days. True when
+        done. False when the app has no limit to keep (or one that cannot be
+        written back, or is not a Windows or Xbox app): the caller unblocks
+        it as usual. Raises HomeAssistantError, keeping any saved state, when
+        it cannot be read or written back.
         """
         account_id = str(account_id)
-        if app_id not in self.saved(account_id):
+        platform = app_platform(app_id)
+        if platform is None:
             return False
-        async with self._lock:
-            if app_id not in self._data.get(account_id, {}):
-                # Paused when this call started and resumed meanwhile (by a
-                # concurrent unblock or resume_app): done unless it is
-                # blocked again, so the restored limit is not wiped.
-                live = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
-                return live is None or live["block"] == NOT_BLOCKED
-            result = await self._async_resume_locked(coordinator, account_id, [app_id])
-            done = bool(result["resumed"] or result["released"])
-            if not done and result["changed_by_parent"]:
-                live = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
-                done = live is not None and live["block"] == NOT_BLOCKED
-        coordinator.async_update_listeners()
-        _raise_if_nothing_done(
-            "resume_app",
-            result["resumed"] + result["released"] + result["changed_by_parent"],
-            result["failed"],
-        )
+        result: dict[str, Any] | None = None
+        try:
+            async with self._lock:
+                done = False
+                if app_id in self._data.get(account_id, {}):
+                    result = await self._async_resume_locked(
+                        coordinator, account_id, [app_id]
+                    )
+                    done = bool(result["resumed"] or result["released"])
+                if not done and not (result and result["failed"]):
+                    # Not paused (also resumed meanwhile by a concurrent
+                    # unblock or resume_app), or changed by a parent since.
+                    done = await self._async_unblock_live(
+                        coordinator, account_id, app_id, platform
+                    )
+        finally:
+            coordinator.async_update_listeners()
+        if result is not None:
+            _raise_if_nothing_done(
+                "resume_app",
+                result["resumed"] + result["released"] + result["changed_by_parent"],
+                result["failed"],
+            )
         return done
+
+    async def _async_unblock_live(
+        self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
+        app_id: str, platform: str,
+    ) -> bool:
+        """Unblock an app that is not paused, keeping its limit (self._lock held).
+
+        True when done (already unblocked, or written back unblocked with its
+        days), False when the plain unblock_app write loses nothing.
+        """
+        now = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
+        if now is None:
+            raise HomeAssistantError(f"unblock_app failed: {app_id}: {UNREADABLE}")
+        if now["block"] == NOT_BLOCKED:
+            return True
+        try:
+            policy = saved_policy(now["policy"])
+        except ValueError:
+            return False
+        if policy is None or not policy["days"]:
+            return False
+        try:
+            await coordinator.async_write_app_policy(
+                account_id, app_id, platform,
+                write_body(app_id, now["name"], policy, NOT_BLOCKED),
+                blocked=False,
+            )
+        except Exception as err:  # noqa: BLE001 - one service call, one app
+            raise HomeAssistantError(
+                f"unblock_app failed: {app_id}: {err}"[:500]
+            ) from err
+        return True

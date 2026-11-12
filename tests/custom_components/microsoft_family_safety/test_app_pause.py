@@ -465,9 +465,11 @@ async def test_the_block_switch_off_resumes_a_paused_app(hass, rig):
     assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
     assert coord.app_pauser.saved(CHILD) == {}
     assert plain() == []
-    # Not paused any more: the next unblock is the plain one again.
+    # Not paused any more and already unblocked: nothing is written.
+    writes = len(api.writes)
     await switch.async_turn_off()
-    assert plain() == [("x:racing", "unblock_app")]
+    assert plain() == [] and len(api.writes) == writes
+    assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
 
 
 async def test_the_unblock_app_service_resumes_a_paused_app(hass, rig):
@@ -514,8 +516,13 @@ async def test_unblocking_a_paused_app_a_parent_reblocked_unblocks_it(hass, rig)
     await coord.async_pause_app(CHILD, ["x:racing"])
     api.entries["x:racing"]["policy"]["monday"] = {**LIMIT_DAY, "allowance": 7200000}
     await coord.async_unblock_app(CHILD, "x:racing")
-    # The parent's state is no longer ours to put back: unblocked as usual.
-    assert plain() == [("x:racing", "unblock_app")]
+    # The parent's state is no longer ours to put back: unblocked with the
+    # parent's limit kept, not wiped.
+    assert plain() == []
+    policy = api.entries["x:racing"]["policy"]
+    assert policy["blockState"] == "NotBlocked"
+    assert policy["monday"] == {**LIMIT_DAY, "allowance": 7200000}
+    assert policy["sunday"] == LIMIT_DAY
     assert coord.app_pauser.saved(CHILD) == {}
 
 
@@ -557,6 +564,67 @@ async def test_an_unblock_during_a_resume_keeps_the_limit(hass, rig):
     assert result["resumed"] == ["x:racing"]
     assert plain() == []
     assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+
+
+async def test_two_unblocks_in_a_row_of_a_paused_app_keep_its_limit(hass, rig):
+    """The block switch off, then unblock_app: the second must not wipe it."""
+    coord, apps, api, entry = rig
+    plain = _plain_calls(apps)
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    switch = _app_block_switch(hass, coord, entry, "x:racing", "Racing")
+    await switch.async_turn_off()
+    await hass.services.async_call(
+        DOMAIN, "unblock_app", {"account_id": CHILD, "app_id": "x:racing"}, blocking=True
+    )
+    assert plain() == []
+    assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+    assert coord.app_pauser.saved(CHILD) == {}
+
+
+async def test_unblocking_an_unblocked_app_with_a_limit_writes_nothing(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    await coord.async_unblock_app(CHILD, "x:racing")
+    assert plain() == [] and api.writes == []
+    assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+
+
+async def test_unblocking_a_blocked_app_with_a_limit_keeps_it(hass, rig):
+    """Blocked by a parent, never paused: the unblock carries its days."""
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    api.entries["x:racing"]["blockState"] = "BlockedAlways"
+    api.entries["x:racing"]["policy"]["blockState"] = "BlockedAlways"
+    apps["x:racing"].blocked = True
+    await coord.async_unblock_app(CHILD, "x:racing")
+    assert plain() == []
+    assert len(api.writes) == 1
+    app_id, platform, body = api.writes[0]
+    assert (app_id, platform) == ("x:racing", "xbox")
+    assert body == {
+        "appId": "x:racing", "displayName": "Racing", "blockState": "NotBlocked",
+        "blocked": False, "enabled": True, "appTimeEnforcementPolicy": "Custom",
+        "alternateAppIds": ["alt-1"], **{day: LIMIT_DAY for day in DAY_KEYS},
+    }
+    assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+    assert apps["x:racing"].blocked is False
+
+
+async def test_unblocking_a_blocked_app_without_a_limit_is_the_plain_unblock(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    await coord.async_unblock_app(CHILD, "win32:chat")
+    assert plain() == [("win32:chat", "unblock_app")]
+    assert api.writes == []
+
+
+async def test_unblocking_an_app_that_cannot_be_read_fails_and_writes_nothing(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    api.read_error = _error(503)
+    with pytest.raises(HomeAssistantError, match="policy_unreadable"):
+        await coord.async_unblock_app(CHILD, "x:racing")
+    assert plain() == [] and api.writes == []
 
 
 async def test_blocking_a_paused_app_keeps_its_limit(hass, rig):
