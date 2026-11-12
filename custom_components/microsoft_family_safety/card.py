@@ -1,8 +1,9 @@
-"""Screen time cards shared with the Google Family Link integration.
+"""Dashboard cards.
 
-The integration serves frontend/parental-screen-time.js (the same file ships
-with Family Link; whichever loads first defines the elements) and adds it to
-every dashboard. A websocket command gives the cards the entities of one
+The integration serves frontend/familysafety-card.js (its own per-child card)
+and frontend/parental-screen-time.js (the screen time cards shared with Google
+Family Link, the same file ships there; whichever loads first defines the
+elements) and adds both to every dashboard. A websocket command gives the cards the entities of one
 device, found by unique id, so the card config only names the device.
 """
 
@@ -37,7 +38,8 @@ async def async_register_card(hass: HomeAssistant) -> None:
     )
     # The release workflow bumps the manifest version: browsers then fetch the new file.
     version = (await async_get_integration(hass, DOMAIN)).version
-    add_extra_js_url(hass, f"{URL_BASE}/parental-screen-time.js?v={version}")
+    for name in ("parental-screen-time.js", "familysafety-card.js"):
+        add_extra_js_url(hass, f"{URL_BASE}/{name}?v={version}")
     websocket_api.async_register_command(hass, ws_card_entities)
 
 

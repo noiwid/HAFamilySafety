@@ -140,6 +140,7 @@ async def test_registered_once():
         await card.async_register_card(hass)
     assert [c.args[1] for c in add_js.call_args_list] == [
         "/familysafety_card/parental-screen-time.js?v=9.9.9",
+        "/familysafety_card/familysafety-card.js?v=9.9.9",
     ]
     add_ws.assert_called_once()
     hass.http.async_register_static_paths.assert_awaited_once()
