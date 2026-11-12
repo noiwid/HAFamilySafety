@@ -957,11 +957,13 @@ Used for read operations and app management. Token-based, no browser session req
 | GET | `/v1/ContentRestrictions/{childId}` | Age rating & ask-to-buy state | `sensor.web_filter` attributes |
 | GET | `/v1/activityreport/webactivity/{childId}` | Websites visited in Edge (`allowStatus=true`, 403 when there is no data) | `sensor.websites_visited` |
 | GET | `/v1/activityreport/searchactivity/{childId}` | Bing searches | `sensor.websites_visited` attributes |
-| GET | `/v1/DeviceLimits/{childId}/overrides` | Active device overrides | `switch.lock` |
+| GET | `/v4/devicelimits/{childId}/overrides` (`Plat-Info: ALL`) | Active device overrides; the platform name to send is its `appliesTo` (Windows can be listed as `Desktop`) | `switch.lock`, `lock_platform` / `unlock_platform` read-back |
+| POST | `/v4/devicelimits/{childId}/overrides` (`Plat-Info: ALL`) | Lock (`BlockUntil`) or unlock (`Cancel`) Windows/Mobile; body `{target, overrideType, validUntil, culture}` | `lock_platform`, `unlock_platform` |
 | PATCH | `/v4/devicelimits/schedules/{childId}` | ~~Set screen time schedule~~ | **Broken** (400 error) |
-| POST | `/v1/devicelimits/{childId}/overrides` | ~~Lock device~~ | **Broken** (Microsoft removed) |
 
-> The mobile API's schedule and device override endpoints no longer work reliably. All screen time writes now go through the web API.
+> The POST answers with the whole overrides document as it stands after the write, and `lock_platform` / `unlock_platform` are judged by that answer: a GET made right after a write can still list the previous state for a while. Microsoft sometimes answers HTTP 500 to a lock or unlock it applied anyway, and has failed a cancel without applying it; after an error, a timeout or an answer without the document, the overrides are read up to three times over a few seconds, and the action succeeds only when a read shows the platform locked (lock) or not locked (unlock); when no read succeeds it fails. A poll answer without the platform list keeps the last known locks. For two minutes after a write, its answer is shown for that platform instead of what the poll reads.
+
+> The mobile API's schedule endpoint no longer works reliably; screen time schedule writes go through the web API.
 
 ### Web API — `account.microsoft.com/family/api/`
 

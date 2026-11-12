@@ -50,6 +50,17 @@ that surface on Home Assistant, especially on Python 3.14:
    child with empty data for the failing endpoint and records the failure in
    ``Account.roster_errors`` for the coordinator to surface.
 
+9. ``Account._get_overrides`` reads the device-limits overrides from the old
+   ``/v1`` route, counts extra time as a lock and knows Windows only by the
+   name "Windows" (Microsoft now also lists it as "Desktop"). The replacement
+   reads the ``/v4`` route with ``Plat-Info: ALL`` that the Family Safety app
+   and current pyfamilysafety use, and decides what is locked with
+   ``mobile_overrides``. An answer without the platforms list keeps the last
+   known locks instead of reading as "nothing locked". With no locks known
+   yet (the first poll, or only such answers so far) that child gets no locks
+   and the read is listed in its ``Account.roster_errors``, so one child
+   whose answer lacks the list never fails the update for every child.
+
 This module patches those paths while keeping token values out of the log.
 """
 from __future__ import annotations
@@ -63,6 +74,7 @@ from typing import Any
 
 import aiohttp
 from pyfamilysafety import application as _pfs_application
+from pyfamilysafety import const as _pfs_const
 from pyfamilysafety.account import Account
 from pyfamilysafety.api import FamilySafetyAPI
 from pyfamilysafety.authenticator import Authenticator
@@ -77,6 +89,14 @@ from pyfamilysafety.exceptions import HttpException, Unauthorized
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .mobile_overrides import (
+    MOBILE_OVERRIDES_PATH,
+    MOBILE_OVERRIDES_PLAT_INFO,
+    is_overrides_document,
+    mobile_blocked_platforms,
+    mobile_lock_of,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 # Markers so we never double-patch.
@@ -90,6 +110,15 @@ _CONNECTION_STATE_PATCH_MARKER = "_hafs_connection_state_diagnostics_patch"
 _ROSTER_TOLERANCE_PATCH_MARKER = "_hafs_roster_tolerance_patch"
 _APP_PLATFORM_PATCH_MARKER = "_hafs_app_platform_patch"
 _APP_NAME_PATCH_MARKER = "_hafs_app_display_name_patch"
+_V4_OVERRIDES_PATCH_MARKER = "_hafs_v4_overrides_read_patch"
+
+# pyfamilysafety endpoint key for the /v4 overrides read.
+_V4_OVERRIDES_ENDPOINT = "hafs_get_override_device_restrictions_v4"
+#: Account attribute set while its blocked_platforms are a stand-in (no
+#: overrides document read yet), cleared by the first document.
+_OVERRIDES_UNREAD_ATTR = "_hafs_overrides_unread"
+#: Recorded in roster_errors when the overrides answer has no platform list.
+_NO_PLATFORM_LIST = "The device-limits overrides answer has no platform list"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
 # data continues to refresh normally during the backoff window.
@@ -750,6 +779,73 @@ def _patch_app_display_name() -> bool:
     return True
 
 
+def _patch_v4_overrides_read() -> bool:
+    """Read the device-limits overrides from the /v4 route (see 9. above)."""
+    current = Account._get_overrides
+    if getattr(current, _V4_OVERRIDES_PATCH_MARKER, False):
+        return False
+    _pfs_const.ENDPOINTS[_V4_OVERRIDES_ENDPOINT] = {
+        "url": "{BASE_URL}" + MOBILE_OVERRIDES_PATH.replace("{child_id}", "{USER_ID}"),
+        "method": "GET",
+    }
+
+    async def _patched_get_overrides(self: Account) -> None:
+        response = await self._api.send_request(
+            endpoint=_V4_OVERRIDES_ENDPOINT,
+            platform=MOBILE_OVERRIDES_PLAT_INFO,
+            USER_ID=self.user_id,
+        )
+        state = response.get("json") if isinstance(response, dict) else None
+        if not is_overrides_document(state):
+            # An HTML page, an empty body (HTTP 204) or any other answer
+            # without the platforms list says nothing about the locks: reading
+            # it as "no locks" would show a locked child as unlocked. Keep the
+            # last known state.
+            if (
+                self.blocked_platforms is None
+                or getattr(self, _OVERRIDES_UNREAD_ATTR, False) is True
+            ):
+                # None known yet: only this child goes without locks, listed
+                # as a roster error, instead of failing every child's update
+                # (Account.update gathers all requests).
+                if self.blocked_platforms is None:
+                    self.blocked_platforms = []
+                setattr(self, _OVERRIDES_UNREAD_ATTR, True)
+                errors = getattr(self, "roster_errors", None)
+                if isinstance(errors, dict):
+                    errors["overrides"] = _NO_PLATFORM_LIST
+                key = (str(self.user_id), "overrides")
+                _LOGGER.log(
+                    logging.DEBUG if key in _ROSTER_WARNED else logging.WARNING,
+                    "The device-limits overrides answer for %s has no platform "
+                    "list and no locks are known yet; showing none for now",
+                    self.user_id,
+                )
+                _ROSTER_WARNED.add(key)
+                return
+            _LOGGER.warning(
+                "The device-limits overrides answer for %s has no platform list; "
+                "keeping the last known locks",
+                self.user_id,
+            )
+            return
+        setattr(self, _OVERRIDES_UNREAD_ATTR, False)
+        self.blocked_platforms = mobile_blocked_platforms(state)
+        for entry in state.get("lockablePlatforms") or []:
+            if not isinstance(entry, dict):
+                continue
+            locked = mobile_lock_of(entry) is not None
+            for raw in entry.get("devices") or []:
+                device_id = str((raw or {}).get("deviceId") or "").replace("g:", "")
+                for device in self.devices or []:
+                    if getattr(device, "device_id", None) == device_id:
+                        device.update_blocked_status(locked)
+
+    setattr(_patched_get_overrides, _V4_OVERRIDES_PATCH_MARKER, True)
+    Account._get_overrides = _patched_get_overrides
+    return True
+
+
 def _patch_account_roster_tolerance() -> bool:
     """Keep loading a family member when Microsoft cannot resolve part of it.
 
@@ -856,6 +952,9 @@ def apply_patches(hass: HomeAssistant) -> None:
 
     if _patch_account_roster_tolerance():
         applied.append("per-member roster error tolerance")
+
+    if _patch_v4_overrides_read():
+        applied.append("v4 device-limits overrides read")
 
     if applied:
         _LOGGER.debug(
