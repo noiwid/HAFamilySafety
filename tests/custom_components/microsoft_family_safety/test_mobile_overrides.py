@@ -391,7 +391,6 @@ async def test_lock_read_back_without_the_document_is_not_read(coordinator, answ
 @pytest.mark.parametrize("answer", [None, "<html></html>", {}, {"error": "x"}, []])
 async def test_poll_without_the_document_keeps_the_last_locks(answer):
     from pyfamilysafety.account import Account
-    from pyfamilysafety.exceptions import HttpException
 
     compat._patch_v4_overrides_read()
     device = MagicMock(device_id="abc")
@@ -400,7 +399,65 @@ async def test_poll_without_the_document_keeps_the_last_locks(answer):
     await Account._get_overrides(account)
     assert account.blocked_platforms == ["Windows"]
     device.update_blocked_status.assert_not_called()
-    # Nothing known yet: fail the update rather than read "unlocked".
-    account.blocked_platforms = None
-    with pytest.raises(HttpException):
-        await Account._get_overrides(account)
+
+
+OTHER_CHILD = "6543210987654321"
+
+
+def _roster_account(user_id, answer):
+    """A pyfamilysafety Account whose overrides read answers ``answer``."""
+    from pyfamilysafety.account import Account
+
+    account = Account(MagicMock())
+    account.user_id = user_id
+    account.get_screentime_usage = AsyncMock()
+    account._get_devices = AsyncMock()
+    account._get_applications = AsyncMock()
+    account._get_account_balance = AsyncMock()
+    account._api.send_request = AsyncMock(return_value={"json": answer})
+    return account
+
+
+@pytest.mark.parametrize("answer", [None, {}])
+async def test_first_poll_without_the_document_affects_only_that_child(answer):
+    """A 204 (no body) or {} on the first poll: that child [] + a roster error."""
+    compat._patch_v4_overrides_read()
+    compat._patch_account_roster_tolerance()
+    later = _iso(dt_util.utcnow() + timedelta(hours=1))
+    locked = {
+        "lockablePlatforms": [
+            {
+                "appliesTo": "Windows",
+                "overrides": [{"overrideType": "BlockUntil", "validUntil": later}],
+                "devices": [],
+            }
+        ]
+    }
+    child = _roster_account(CHILD, locked)
+    other = _roster_account(OTHER_CHILD, answer)
+
+    await asyncio.gather(child.update(), other.update())
+
+    assert child.blocked_platforms == ["Windows"]
+    assert child.roster_errors == {}
+    assert other.blocked_platforms == []
+    assert set(other.roster_errors) == {"overrides"}
+
+    # The same answer on every later poll still never fails the update.
+    for _ in range(2):
+        await asyncio.gather(child.update(), other.update())
+        assert other.blocked_platforms == []
+        assert set(other.roster_errors) == {"overrides"}
+        assert child.roster_errors == {}
+
+    # Once the document comes, the child's locks are read and the error clears.
+    other._api.send_request.return_value = {"json": locked}
+    await other.update()
+    assert other.blocked_platforms == ["Windows"]
+    assert other.roster_errors == {}
+
+    # From then on a missing document keeps the last locks, as before.
+    other._api.send_request.return_value = {"json": answer}
+    await other.update()
+    assert other.blocked_platforms == ["Windows"]
+    assert other.roster_errors == {}

@@ -56,7 +56,10 @@ that surface on Home Assistant, especially on Python 3.14:
    reads the ``/v4`` route with ``Plat-Info: ALL`` that the Family Safety app
    and current pyfamilysafety use, and decides what is locked with
    ``mobile_overrides``. An answer without the platforms list keeps the last
-   known locks instead of reading as "nothing locked".
+   known locks instead of reading as "nothing locked". With no locks known
+   yet (the first poll, or only such answers so far) that child gets no locks
+   and the read is listed in its ``Account.roster_errors``, so one child
+   whose answer lacks the list never fails the update for every child.
 
 This module patches those paths while keeping token values out of the log.
 """
@@ -111,6 +114,11 @@ _V4_OVERRIDES_PATCH_MARKER = "_hafs_v4_overrides_read_patch"
 
 # pyfamilysafety endpoint key for the /v4 overrides read.
 _V4_OVERRIDES_ENDPOINT = "hafs_get_override_device_restrictions_v4"
+#: Account attribute set while its blocked_platforms are a stand-in (no
+#: overrides document read yet), cleared by the first document.
+_OVERRIDES_UNREAD_ATTR = "_hafs_overrides_unread"
+#: Recorded in roster_errors when the overrides answer has no platform list.
+_NO_PLATFORM_LIST = "The device-limits overrides answer has no platform list"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
 # data continues to refresh normally during the backoff window.
@@ -789,20 +797,39 @@ def _patch_v4_overrides_read() -> bool:
         )
         state = response.get("json") if isinstance(response, dict) else None
         if not is_overrides_document(state):
-            # An HTML page, an empty body or any other answer without the
-            # platforms list says nothing about the locks: reading it as "no
-            # locks" would show a locked child as unlocked. Keep the last
-            # known state; with none yet, fail this update.
-            if self.blocked_platforms is None:
-                raise HttpException(
-                    "The device-limits overrides answer has no platform list"
+            # An HTML page, an empty body (HTTP 204) or any other answer
+            # without the platforms list says nothing about the locks: reading
+            # it as "no locks" would show a locked child as unlocked. Keep the
+            # last known state.
+            if (
+                self.blocked_platforms is None
+                or getattr(self, _OVERRIDES_UNREAD_ATTR, False) is True
+            ):
+                # None known yet: only this child goes without locks, listed
+                # as a roster error, instead of failing every child's update
+                # (Account.update gathers all requests).
+                if self.blocked_platforms is None:
+                    self.blocked_platforms = []
+                setattr(self, _OVERRIDES_UNREAD_ATTR, True)
+                errors = getattr(self, "roster_errors", None)
+                if isinstance(errors, dict):
+                    errors["overrides"] = _NO_PLATFORM_LIST
+                key = (str(self.user_id), "overrides")
+                _LOGGER.log(
+                    logging.DEBUG if key in _ROSTER_WARNED else logging.WARNING,
+                    "The device-limits overrides answer for %s has no platform "
+                    "list and no locks are known yet; showing none for now",
+                    self.user_id,
                 )
+                _ROSTER_WARNED.add(key)
+                return
             _LOGGER.warning(
                 "The device-limits overrides answer for %s has no platform list; "
                 "keeping the last known locks",
                 self.user_id,
             )
             return
+        setattr(self, _OVERRIDES_UNREAD_ATTR, False)
         self.blocked_platforms = mobile_blocked_platforms(state)
         for entry in state.get("lockablePlatforms") or []:
             if not isinstance(entry, dict):
