@@ -493,3 +493,81 @@ async def test_token_refresh_failure_after_the_post_is_a_ha_error(coordinator):
     web.get_mobile_device_overrides = refresh_fails_after_the_first_read
     with pytest.raises(HomeAssistantError, match="could not be read back .*authentication failed"):
         await coordinator.async_lock_platform(CHILD, "Windows")
+
+
+STALE_ROSTER = (
+    'API request failed with status 404: {"code": "Family.UnableToFindTargetResource"}'
+)
+
+
+def _windows_locked() -> dict:
+    later = _iso(dt_util.utcnow() + timedelta(hours=1))
+    return {
+        "lockablePlatforms": [
+            {
+                "appliesTo": "Windows",
+                "overrides": [{"overrideType": "BlockUntil", "validUntil": later}],
+                "devices": [],
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize("answer", [None, {}])
+async def test_first_poll_without_the_document_leaves_the_locks_unknown(answer):
+    """The stand-in [] is marked unknown until a document is read, then never again."""
+    compat._patch_v4_overrides_read()
+    compat._patch_account_roster_tolerance()
+    child = _roster_account(CHILD, _windows_locked())
+    other = _roster_account(OTHER_CHILD, answer)
+
+    await asyncio.gather(child.update(), other.update())
+    assert compat.locks_unknown(other) is True
+    assert compat.locks_unknown(child) is False
+    await other.update()
+    assert compat.locks_unknown(other) is True
+
+    other._api.send_request.return_value = {"json": _windows_locked()}
+    await other.update()
+    assert compat.locks_unknown(other) is False
+
+    # A bare answer after a document keeps the last locks, and they stay known.
+    other._api.send_request.return_value = {"json": answer}
+    await other.update()
+    assert compat.locks_unknown(other) is False
+    assert other.blocked_platforms == ["Windows"]
+
+
+async def test_stale_roster_overrides_leave_the_locks_unknown():
+    """Microsoft cannot resolve the overrides before any were read: unknown, not []."""
+    from pyfamilysafety.exceptions import HttpException
+
+    compat._patch_v4_overrides_read()
+    compat._patch_account_roster_tolerance()
+    other = _roster_account(OTHER_CHILD, None)
+    other._api.send_request = AsyncMock(side_effect=HttpException(STALE_ROSTER))
+
+    await other.update()
+    assert other.blocked_platforms == []
+    assert compat.locks_unknown(other) is True
+    assert set(other.roster_errors) == {"overrides"}
+
+    other._api.send_request = AsyncMock(return_value={"json": _windows_locked()})
+    await other.update()
+    assert compat.locks_unknown(other) is False
+    assert other.blocked_platforms == ["Windows"]
+
+    # Once read, the same failure keeps the last locks, still known.
+    other._api.send_request = AsyncMock(side_effect=HttpException(STALE_ROSTER))
+    await other.update()
+    assert other.blocked_platforms == ["Windows"]
+    assert compat.locks_unknown(other) is False
+
+
+async def test_a_write_answered_with_the_document_makes_the_locks_known(coordinator):
+    account = coordinator._accounts[CHILD]
+    setattr(account, compat._OVERRIDES_UNREAD_ATTR, True)
+    assert compat.locks_unknown(account) is True
+    await coordinator.async_lock_platform(CHILD, "Windows")
+    assert compat.locks_unknown(account) is False
+    assert account.blocked_platforms == ["Windows"]

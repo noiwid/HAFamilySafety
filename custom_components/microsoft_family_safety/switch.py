@@ -257,6 +257,10 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         # here succeeded), say "unknown" rather than "unlocked".
         if self._platform == "Xbox" and not account.get("xbox_lock_known", False):
             return None
+        # Windows/Mobile: no overrides document read yet for this child (an
+        # answer without one, or a resource Microsoft could not resolve).
+        if not self.coordinator.platform_lock_known(self._account_id, self._platform):
+            return None
         blocked_platforms = account.get("blocked_platforms", [])
         return self._platform in blocked_platforms
 

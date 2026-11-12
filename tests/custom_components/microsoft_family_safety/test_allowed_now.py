@@ -366,3 +366,46 @@ async def test_minute_tick_writes_only_when_something_changed(hass, coordinator,
     coord.data["accounts"][CHILD]["blocked_platforms"] = ["Windows"]
     entity._async_minute_tick(dt_util.now())
     assert len(writes) == 2
+
+
+async def test_unread_windows_locks_are_unknown_not_allowed(hass, coordinator):
+    """No overrides document read yet: a lock may be in force, so not "allowed"."""
+    from custom_components.microsoft_family_safety.switch import (
+        FamilySafetyPlatformLockSwitch,
+    )
+
+    coord, entry = coordinator
+    coord.data["accounts"][CHILD]["lock_state_known"] = False
+    status = coord.platform_status(CHILD, "Windows", NOW)
+    assert (status["allowed"], status["remaining_minutes"], status["reason"]) == (
+        None, None, "unknown"
+    )
+    # What the schedule forbids stays forbidden.
+    assert coord.platform_status(CHILD, "Windows", _at(21, 0))["allowed"] is False
+    # The Xbox lock is not read from these overrides.
+    assert coord.platform_status(CHILD, "Xbox", NOW)["allowed"] is True
+    for platform in ("Windows", "Mobile"):
+        switch = FamilySafetyPlatformLockSwitch(coord, entry, CHILD, "Alex", platform)
+        assert switch.is_on is None
+        assert switch.extra_state_attributes["blocked"] is None
+
+    coord.data["accounts"][CHILD]["lock_state_known"] = True
+    assert coord.platform_status(CHILD, "Windows", NOW)["allowed"] is True
+    switch = FamilySafetyPlatformLockSwitch(coord, entry, CHILD, "Alex", "Windows")
+    assert switch.is_on is False
+
+
+async def test_polled_data_says_whether_the_locks_were_read(coordinator):
+    from types import SimpleNamespace
+
+    from custom_components.microsoft_family_safety import _pyfamilysafety_compat as compat
+
+    coord, _ = coordinator
+    account = SimpleNamespace(
+        user_id=CHILD, first_name="Alex", surname="Example", profile_picture=None,
+        today_screentime_usage=0, average_screentime_usage=0, account_balance=0,
+        account_currency="", blocked_platforms=[], applications=[],
+    )
+    assert coord._transform_account_data(account)[1]["lock_state_known"] is True
+    setattr(account, compat._OVERRIDES_UNREAD_ATTR, True)
+    assert coord._transform_account_data(account)[1]["lock_state_known"] is False
