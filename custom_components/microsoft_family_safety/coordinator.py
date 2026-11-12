@@ -1843,7 +1843,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Microsoft Family Safety authentication requires renewal (%s)", reason
             )
         self._reauth_requested = True
-        self._reauth_reason = reason
+        # A reauth the user asked for stays "manual": a later automatic reason
+        # would otherwise let _async_withdraw_unneeded_reauth close it.
+        if self._reauth_reason != "manual":
+            self._reauth_reason = reason
         self.entry.async_start_reauth(self.hass, data={"reason": reason})
 
     async def async_request_reauth(self) -> None:

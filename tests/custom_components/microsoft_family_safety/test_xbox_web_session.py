@@ -449,3 +449,24 @@ async def test_reauth_kept_when_asked_for_or_still_needed(make_coordinator, reas
     coord._reauth_reason = reason
     await coord._async_withdraw_unneeded_reauth()
     assert (coord._reauth_requested is False) is withdrawn
+
+
+async def test_manual_reauth_survives_a_later_automatic_reason(make_coordinator, hass):
+    # The user asks for a sign-in, a poll then raises an automatic reason while
+    # the web session is still needed, and the Xbox link becomes usable later.
+    coord = make_coordinator()
+    coord._request_reauth = FamilySafetyDataUpdateCoordinator._request_reauth.__get__(coord)
+    coord.entry.async_start_reauth = MagicMock()
+    coord._request_reauth("manual")
+    coord._request_reauth("family_context_auth_required")
+    assert coord._reauth_reason == "manual"
+    _link_xbox(coord)
+    coord.web_api = SimpleNamespace(mobile_schedule_ok=True)
+    abort = MagicMock()
+    hass.config_entries.flow.async_progress_by_handler = MagicMock(
+        return_value=[{"flow_id": "f1", "step_id": "reauth_full_confirm"}]
+    )
+    hass.config_entries.flow.async_abort = abort
+    await coord._async_withdraw_unneeded_reauth()
+    assert coord._reauth_requested is True
+    abort.assert_not_called()
