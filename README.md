@@ -753,6 +753,10 @@ Microsoft's mobile API sometimes answers `Family.UnableToFindTargetResource` / `
 - If the session is dead (redirect to a marketing page), the simplest fix since 2.0.8 is to reauthenticate the entry from Home Assistant: it switches the entry to the native sign-in (answer Yes to "Stay signed in?"). Re-authenticating via the noVNC interface still works if you want to stay on the add-on.
 - Add-on writes take ~20-30 s each because the browser must reach the family dashboard first.
 
+### Diagnostics
+
+**Settings > Devices & services > Microsoft Family Safety > ⋮ > Download diagnostics** gives the entry options, the connection state (as on the connection sensor) and the last polled data, each app list reduced to a count. Tokens, cookies, names, pictures, device names, e-mail addresses, the account balance, the website lists and the websites visited are removed, and account, device and Xbox user ids are replaced by `account_1`, `device_1`, `xbox_user_1` (the parent's ids by `parent`, `xbox_parent`). Attach it to an issue together with a debug log.
+
 ### Debug logging
 
 ```yaml
