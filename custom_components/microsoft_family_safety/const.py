@@ -40,6 +40,11 @@ CONF_XBOX_LINK: Final = "xbox_link"
 # everybody, as before.
 CONF_ALLOWED_USERS: Final = "allowed_users"
 DEFAULT_XBOX_FEATURES: Final = True
+# Strict mode: a platform lock placed by lock_platform that Microsoft reports
+# as cancelled while it should still hold is placed again.
+CONF_STRICT_MODE: Final = "strict_mode"
+DEFAULT_STRICT_MODE: Final = False
+EVENT_LOCK_REASSERTED: Final = f"{DOMAIN}_lock_reasserted"
 
 # Days of week, in Microsoft API order (index 0 = Sunday)
 DAY_KEYS: Final = [

@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from custom_components.microsoft_family_safety.const import (
@@ -261,15 +262,16 @@ async def test_xbox_lock_through_xapprove(coordinator):
     coordinator.web_api.set_platform_time_override.assert_not_called()
 
 
-async def test_xbox_unlock_falls_back_to_web_when_block_remains(coordinator):
+async def test_xbox_unlock_fails_without_the_web_when_block_remains(coordinator):
     coordinator.xbox_family.async_create_override.return_value = {
         "overrides": [{"overrideType": 2, "validUntil": "2099-01-01T00:00:00Z"}]
     }
     coordinator._has_web_credentials = True
     coordinator.web_api.has_web_cookies = True
     coordinator.web_api.set_platform_time_override = AsyncMock()
-    await coordinator.async_unlock_platform(CHILD, "Xbox")
-    assert coordinator.web_api.set_platform_time_override.await_args.args[2] == "cancel"
+    with pytest.raises(HomeAssistantError, match="still reports a block"):
+        await coordinator.async_unlock_platform(CHILD, "Xbox")
+    coordinator.web_api.set_platform_time_override.assert_not_called()
 
 
 @pytest.mark.parametrize(

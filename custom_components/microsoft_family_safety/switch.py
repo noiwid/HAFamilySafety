@@ -277,9 +277,12 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
         return {
-            ATTR_USER_ID: self._account_id,
+            ATTR_USER_ID: str(self._account_id),
             ATTR_PLATFORM: self._platform,
             ATTR_BLOCKED: self.is_on,
+            # Who decides the lock now (ours / parent / none) and what is in
+            # force: override, override_until and allow_until (local ISO).
+            **self.coordinator.platform_hold_state(self._account_id, self._platform),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -289,10 +292,14 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         await self.coordinator.async_lock_platform(self._account_id, self._platform)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Unlock the platform (web override for Windows/Xbox, else mobile API)."""
+        """Unlock the platform: cancel whatever lock is in force (no restore).
+
+        The unlock_platform action puts back a lock that was in force before
+        lock_platform; the switch does not, or it could not stay off.
+        """
         await async_check_entity_action(self)
         _LOGGER.debug("Unlocking platform %s for %s", self._platform, self._account_name)
-        await self.coordinator.async_unlock_platform(self._account_id, self._platform)
+        await self.coordinator.async_release_platform(self._account_id, self._platform)
 
 
 class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
