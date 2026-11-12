@@ -594,12 +594,12 @@ class FamilySafetyWebFilterSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await async_check_entity_action(self)
-        _LOGGER.info("Turning the web filter on for %s", self._account_name)
+        _LOGGER.debug("Turning the web filter on for %s", self._account_name)
         await self._async_set(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await async_check_entity_action(self)
-        _LOGGER.info("Turning the web filter off for %s", self._account_name)
+        _LOGGER.debug("Turning the web filter off for %s", self._account_name)
         await self._async_set(False)
 
 
