@@ -89,6 +89,7 @@ _WEB_PROBE_PATCH_MARKER = "_hafs_web_probe_backoff_patch"
 _CONNECTION_STATE_PATCH_MARKER = "_hafs_connection_state_diagnostics_patch"
 _ROSTER_TOLERANCE_PATCH_MARKER = "_hafs_roster_tolerance_patch"
 _APP_PLATFORM_PATCH_MARKER = "_hafs_app_platform_patch"
+_APP_NAME_PATCH_MARKER = "_hafs_app_display_name_patch"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
 # data continues to refresh normally during the backoff window.
@@ -700,6 +701,55 @@ def _patch_app_platform() -> bool:
     return True
 
 
+def _app_block_body(app: Any, block_state: str) -> dict[str, Any]:
+    """pyfamilysafety's block/unblock body, with the app's name kept."""
+    return {
+        "appId": app.app_id,
+        "appTimeEnforcementPolicy": "WeekendAndWeekday",
+        "blockState": block_state,
+        "blocked": False,
+        "displayName": app.name or app.app_id,
+        "enabled": True,
+    }
+
+
+def _patch_app_display_name() -> bool:
+    """Keep an app's name when blocking or unblocking it.
+
+    pyfamilysafety 1.1.2's ``Application.block_app`` and ``unblock_app`` send
+    the app id as ``displayName``. Microsoft stores it, so every block or
+    unblock renamed the app to its id (``x:xboxplt:...``) in the activity
+    report and in this integration's Applications sensor. The body is
+    otherwise unchanged.
+    """
+    application = _pfs_application.Application
+    if getattr(application.block_app, _APP_NAME_PATCH_MARKER, False):
+        return False
+
+    async def _send(app: Any, block_state: str) -> None:
+        await app._api.send_request(
+            endpoint="set_app_policy",
+            body=_app_block_body(app, block_state),
+            USER_ID=app._user_id,
+            APP_ID=app.app_id,
+            platform=_pfs_application.get_platform(app.app_id),
+        )
+
+    async def _patched_block_app(self) -> None:
+        await _send(self, "BlockedAlways")
+        self.blocked = True
+
+    async def _patched_unblock_app(self) -> None:
+        await _send(self, "NotBlocked")
+        self.blocked = False
+
+    for func in (_patched_block_app, _patched_unblock_app):
+        setattr(func, _APP_NAME_PATCH_MARKER, True)
+    application.block_app = _patched_block_app
+    application.unblock_app = _patched_unblock_app
+    return True
+
+
 def _patch_account_roster_tolerance() -> bool:
     """Keep loading a family member when Microsoft cannot resolve part of it.
 
@@ -800,6 +850,9 @@ def apply_patches(hass: HomeAssistant) -> None:
 
     if _patch_app_platform():
         applied.append("Plat-Info for win32 desktop apps")
+
+    if _patch_app_display_name():
+        applied.append("app name kept on block/unblock")
 
     if _patch_account_roster_tolerance():
         applied.append("per-member roster error tolerance")
