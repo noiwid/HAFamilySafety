@@ -1,7 +1,7 @@
 """The Microsoft Family Safety integration."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 
 import voluptuous as vol
@@ -17,6 +17,7 @@ from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
@@ -47,6 +48,8 @@ from .const import (
     SERVICE_GET_SITES,
     SERVICE_PAUSE_APP,
     SERVICE_RESUME_APP,
+    SERVICE_ADD_TIME_BONUS,
+    SERVICE_CANCEL_TIME_BONUS,
     CONF_ALLOWED_USERS,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
@@ -88,6 +91,18 @@ SERVICE_LOCK_PLATFORM_SCHEMA = child_schema({
 
 SERVICE_UNLOCK_PLATFORM_SCHEMA = child_schema({
     vol.Required("platform"): _platform("Windows", "Xbox", "Mobile"),
+})
+
+SERVICE_ADD_TIME_BONUS_SCHEMA = child_schema({
+    # Only the Xbox has a confirmed request for extra time so far.
+    vol.Optional("platform", default="Xbox"): _platform("Xbox"),
+    vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+    vol.Optional("until"): cv.datetime,
+    vol.Optional("replace_lock", default=False): cv.boolean,
+})
+
+SERVICE_CANCEL_TIME_BONUS_SCHEMA = child_schema({
+    vol.Optional("platform", default="Xbox"): _platform("Xbox"),
 })
 
 SERVICE_APPROVE_REQUEST_SCHEMA = vol.Schema({
@@ -172,6 +187,8 @@ _RESPONSE_SERVICES = frozenset({SERVICE_GET_SITES})
 # Answer {"done": [...], "failed": [...]} when asked for a response.
 _OPTIONAL_RESPONSE_SERVICES = frozenset({
     SERVICE_BLOCK_WEBSITE, SERVICE_ALLOW_WEBSITE, SERVICE_REMOVE_WEBSITE,
+    # what the extra time did (#78)
+    SERVICE_ADD_TIME_BONUS, SERVICE_CANCEL_TIME_BONUS,
 })
 
 _APP_IDS = vol.All(cv.ensure_list, [cv.string], vol.Length(min=1))
@@ -259,6 +276,24 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+
+def _bonus_until(data: dict) -> datetime:
+    """When add_time_bonus's extra time ends: ``until``, or ``minutes`` from now."""
+    if (data.get("until") is None) == (data.get("minutes") is None):
+        raise ServiceValidationError("Give either minutes or until.")
+    now = dt_util.now()
+    if data.get("minutes") is not None:
+        return now + timedelta(minutes=data["minutes"])
+    until = data["until"]
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=dt_util.get_default_time_zone())
+    if until <= now:
+        raise ServiceValidationError(f"until ({until.isoformat()}) is not in the future.")
+    if until > now + timedelta(hours=24):
+        raise ServiceValidationError("Extra time can be given for 24 hours at most.")
+    return until
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register integration services.
 
@@ -282,6 +317,10 @@ def _register_services(hass: HomeAssistant) -> None:
          )),
         (SERVICE_UNLOCK_PLATFORM, SERVICE_UNLOCK_PLATFORM_SCHEMA, "async_unlock_platform",
          lambda d: (d["account_id"], d["platform"])),
+        (SERVICE_ADD_TIME_BONUS, SERVICE_ADD_TIME_BONUS_SCHEMA, "async_add_time_bonus",
+         lambda d: (d["account_id"], d["platform"], _bonus_until(d), d["replace_lock"])),
+        (SERVICE_CANCEL_TIME_BONUS, SERVICE_CANCEL_TIME_BONUS_SCHEMA,
+         "async_cancel_time_bonus", lambda d: (d["account_id"], d["platform"])),
         (SERVICE_APPROVE_REQUEST, SERVICE_APPROVE_REQUEST_SCHEMA, "async_approve_request",
          lambda d: (d["request_id"], d.get("extension_minutes", 60) * 60)),
         (SERVICE_DENY_REQUEST, SERVICE_DENY_REQUEST_SCHEMA, "async_deny_request",

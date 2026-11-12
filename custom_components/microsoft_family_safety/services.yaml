@@ -112,6 +112,77 @@ unlock_platform:
             - "Xbox"
             - "Mobile"
 
+add_time_bonus:
+  name: Add Xbox Extra Time
+  description: "Give a child extra time on the Xbox, for some minutes or until a time, through the Xbox Family Settings service. Needs the Xbox Family Settings sign-in linked. Refused while the Xbox is locked, unless Replace lock is on. Fails when Microsoft does not confirm the extra time, or when the Xbox stays locked. Can answer with added, until and replaced_lock."
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
+      selector:
+        text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
+    platform:
+      name: Platform
+      description: Only Xbox for now (the default).
+      default: "Xbox"
+      selector:
+        select:
+          options:
+            - "Xbox"
+    minutes:
+      name: Minutes
+      description: Extra time from now, 1 to 1440 minutes. Give this or until.
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minutes
+    until:
+      name: Until
+      description: When the extra time ends, instead of minutes (at most 24 hours from now).
+      selector:
+        datetime:
+    replace_lock:
+      name: Replace lock
+      description: "Microsoft keeps one Xbox override, so extra time replaces a lock. Off (default): refused while the Xbox is locked, by this integration or by a parent. On: the lock is replaced by the extra time."
+      default: false
+      selector:
+        boolean:
+
+cancel_time_bonus:
+  name: Cancel Xbox Extra Time
+  description: "Cancel the extra time in force on a child's Xbox. Only extra time is cancelled: fails while the Xbox is locked (a lock is never lifted), and does nothing when no extra time is in force. Can answer with cancelled and reason or lock_in_force."
+  fields:
+    account_id:
+      name: Account ID
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
+      selector:
+        text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
+    platform:
+      name: Platform
+      description: Only Xbox for now (the default).
+      default: "Xbox"
+      selector:
+        select:
+          options:
+            - "Xbox"
+
 approve_request:
   name: Approve Pending Request
   description: Approve a pending screen time extension request.

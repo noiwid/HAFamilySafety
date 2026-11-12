@@ -375,7 +375,7 @@ One start/end pair per day of the week, editable from the UI with optimistic upd
 
 ## Services
 
-The integration exposes **21 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
+The integration exposes **23 services**, split between the pyfamilysafety library, the web API and the Xbox Family Settings service, plus one to start the sign-in flow on demand.
 
 Every service that acts on one child takes the child either as `account_id` (the Microsoft user ID, shown in the `user_id` attribute of the child's entities) or as `entity_id`: any Microsoft Family Safety entity of that child or of one of its devices. `device_id` works the same way: the child's Microsoft Family Safety device or one of its physical devices. The account is looked up from the entity or device, so automations need no hard-coded ID. Lists are accepted as long as everything in them belongs to the same child. When `account_id` is given, it wins.
 
@@ -419,6 +419,43 @@ service: microsoft_family_safety.unlock_platform
 data:
   account_id: "1234567890123456"
   platform: "Windows"
+```
+
+#### Xbox extra time
+
+`add_time_bonus` gives a child extra time on the Xbox, for some `minutes` (1 – 1440) or `until` a time (at most 24 hours ahead); `cancel_time_bonus` takes it back. Both go through the Xbox Family Settings service (the same "add time" as the Xbox Family Settings app), so they need **Xbox** among the monitored platforms and the Xbox Family Settings sign-in linked; otherwise they fail with an error saying so. They never use the web session.
+
+- Microsoft keeps **one** Xbox override, so extra time replaces a lock. While the Xbox is locked (by `lock_platform` or by a parent in the app), `add_time_bonus` is refused unless you pass `replace_lock: true`.
+- The extra time is believed only when Microsoft's answer lists it ending when asked; otherwise the action fails. If a lock is still listed afterwards, the action fails and the lock stays.
+- While extra time runs, the Xbox lock switch reads off (Microsoft reports `allowUntil`).
+- `cancel_time_bonus` only ever cancels extra time. While the Xbox is locked it fails without sending anything (the cancel would lift the lock too); with no extra time in force it does nothing.
+- A lock that extra time replaced (`replace_lock: true`) does not come back: after `cancel_time_bonus`, or when the extra time ends, the Xbox follows its schedule again. Lock it again with `lock_platform` if needed.
+- Both can answer with what they did (`response_variable`): `add_time_bonus` with `{added, until, replaced_lock}`, `cancel_time_bonus` with `{cancelled: true, lock_in_force}` or `{cancelled: false, reason: "no_extra_time"}`.
+- Windows has no confirmed request for extra time yet, so only `platform: "Xbox"` (the default) is accepted.
+
+```yaml
+# 30 minutes of extra time on the Xbox
+service: microsoft_family_safety.add_time_bonus
+data:
+  account_id: "1234567890123456"
+  minutes: 30
+```
+
+```yaml
+# One more hour even though the Xbox is locked: the lock is replaced
+service: microsoft_family_safety.add_time_bonus
+data:
+  account_id: "1234567890123456"
+  minutes: 60
+  replace_lock: true
+response_variable: extra_time
+```
+
+```yaml
+# End the Xbox extra time early (the child as one of its entities)
+service: microsoft_family_safety.cancel_time_bonus
+data:
+  entity_id: switch.firstname_xbox_lock
 ```
 
 ### App Management
