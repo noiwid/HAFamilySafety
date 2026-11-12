@@ -1019,7 +1019,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except (FamilySafetyWebAPIError, asyncio.TimeoutError) as err:
             raise HomeAssistantError(
-                f"Could not read the {platform} overrides, so nothing was sent: {err}"
+                f"Could not read the {platform} overrides, so nothing was sent: "
+                f"{_describe_error(err)}"
             ) from err
         if entry is None:
             raise HomeAssistantError(

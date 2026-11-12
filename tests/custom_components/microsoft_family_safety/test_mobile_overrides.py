@@ -165,6 +165,14 @@ async def test_platform_not_listed_sends_nothing(coordinator):
     assert web.posts == []
 
 
+async def test_target_read_timeout_gives_a_reason_and_sends_nothing(coordinator):
+    web = coordinator.web_api
+    web.get_mobile_device_overrides = AsyncMock(side_effect=asyncio.TimeoutError())
+    with pytest.raises(HomeAssistantError, match="nothing was sent: no answer in time"):
+        await coordinator.async_lock_platform(CHILD, "Windows")
+    assert web.posts == []
+
+
 async def test_failed_read_back_after_a_500_raises(coordinator):
     web = coordinator.web_api
     web.post_error = FamilySafetyWebAPIError(ERROR_500)
