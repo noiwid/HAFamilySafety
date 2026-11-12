@@ -4,7 +4,8 @@
  *
  *   type: custom:parental-screen-time-card        # today: total, per source, limit, locks, hourly chart
  *   type: custom:parental-screen-time-history-card  # the last days, one bar per day
- *   devices: [<device id>, ...]      # phones, tablets, PCs of Family Link or Family Safety ({ device, name } to rename one)
+ *   devices: [<device id>, ...]      # phones, tablets, PCs of Family Link or Family Safety ({ device, name } to rename one,
+ *                                    #   { entity: switch.kids_phone } to name it by one of its entities)
  *   entities: [sensor.switch_used_screen_time]      # any other time sensor in minutes
  *   sources:                         # optional, same with a name and a limit entity
  *     - { entity: sensor.console_time, name: Console, limit: number.console_limit }
@@ -24,12 +25,16 @@ const STR = {
 		today: 'Screen time today', history: 'Last {n} days', left: 'left', no_limit: ' · no limit', locked: 'Locked', unlocked: 'Unlocked',
 		loading: 'Loading…', none: 'Choose at least one device or time sensor.', missing: 'Not found: ',
 		f_devices: 'Devices (Family Link, Family Safety)', f_entities: 'Other time sensors (minutes)', f_title: 'Title', f_language: 'Language',
+		next_tr: (s) => s,
 		f_chart: 'Hourly chart', f_days: 'Days', f_history: 'Daily history below (second card)',
 	},
 	fr: {
 		today: "Temps d'écran aujourd'hui", history: '{n} derniers jours', left: 'reste', no_limit: ' · sans limite', locked: 'Verrouillé', unlocked: 'Libre',
 		loading: 'Chargement…', none: "Choisissez au moins un appareil ou un capteur de temps.", missing: 'Introuvable : ',
 		f_devices: 'Appareils (Family Link, Family Safety)', f_entities: 'Autres capteurs de temps (minutes)', f_title: 'Titre', f_language: 'Langue',
+		next_tr: (s) => s.replace('Daily limit soon reached', 'Limite du jour bientôt atteinte').replace('No restrictions', 'Aucune restriction')
+			.replace('School time', 'École').replace('Bedtime', 'Coucher').replace('(ends ', '(fin ').replace(/\bat (\d)/, 'à $1').replace('tomorrow', 'demain')
+			.replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/, (d) => ({ Mon: 'lun.', Tue: 'mar.', Wed: 'mer.', Thu: 'jeu.', Fri: 'ven.', Sat: 'sam.', Sun: 'dim.' })[d]),
 		f_chart: 'Graphique par heure', f_days: 'Jours', f_history: 'Historique par jour en dessous (seconde carte)',
 	},
 };
@@ -75,7 +80,7 @@ class Base extends HTMLElement {
 		this._resolving = true;
 		const sources = [];
 		for (const item of devices) {
-			const device = typeof item === 'string' ? item : item.device;
+			const device = typeof item === 'string' ? item : item.device || ((hass.entities || {})[item.entity] || {}).device_id;
 			const reg = Object.values(hass.entities || {}).find((e) => e.device_id === device && PLATFORMS.includes(e.platform));
 			const dev = hass.devices && hass.devices[device];
 			let found = null;
@@ -179,7 +184,7 @@ class ScreenTimeCard extends Base {
 				<div class="big">${hm(total)}<span>${isNaN(limit) ? t('no_limit') : ' / ' + hm(limit)}</span></div>
 				<div class="per">${live.map((s) => `${esc(s.name)}: ${hm(this._num(s.used) || 0)}`).join(' · ')}</div>
 				<div class="bar"><div style="width:${pct}%;background:${col}"></div></div>
-				${next ? `<div class="next">${esc(next.state)}</div>` : ''}
+				${next ? `<div class="next">${esc(t('next_tr')(next.state))}</div>` : ''}
 				${missing.length ? `<div class="msg err">${t('missing')}${esc(missing.join(', '))}</div>` : ''}
 				${tiles ? `<div class="tiles">${tiles}</div>` : ''}
 			</div>
