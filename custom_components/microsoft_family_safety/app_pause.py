@@ -31,7 +31,10 @@ limit. So:
   and the saved state is forgotten. A failed read keeps it for later.
 * The block switch and the block_app / unblock_app services go through the
   same paths for a paused app (``async_block`` / ``async_unblock``), so
-  turning the switch off puts the limit back instead of wiping it.
+  turning the switch off puts the limit back instead of wiping it. Blocking
+  an app whose pause is no longer in force (released, or changed by a
+  parent) forgets the pause and blocks it as usual, so a later resume_app
+  does not undo that block.
 * Saved states are kept until resumed or until the config entry is removed,
   not pruned when a child is missing from one roster read.
 
@@ -446,15 +449,31 @@ class AppPauser:
     ) -> bool:
         """Block a paused app through the pause, so its limit stays stored.
 
-        block_app's body has no day keys and would wipe it. True when done
-        (still blocked by the pause, or blocked again after a release).
-        False when the app is not paused, or a parent changed it since: the
-        caller blocks it as usual.
+        block_app's body has no day keys and would wipe it. True when the
+        pause still blocks it: nothing to write. False when the app is not
+        paused (also when resumed meanwhile), or its pause is no longer in
+        force (released or changed by a parent): the saved state is
+        forgotten, so a later resume_app cannot undo this block, and the
+        caller blocks it as usual. Raises HomeAssistantError, keeping the
+        saved state, when it cannot be read.
         """
+        account_id = str(account_id)
         if app_id not in self.saved(account_id):
             return False
-        result = await self.async_pause(coordinator, account_id, [app_id])
-        return bool(result["paused"])
+        async with self._lock:
+            saved = self._data.setdefault(account_id, {})
+            record = saved.get(app_id)
+            if record is None:
+                return False
+            now = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
+            if now is None:
+                raise HomeAssistantError(f"block_app failed: {app_id}: {UNREADABLE}")
+            if _parent_change(record, now) is None:
+                return True
+            saved.pop(app_id, None)
+            await self._async_save()
+        coordinator.async_update_listeners()
+        return False
 
     async def async_unblock(
         self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,

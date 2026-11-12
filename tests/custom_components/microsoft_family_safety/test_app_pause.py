@@ -569,16 +569,53 @@ async def test_blocking_a_paused_app_keeps_its_limit(hass, rig):
         DOMAIN, "block_app", {"account_id": CHILD, "app_id": "x:racing"}, blocking=True
     )
     assert len(api.writes) == 1 and plain() == []
-    # Released in the app, then blocked again: the saved limit stays stored.
-    api.entries["x:racing"]["blockState"] = "NotBlocked"
-    api.entries["x:racing"]["policy"]["blockState"] = "NotBlocked"
-    await switch.async_turn_on()
-    assert api.entries["x:racing"]["policy"]["blockState"] == "BlockedAlways"
-    assert api.entries["x:racing"]["policy"]["monday"] == LIMIT_DAY
-    assert plain() == []
+    assert "x:racing" in coord.app_pauser.saved(CHILD)
     result = await coord.async_resume_app(CHILD)
     assert result["resumed"] == ["x:racing"]
     assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+
+
+async def test_blocking_an_app_whose_pause_was_released_is_the_plain_block(hass, rig):
+    coord, apps, api, entry = rig
+    plain = _plain_calls(apps)
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    # Released in the app, then blocked deliberately by a parent.
+    api.entries["x:racing"]["blockState"] = "NotBlocked"
+    api.entries["x:racing"]["policy"]["blockState"] = "NotBlocked"
+    switch = _app_block_switch(hass, coord, entry, "x:racing", "Racing")
+    await switch.async_turn_on()
+    assert plain() == [("x:racing", "block_app")]
+    assert len(api.writes) == 1
+    # No longer part of the pause: resume_app does not undo that block.
+    assert coord.app_pauser.saved(CHILD) == {}
+    result = await coord.async_resume_app(CHILD)
+    assert result["resumed"] == [] and result["released"] == []
+    assert len(api.writes) == 1
+
+
+async def test_blocking_a_paused_app_resumed_meanwhile_is_the_plain_block(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    _slow_reads(api)
+    result, _ = await asyncio.gather(
+        coord.async_resume_app(CHILD),
+        coord.async_block_app(CHILD, "x:racing"),
+    )
+    assert result["resumed"] == ["x:racing"]
+    assert plain() == [("x:racing", "block_app")]
+    assert coord.app_pauser.saved(CHILD) == {}
+
+
+async def test_blocking_a_paused_app_that_cannot_be_read_fails_and_keeps_it(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    api.read_error = _error(503)
+    with pytest.raises(HomeAssistantError, match="policy_unreadable"):
+        await coord.async_block_app(CHILD, "x:racing")
+    assert "x:racing" in coord.app_pauser.saved(CHILD)
+    assert plain() == []
 
 
 async def test_blocking_an_app_never_paused_is_the_plain_block(hass, rig):
