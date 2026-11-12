@@ -4,10 +4,17 @@ block_app:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     app_id:
       name: Application ID
       description: The application ID to block (e.g., "appx:Microsoft.WindowsStore").
@@ -21,10 +28,17 @@ unblock_app:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     app_id:
       name: Application ID
       description: The application ID to unblock.
@@ -38,10 +52,17 @@ lock_platform:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     platform:
       name: Platform
       description: The platform to lock.
@@ -69,10 +90,17 @@ unlock_platform:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     platform:
       name: Platform
       description: The platform to unlock.
@@ -122,10 +150,17 @@ set_screentime_limit:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     day_of_week:
       name: Day of Week
       description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday."
@@ -162,10 +197,17 @@ set_screentime_intervals:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     day_of_week:
       name: Day of Week
       description: "Day of week: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday."
@@ -218,10 +260,17 @@ set_app_time_limit:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     app_id:
       name: Application ID
       description: The application ID (e.g., "x:windowsplt:61f08e27aff06317").
@@ -283,10 +332,17 @@ remove_app_time_limit:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     app_id:
       name: Application ID
       description: The application ID.
@@ -316,10 +372,17 @@ block_website:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     website:
       name: Website
       description: The domain to block (e.g., "example.com").
@@ -333,10 +396,17 @@ allow_website:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     website:
       name: Website
       description: The domain to allow (e.g., "example.com").
@@ -350,10 +420,17 @@ remove_website:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     website:
       name: Website
       description: The domain to remove.
@@ -367,10 +444,17 @@ toggle_web_filter:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     enabled:
       name: Enabled
       description: True to enable web filtering, false to disable.
@@ -384,10 +468,17 @@ set_age_rating:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     age:
       name: Age Rating
       description: "Age limit (3-20, or 21 for no restriction)."
@@ -404,10 +495,17 @@ set_acquisition_policy:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
     require_approval:
       name: Require Approval
       description: True = require approval for purchases, false = unrestricted.
@@ -421,10 +519,17 @@ lock_account:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account to lock.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
 
 unlock_account:
   name: Unlock Account
@@ -432,10 +537,17 @@ unlock_account:
   fields:
     account_id:
       name: Account ID
-      description: The user ID of the child account to unlock.
-      required: true
+      description: The user ID of the child account. Give this or an entity of the child.
+      required: false
       selector:
         text:
+    entity_id:
+      name: Child entity
+      description: Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID.
+      required: false
+      selector:
+        entity:
+          integration: microsoft_family_safety
 
 request_reauth:
   name: Request Reauthentication
