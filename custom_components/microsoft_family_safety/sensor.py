@@ -1,7 +1,6 @@
 """Sensor platform for Microsoft Family Safety."""
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 from typing import Any
 
@@ -17,6 +16,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_ACCOUNT_BALANCE,
@@ -267,8 +267,7 @@ class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
         return {
             ATTR_USER_ID: account_data.get(ATTR_USER_ID),
             ATTR_AVERAGE_SCREENTIME: account_data.get("average_screentime_usage", 0),
-            "state_class": "total",
-            "date": account_data.get("screen_time_date") or datetime.now().date().isoformat(),
+            "date": account_data.get("screen_time_date") or dt_util.now().date().isoformat(),
             "raw_microsoft_minutes": account_data.get("raw_today_screentime_usage"),
             "raw_microsoft_ms": account_data.get("raw_today_screentime_ms"),
             "last_api_poll": account_data.get("screen_time_polled_at"),
@@ -440,8 +439,7 @@ class FamilySafetyDeviceScreenTimeSensor(FamilySafetyDeviceSensor):
         return {
             ATTR_DEVICE_ID: device_data.get(ATTR_DEVICE_ID),
             ATTR_DEVICE_NAME: device_data.get(ATTR_DEVICE_NAME),
-            "state_class": "total",
-            "date": datetime.now().date().isoformat(),
+            "date": dt_util.now().date().isoformat(),
             **_format_duration_attributes(total_seconds),
         }
 
