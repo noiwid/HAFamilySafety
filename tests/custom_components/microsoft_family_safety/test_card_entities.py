@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from custom_components.microsoft_family_safety import card
 
 ENTRY = "entry1"
@@ -93,11 +95,15 @@ def test_an_xbox_gets_the_xbox_roles():
     assert result["child"]["daily_limit_7"] == "number.alex_xbox_sunday_limit"
 
 
-def test_the_child_device_gets_the_account_total():
-    result = _cards("button.alex_approve")
-    assert result["device"]["daily_screen_time"] == "sensor.alex_screen_time"
-    assert result["device"]["lock"] == "switch.alex_windows_lock"
-    assert result["child"]["daily_limit_1"] == "number.alex_monday_limit"
+def test_the_child_device_is_refused_with_a_reason():
+    # its time is the total of the PC and the Xbox: taking it with them would count it twice
+    with pytest.raises(card.ChildAccountDevice):
+        _cards("button.alex_approve")
+    connection = MagicMock()
+    with patch.object(card.er, "async_get", return_value=_registry()):
+        card.ws_card_entities(_hass(), connection, {"id": 8, "entity_id": "sensor.alex_screen_time"})
+    assert connection.send_error.call_args.args == (8, "not_found", card.CHILD_ACCOUNT_MESSAGE)
+    connection.send_result.assert_not_called()
 
 
 def test_another_device_only_has_its_time():

@@ -41,13 +41,25 @@ async def async_register_card(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_card_entities)
 
 
+#: Why the child's own device does not answer (the cards show it).
+CHILD_ACCOUNT_MESSAGE = (
+    "This is the child's Microsoft Family Safety account, not a device: choose its PC or its Xbox"
+)
+
+
+class ChildAccountDevice(Exception):
+    """The entity belongs to the child's account device, which the cards do not take."""
+
+
 def card_entities(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | None:
     """Entities of the HA device that ``entity_id`` belongs to, by card role.
 
     A Windows PC gets its own time and the child's Windows lock, Windows time
-    remaining and daily limits; an Xbox the child's Xbox ones; the child's
-    device the account total with the Windows ones. Other devices only have
-    their time. None when the entity is not ours or has no time sensor.
+    remaining and daily limits; an Xbox the child's Xbox ones. Other devices
+    only have their time. None when the entity is not ours or has no time
+    sensor. The child's own device raises ChildAccountDevice: its time is the
+    total of its PC and Xbox, so taking it along with them would count it
+    twice (the account total can still be added to a card as a plain source).
     """
     registry = er.async_get(hass)
     entry = registry.async_get(entity_id)
@@ -76,11 +88,9 @@ def card_entities(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | None:
         if platform == "xbox":
             used = find("sensor", f"{account_id}_xbox_screentime") or used
     else:
-        account_id = owner(data.get("accounts") or {})
-        if account_id is None:
-            return None
-        platform = "windows"
-        used = find("sensor", f"{account_id}_screentime")
+        if owner(data.get("accounts") or {}) is not None:
+            raise ChildAccountDevice
+        return None
     if used is None:
         return None
 
@@ -110,7 +120,11 @@ def ws_card_entities(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Return the entities the cards need for the device of ``entity_id``."""
-    result = card_entities(hass, msg["entity_id"])
+    try:
+        result = card_entities(hass, msg["entity_id"])
+    except ChildAccountDevice:
+        connection.send_error(msg["id"], "not_found", CHILD_ACCOUNT_MESSAGE)
+        return
     if result is None:
         connection.send_error(
             msg["id"], "not_found", f"{msg['entity_id']} is not a Microsoft Family Safety device entity"
