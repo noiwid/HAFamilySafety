@@ -17,7 +17,7 @@ from pyfamilysafety.enum import OverrideTarget, OverrideType
 from pyfamilysafety.exceptions import AggregatorException, HttpException
 from yarl import URL
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
@@ -29,7 +29,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from ._pyfamilysafety_compat import apply_patches, is_stale_roster_error
+from ._pyfamilysafety_compat import (
+    _WEB_BACKOFF_SECONDS,
+    apply_patches,
+    is_stale_roster_error,
+)
 from .api_client import FamilySafetyWebAPI
 from .app_pause import AppPauser
 from .auth.addon_client import AddonCookieClient
@@ -76,6 +80,10 @@ AUTH_NOTIFICATION_ID = "familysafety_auth_expired"
 ROSTER_NOTIFICATION_ID = "familysafety_roster_error"
 #: Runtime-store flag set when Microsoft rejected the persisted Family token.
 _FAMILY_TOKEN_REJECTED = "web_family_token_rejected"
+#: Reauth reasons raised by polling for the Family web session.
+_AUTOMATIC_WEB_REAUTH = frozenset(
+    {"family_context_auth_required", "web_session_expired", "web_credentials_missing"}
+)
 #: Polls in a row ending in family_context_state == "auth_required" before the
 #: coordinator treats the Family session as gone and starts reauthentication.
 _FAMILY_AUTH_REQUIRED_POLLS = 2
@@ -278,6 +286,23 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._has_web_credentials and not self._mobile_only
 
     @property
+    def _xbox_needs_web_session(self) -> bool:
+        """Xbox is ticked and not served by the Xbox Family Settings sign-in."""
+        return self.xbox_features and not self.xbox_family.usable
+
+    @property
+    def _web_session_needed(self) -> bool:
+        """Whether anything still depends on the Family web session.
+
+        Schedules run on the mobile API once it has answered, and Xbox runs on
+        the Xbox Family Settings sign-in once that is linked. Until the mobile
+        schedule API has answered, the web session counts as needed.
+        """
+        if self.web_api is None or not getattr(self.web_api, "mobile_schedule_ok", False):
+            return True
+        return self._xbox_needs_web_session
+
+    @property
     def xbox_features(self) -> bool:
         """Whether Xbox entities (and the web session they need) are wanted."""
         return not self._mobile_only
@@ -379,9 +404,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             next_state[CONF_WEB_COOKIES] = web_cookies
         if family_token:
             next_state[CONF_WEB_FAMILY_TOKEN] = family_token
-        elif (
-            self.web_api is not None
-            and self.web_api.family_context_state == "auth_required"
+        elif self.web_api is not None and (
+            self.web_api.family_context_state == "auth_required"
+            # An Xbox 401 dropped the token; a same-poll re-warm that then
+            # timed out leaves another state, but the token is still rejected.
+            or getattr(self.web_api, "family_token_rejected", False)
         ):
             # The web API dropped its antiforgery token because Microsoft
             # rejected it. Keeping the old value here would hand it straight
@@ -396,6 +423,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             next_state[_FAMILY_TOKEN_REJECTED] = True
         if family_token:
             next_state.pop(_FAMILY_TOKEN_REJECTED, None)
+            if self.web_api is not None:
+                # A token captured after the drop is a fresh one.
+                self.web_api.family_token_rejected = False
         if family_referer:
             next_state[CONF_WEB_FAMILY_REFERER] = family_referer
         next_state["updated_at"] = dt_util.now().isoformat()
@@ -548,7 +578,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._web_cookies_loaded:
                     await self._create_auth_notification()
                 self._web_cookies_loaded = False
-                if not cookies and not self.entry.data.get(CONF_AUTH_URL):
+                if (
+                    not cookies
+                    and not self.entry.data.get(CONF_AUTH_URL)
+                    and self._web_session_needed
+                ):
                     self._request_reauth("web_credentials_missing")
         except Exception as err:
             self._web_cookies_loaded = False
@@ -2269,7 +2303,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._create_auth_notification()
                 if self._native_web_auth:
                     self._request_reauth("web_session_expired")
-            elif screentime is not None:
+            elif (
+                screentime is not None
+                and self._reauth_reason != "family_context_auth_required"
+            ):
+                # With Xbox on, a dead Family context raises its own reauth
+                # while the mobile schedule still answers; dismissing here would
+                # recreate the notification on every poll.
                 await self._dismiss_auth_notification()
             result["screentime_policy"] = screentime
         except Exception as err:
@@ -2280,9 +2320,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Family API 401 can also be caused by a stale/wrong Family SPA
         # request-verification token, so do not create a reauth loop while the
         # /account session probe is still authenticated.
-        if self._native_web_auth and (
-            self.web_api.last_web_error_code == "LOGIN_REDIRECT"
-            or self.web_api.web_session_state == "expired"
+        if (
+            self._native_web_auth
+            and (
+                self.web_api.last_web_error_code == "LOGIN_REDIRECT"
+                or self.web_api.web_session_state == "expired"
+            )
+            and self._web_session_needed
         ):
             await self._create_auth_notification()
             self._request_reauth("web_session_expired")
@@ -2318,7 +2362,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Microsoft Family Safety authentication requires renewal (%s)", reason
             )
         self._reauth_requested = True
-        self._reauth_reason = reason
+        # A reauth the user asked for stays "manual": a later automatic reason
+        # would otherwise let _async_withdraw_unneeded_reauth close it.
+        if self._reauth_reason != "manual":
+            self._reauth_reason = reason
         self.entry.async_start_reauth(self.hass, data={"reason": reason})
 
     async def async_request_reauth(self) -> None:
@@ -2327,9 +2374,90 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._create_auth_notification()
         self._request_reauth("manual")
 
+    async def _async_withdraw_unneeded_reauth(self) -> None:
+        """Drop an automatic web reauth once nothing depends on the web session.
+
+        Raised while the web session was still needed, e.g. before the mobile
+        schedule API first answered or before the Xbox Family Settings sign-in
+        was linked. A request the user asked for (the service) is kept, and so
+        is a sign-in flow already under way: only flows still on their first
+        step are closed.
+        """
+        if (
+            not self._reauth_requested
+            or self._reauth_reason not in _AUTOMATIC_WEB_REAUTH
+            or self._web_session_needed
+        ):
+            return
+        _LOGGER.info(
+            "Nothing depends on the Family web session any more; withdrawing the "
+            "reauthentication request (%s)",
+            self._reauth_reason,
+        )
+        self._reauth_requested = False
+        self._reauth_reason = None
+        await self._dismiss_auth_notification()
+        try:
+            for flow in self.hass.config_entries.flow.async_progress_by_handler(
+                DOMAIN,
+                match_context={"source": SOURCE_REAUTH, "entry_id": self.entry.entry_id},
+            ):
+                # Still on the confirmation form: nobody has started signing in.
+                if flow.get("step_id") in ("reauth_full_confirm", "reauth_confirm"):
+                    self.hass.config_entries.flow.async_abort(flow["flow_id"])
+        except Exception as err:  # noqa: BLE001 - the card can still be ignored
+            _LOGGER.debug("Could not close the reauth flow: %r", err)
+
     @property
     def _family_context_dead_end(self) -> bool:
         return self._family_auth_required_polls >= _FAMILY_AUTH_REQUIRED_POLLS
+
+    async def _async_rewarm_dropped_family_context(self) -> None:
+        """Bootstrap again in the poll where an Xbox call found the session rejected.
+
+        Before #64 the /st read noticed the rejection and
+        bootstrapped in the same poll, so the +8 h / +16 h silent renewals
+        (which recover on the next bootstrap) counted as one auth_required
+        poll. Leaving the bootstrap to the next poll made them count twice and
+        raised a needless reauth prompt each time.
+        """
+        if (
+            not self._native_web_auth
+            or self.web_api is None
+            or not getattr(self.web_api, "family_context_dropped", False)
+        ):
+            return
+        self.web_api.family_context_dropped = False
+        if not self._xbox_needs_web_session or self._family_web_backing_off():
+            return
+        await self._async_warm_family_context_for_xbox()
+
+    def _family_web_backing_off(self) -> bool:
+        return (
+            float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
+            > time.monotonic()
+        )
+
+    async def _async_warm_family_context_for_xbox(self) -> None:
+        """Bootstrap the Family context, backing off after a transport failure.
+
+        The /st read used to set the 30-minute backoff on a timeout, but the
+        schedules now come from the mobile API, so without this a Family outage
+        made every poll wait out the bootstrap before the mobile update.
+        """
+        try:
+            await self.web_api._warm_family_context()
+        except Exception as err:  # noqa: BLE001 - Xbox extras only
+            _LOGGER.debug("Could not warm the Family web context for Xbox: %r", err)
+            failed = True
+        else:
+            failed = self.web_api.family_context_state in ("timeout", "error", "unavailable")
+        if failed:
+            self.web_api._family_web_backoff_until = time.monotonic() + _WEB_BACKOFF_SECONDS
+            _LOGGER.debug(
+                "Family bootstrap failed (%s); no new attempt for %d s",
+                self.web_api.family_context_state, _WEB_BACKOFF_SECONDS,
+            )
 
     async def _async_track_family_context(self) -> None:
         """Escalate a Family bootstrap that keeps landing on a login page.
@@ -2353,7 +2481,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._family_auth_required_polls += 1
         if not self._family_context_dead_end:
             return
-        if getattr(self.web_api, "mobile_schedule_ok", False):
+        # Prompt only while something still depends on the web session: Xbox
+        # ticked without a usable Xbox Family Settings sign-in, or schedules
+        # the mobile API has not served yet.
+        if not self._web_session_needed:
             # Schedules run on the mobile API; the expired web context only
             # affects web-only extras, so a daily reauth prompt is not worth it.
             if self._family_auth_required_polls == _FAMILY_AUTH_REQUIRED_POLLS:
@@ -2445,13 +2576,31 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._dismiss_auth_notification()
                     self._reauth_requested = False
                     self._reauth_reason = None
-                elif self.web_api.web_session_state in ("missing", "expired"):
+                elif (
+                    self.web_api.web_session_state in ("missing", "expired")
+                    and self._web_session_needed
+                ):
                     await self._create_auth_notification()
                     self._request_reauth(
                         "web_credentials_missing"
                         if self.web_api.web_session_state == "missing"
                         else "web_session_expired"
                     )
+            # Since the schedules moved to the mobile API (#64)
+            # no other request warms the Family web session, so after a restart
+            # (no stored token) the Xbox reads below never started, and nothing
+            # noticed when the session died. Warm it here whenever Xbox is on;
+            # a login page then shows up as family_context "auth_required",
+            # which _async_track_family_context escalates as before.
+            if (
+                self._native_web_auth
+                and self.web_api is not None
+                and self.web_api.has_web_cookies
+                and self.web_api.family_context_state != "ready"
+                and self._xbox_needs_web_session
+                and not self._family_web_backing_off()
+            ):
+                await self._async_warm_family_context_for_xbox()
             await self._async_try_silent_xbox_link()
             await self.api.update()
             if not getattr(self.api, "accounts", None):
@@ -2553,7 +2702,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 accounts_data[account_id]["xbox_policy"] = (
                     xbox_policy if xbox_policy is not None else previous.get("xbox_policy")
                 )
+            await self._async_rewarm_dropped_family_context()
             await self._async_track_family_context()
+            await self._async_withdraw_unneeded_reauth()
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts
             self._devices = new_devices
