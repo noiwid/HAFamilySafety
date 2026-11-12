@@ -384,14 +384,14 @@ FamilySafetyCard.css = `
 	.track.big { height: 8px; margin: 0 16px 12px; }
 	.track.big > div { background: var(--accent-color); }
 	.warn { margin: 0 16px 8px; font-size: 12px; color: var(--error-color); }
-	.tiles { display: flex; border-top: 1px solid var(--divider-color); }
+	.tiles { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
 	.tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; font-size: 13px; font-weight: 500;
 		border-right: 1px solid var(--divider-color); }
 	.tile:last-child { border-right: 0; }
 	.tile ha-icon { --mdc-icon-size: 26px; opacity: 0.5; }
 	.tile.on ha-icon { color: var(--on); opacity: 1; }
 	.req { display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box; padding: 10px 16px; font-size: 14px; font-weight: 500; text-align: left;
-		border-top: 1px solid var(--divider-color); background: rgba(255, 152, 0, 0.08); }
+		border-bottom: 1px solid var(--divider-color); background: rgba(255, 152, 0, 0.08); }
 	.req span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.req ha-icon:first-child { color: var(--accent-color); }
 	.label { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px; font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; opacity: 0.55; }
