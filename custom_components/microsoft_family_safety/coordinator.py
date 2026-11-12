@@ -691,8 +691,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return result
 
     async def async_block_app(self, account_id: str, app_id: str) -> None:
-        """Block an application (a paused one stays paused, its limit kept)."""
+        """Block an application without wiping its limit (a paused one stays paused)."""
         if await self.app_pauser.async_block(self, account_id, app_id):
+            return
+        if await self.app_pauser.async_block_live(self, account_id, app_id):
+            await self.async_request_refresh()
             return
         await self._async_set_app_blocked(account_id, app_id, True)
 

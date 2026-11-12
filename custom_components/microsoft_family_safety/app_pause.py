@@ -35,6 +35,10 @@ limit. So:
   an app whose pause is no longer in force (released, or changed by a
   parent) forgets the pause and blocks it as usual, so a later resume_app
   does not undo that block.
+* A block never wipes a limit either (``async_block_live``): an app that is
+  not paused is read live; already blocked, nothing is written; with a
+  limit, its policy is written back with ``BlockedAlways`` and the same day
+  keys. Only an app without a limit gets the plain block_app write.
 * An unblock never wipes a limit either. An app that is not paused (any
   more) is read live: already unblocked, nothing is written; blocked with a
   limit, its policy is written back with ``NotBlocked`` and the same day
@@ -578,6 +582,50 @@ class AppPauser:
                 result["failed"],
             )
         return done
+
+    async def async_block_live(
+        self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
+        app_id: str,
+    ) -> bool:
+        """Block an app that is not paused, keeping its limit (D-008).
+
+        block_app's body has no day keys and would wipe it. The app is read
+        live: already blocked, nothing is written; with a limit, its policy is
+        written back blocked with the same days. True when done. False when
+        the app has no limit to keep (or one that cannot be written back, or
+        is not a Windows or Xbox app): the caller blocks it as usual. Raises
+        HomeAssistantError when it cannot be read or written back.
+        """
+        account_id = str(account_id)
+        platform = app_platform(app_id)
+        if platform is None:
+            return False
+        try:
+            async with self._lock:
+                now = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
+                if now is None:
+                    raise HomeAssistantError(f"block_app failed: {app_id}: {UNREADABLE}")
+                if now["block"] == BLOCKED:
+                    return True
+                try:
+                    policy = saved_policy(now["policy"])
+                except ValueError:
+                    return False
+                if policy is None or not policy["days"]:
+                    return False
+                try:
+                    await coordinator.async_write_app_policy(
+                        account_id, app_id, platform,
+                        write_body(app_id, now["name"], policy, BLOCKED),
+                        blocked=True,
+                    )
+                except Exception as err:  # noqa: BLE001 - one service call, one app
+                    raise HomeAssistantError(
+                        f"block_app failed: {app_id}: {err}"[:500]
+                    ) from err
+                return True
+        finally:
+            coordinator.async_update_listeners()
 
     async def _async_unblock_live(
         self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
