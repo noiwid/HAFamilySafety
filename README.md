@@ -182,7 +182,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | Monitored platforms | Windows / Xbox / Mobile | Windows | One lock switch per platform. Xbox also decides whether the web session is used, see [below](#xbox-and-the-web-session) |
 | Users allowed to control Microsoft Family Safety | list of Home Assistant users | *(empty: everybody)* | See [Who can control the integration](#who-can-control-the-integration) |
 | Allow insecure local HTTP authentication (testing only) | on / off | off | See below |
-| Link the Xbox Family Settings sign-in | on / off | off | Only with Xbox ticked; for when the Connection sensor shows `xbox_family: not_linked`. Opens a Microsoft sign-in through the same temporary proxy as the setup, which picks up the result itself: sign in, close the window, done. A passkey does not work through the proxy (it is tied to Microsoft's address): choose *Sign in another way*. Without an HTTPS URL (or the local HTTP option below), or if the sign-in does not finish within 5 minutes, you paste the address of the blank page Microsoft ends on instead |
+| Link the Xbox Family Settings sign-in | on / off | off | Only with Xbox ticked; for when the Connection sensor shows `xbox_family: not_linked`. Opens a Microsoft sign-in through the same temporary proxy as the setup, which picks up the result itself: sign in, close the window, done. A passkey does not work through the proxy (it is tied to Microsoft's address), here or in the main sign-in: choose *Sign in another way*. Without an HTTPS URL (or the local HTTP option below), or if the sign-in does not finish within 5 minutes, you paste the address of the blank page Microsoft ends on instead |
 
 #### Who can control the integration
 

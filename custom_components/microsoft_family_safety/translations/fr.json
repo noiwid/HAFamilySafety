@@ -37,11 +37,11 @@
       },
       "check_mobile_proxy": {
         "title": "Connexion Microsoft",
-        "description": "Connectez-vous avec le compte Microsoft qui gère la famille, et répondez **Oui** quand Microsoft demande « Rester connecté ? ». Laissez la fenêtre d'authentification ouverte : une fois la connexion visible terminée, Home Assistant passe sur un écran d'attente pendant que la session Family et le jeton mobile sont établis."
+        "description": "Connectez-vous avec le compte Microsoft qui gère la famille, et répondez **Oui** quand Microsoft demande « Rester connecté ? ». Laissez la fenêtre d'authentification ouverte : une fois la connexion visible terminée, Home Assistant passe sur un écran d'attente pendant que la session Family et le jeton mobile sont établis.\n\nUne clé d'accès (passkey) ne peut pas être utilisée ici, car la connexion passe par l'adresse de Home Assistant et non par celle de Microsoft : si Microsoft en propose une, choisissez **Autres façons de se connecter** et utilisez votre mot de passe ou un code."
       },
       "check_proxy": {
         "title": "Session web Microsoft Family",
-        "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion."
+        "description": "**Connectez-vous dans la fenêtre qui vient de s'ouvrir**, avec le compte Microsoft qui gère la famille, et répondez **Oui** à « Rester connecté ? ».\n\nRevenez ensuite ici et **patientez** : cette fenêtre continue toute seule, ce qui peut prendre jusqu'à une minute environ après la connexion. Ne cliquez pas à nouveau sur *Ouvrir le site*, sauf si la fenêtre Microsoft ne s'est jamais ouverte ou a été fermée avant la connexion.\n\nUne clé d'accès (passkey) ne peut pas être utilisée ici, car la connexion passe par l'adresse de Home Assistant et non par celle de Microsoft : si Microsoft en propose une, choisissez **Autres façons de se connecter** et utilisez votre mot de passe ou un code."
       },
       "auth_success": {
         "title": "Connexion Microsoft Family Safety terminée",
