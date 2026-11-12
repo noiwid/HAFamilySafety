@@ -8,6 +8,10 @@
   "dependencies": [
     "http"
   ],
+  "after_dependencies": [
+    "frontend",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/noiwid/HAFamilySafety",
   "integration_type": "hub",
   "iot_class": "cloud_polling",

@@ -247,6 +247,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # The dashboard cards are a convenience: a failure there must not stop the integration.
+    try:
+        from .card import async_register_card
+
+        await async_register_card(hass)
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Could not register the screen time dashboard cards")
+
     # Register services (only once)
     if not hass.services.has_service(DOMAIN, SERVICE_BLOCK_APP):
         _register_services(hass)
