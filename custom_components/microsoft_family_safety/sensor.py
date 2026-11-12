@@ -771,8 +771,8 @@ class FamilySafetyWebActivitySensor(FamilySafetyAccountSensor):
     _attr_icon = "mdi:web-clock"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "visits"
-    # Up to 50 sites and 50 searches: keep them out of the recorder database.
-    _unrecorded_attributes = frozenset({"sites", "searches"})
+    # Up to 50 sites, searches and blocked URLs: keep them out of the recorder.
+    _unrecorded_attributes = frozenset({"sites", "searches", "blocked_sites"})
 
     def __init__(
         self,

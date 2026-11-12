@@ -95,3 +95,51 @@ def test_search_objects_are_grouped_by_term() -> None:
         "search": "cats", "visits": 3,
         "date": "2026-11-11T08:00:00+00:00", "site": "video.example",
     }]
+
+
+# Shape of a real blocked[] entry (#65), URLs replaced.
+BLOCKED_WEB = {
+    "allowed": [
+        {"domain": "example.com", "totalCountOfVisitsToDomain": 5,
+         "lastVisitToDomain": "2026-11-12T18:00:00",
+         "visits": [{"date": "2026-11-12T18:00:00", "visitCount": 5,
+                     "pageVisit": {"url": "https://example.com/allowed",
+                                   "allowedStatus": 0}}]},
+    ],
+    "blocked": [
+        {"domain": "blocked.example", "lastVisitToDomain": "2026-11-12T17:21:20.9496358",
+         "totalCountOfVisitsToDomain": 3, "allowedStatus": 2,
+         "detailedAllowedStatus": "BlockedForInappropriateContent",
+         "visits": [
+             {"date": "2026-11-11T09:00:00", "visitCount": 1,
+              "pageVisit": {"url": "https://blocked.example/older",
+                            "title": "https://blocked.example/older", "referrer": "",
+                            "categories": "", "applicationName": "", "allowedStatus": 2}},
+             {"date": "2026-11-12T17:21:20.9496358", "visitCount": 2,
+              "pageVisit": {"url": "https://blocked.example/path",
+                            "title": "https://blocked.example/path", "referrer": "",
+                            "categories": "", "applicationName": "", "allowedStatus": 2}},
+         ]},
+        {"domain": "no-detail.example", "totalCountOfVisitsToDomain": 1},
+    ],
+}
+
+
+def test_blocked_attempts_are_listed_by_url() -> None:
+    summary = summarize_web_activity(BLOCKED_WEB, None)
+    assert summary["blocked_sites"] == [
+        {"url": "https://blocked.example/path", "visits": 2,
+         "last_visit": "2026-11-12T17:21:20.949635+00:00", "domain": "blocked.example"},
+        {"url": "https://blocked.example/older", "visits": 1,
+         "last_visit": "2026-11-11T09:00:00+00:00", "domain": "blocked.example"},
+    ]
+    # Domain rows are unchanged, and allowed URLs are never listed.
+    assert summary["blocked_count"] == 2
+    assert {s["domain"] for s in summary["sites"]} == {
+        "example.com", "blocked.example", "no-detail.example"
+    }
+
+
+def test_no_report_has_no_blocked_attempts() -> None:
+    assert summarize_web_activity(None, None)["blocked_sites"] == []
+    assert summarize_web_activity(WEB, SEARCH)["blocked_sites"] == []

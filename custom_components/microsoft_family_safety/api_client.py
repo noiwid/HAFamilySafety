@@ -192,6 +192,24 @@ def summarize_web_activity(web: Any, search: Any) -> dict[str, Any]:
                     "blocked": status == "blocked",
                 })
     sites.sort(key=lambda s: s["visits"], reverse=True)
+    # Blocked attempts per URL (#65): the URL tells whether a block is a false
+    # positive. Allowed URLs are not listed, there are far too many of them.
+    blocked_urls = []
+    for entry in web.get("blocked") or []:
+        if not isinstance(entry, dict):
+            continue
+        for visit in entry.get("visits") or []:
+            page = visit.get("pageVisit") if isinstance(visit, dict) else None
+            if isinstance(page, dict) and page.get("url"):
+                blocked_urls.append({
+                    "url": page["url"],
+                    "visits": int(visit.get("visitCount") or 1),
+                    "last_visit": visit.get("date"),
+                    "domain": entry.get("domain"),
+                })
+    blocked_urls.sort(key=lambda b: b["last_visit"] or "", reverse=True)
+    for row in blocked_urls:
+        row["last_visit"] = _utc_iso(row["last_visit"])
     # One row per URL variant of a term: grouped by term like the Family
     # dashboard, which shows the highest visitCount and the latest date (#65).
     terms: dict[str, dict[str, Any]] = {}
@@ -229,6 +247,7 @@ def summarize_web_activity(web: Any, search: Any) -> dict[str, Any]:
         "blocked_count": sum(1 for s in sites if s["blocked"]),
         "sites": sites[:_WEB_ACTIVITY_LIMIT],
         "searches": searches[:_WEB_ACTIVITY_LIMIT],
+        "blocked_sites": blocked_urls[:_WEB_ACTIVITY_LIMIT],
     }
 
 
