@@ -737,22 +737,23 @@ async def test_blocking_an_already_blocked_app_writes_nothing(hass, rig):
     )
 
 
-async def test_blocking_an_app_that_cannot_be_read_fails_and_writes_nothing(hass, rig):
+async def test_blocking_an_app_that_cannot_be_read_still_blocks_it(hass, rig, caplog):
+    """A block must not fail where the plain block works: plain block, logged."""
     coord, apps, api, _ = rig
     plain = _plain_calls(apps)
     api.read_error = _error(503)
-    with pytest.raises(HomeAssistantError, match="policy_unreadable"):
-        await coord.async_block_app(CHILD, "x:racing")
-    assert plain() == [] and api.writes == []
+    await coord.async_block_app(CHILD, "x:racing")
+    assert plain() == [("x:racing", "block_app")] and api.writes == []
+    assert "plain block" in caplog.text
 
 
-async def test_a_failed_block_write_fails_without_the_plain_block(hass, rig):
+async def test_a_failed_block_write_falls_back_to_the_plain_block(hass, rig, caplog):
     coord, apps, api, _ = rig
     plain = _plain_calls(apps)
     api.write_error = _error(400)
-    with pytest.raises(HomeAssistantError, match="block_app failed"):
-        await coord.async_block_app(CHILD, "x:racing")
-    assert plain() == []
+    await coord.async_block_app(CHILD, "x:racing")
+    assert plain() == [("x:racing", "block_app")]
+    assert "plain block" in caplog.text
     assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
 
 

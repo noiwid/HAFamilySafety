@@ -42,7 +42,9 @@ limit. So:
   the limit stays stored while blocked and comes back on unblock. Only an
   app without a limit (or with one that cannot be written back) gets the
   plain block_app / unblock_app write. An app that cannot be read is not
-  blocked or unblocked.
+  unblocked; a block still goes through, with the plain block_app write
+  (logged), as does a block whose write with the days fails, because a
+  block must not fail where it worked before.
 * Mobile apps (``a:`` ids) are not read here and still get the plain
   block_app / unblock_app writes.
 * Saved states are kept until resumed or until the config entry is removed,
@@ -468,9 +470,11 @@ class AppPauser:
         written back blocked with the same days, so a later unblock puts the
         limit back. True when done. False when the app has no limit to keep
         (or one that cannot be written back, or is not a Windows or Xbox
-        app): the caller blocks it as usual. Raises HomeAssistantError when
-        it cannot be read (writing nothing and keeping any saved state) or
-        when the write fails.
+        app): the caller blocks it as usual. Also False, with a warning, when
+        an app that is not paused cannot be read or the write with its days
+        fails: a block must not fail where the plain block works, so the
+        caller blocks it plainly and the limit is lost. A paused app that
+        cannot be read raises HomeAssistantError and keeps its saved state.
         """
         account_id = str(account_id)
         platform = app_platform(app_id)
@@ -480,10 +484,20 @@ class AppPauser:
         try:
             async with self._lock:
                 now = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
-                if now is None:
-                    raise HomeAssistantError(f"block_app failed: {app_id}: {UNREADABLE}")
                 saved = self._data.get(account_id) or {}
                 record = saved.get(app_id)
+                if now is None:
+                    if record is not None:
+                        # Paused: blocked by the pause already; keep its saved state.
+                        raise HomeAssistantError(f"block_app failed: {app_id}: {UNREADABLE}")
+                    # A block must not fail where the plain block works: block it
+                    # anyway, at the cost of a time limit it may have.
+                    _LOGGER.warning(
+                        "Could not read app %s of account %s; blocking it with the "
+                        "plain block, which drops any time limit it has",
+                        app_id, account_id,
+                    )
+                    return False
                 if record is not None:
                     if _parent_change(record, now) is None:
                         return True
@@ -523,9 +537,12 @@ class AppPauser:
                 blocked=True,
             )
         except Exception as err:  # noqa: BLE001 - one service call, one app
-            raise HomeAssistantError(
-                f"block_app failed: {app_id}: {err}"[:500]
-            ) from err
+            _LOGGER.warning(
+                "Could not block app %s of account %s with its limit kept (%s); "
+                "blocking it with the plain block, which drops the limit",
+                app_id, account_id, err,
+            )
+            return False
         return True
 
     async def async_unblock(
