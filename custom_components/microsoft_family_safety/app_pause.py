@@ -33,14 +33,18 @@ limit. So:
   same paths for a paused app (``async_block`` / ``async_unblock``), so
   turning the switch off puts the limit back instead of wiping it. Blocking
   an app whose pause is no longer in force (released, or changed by a
-  parent) forgets the pause and blocks it as usual, so a later resume_app
-  does not undo that block.
-* An unblock never wipes a limit either. An app that is not paused (any
-  more) is read live: already unblocked, nothing is written; blocked with a
-  limit, its policy is written back with ``NotBlocked`` and the same day
-  keys. Only an app without a limit (or with one that cannot be written
-  back) gets the plain unblock_app write. An app that cannot be read is not
-  unblocked.
+  parent) forgets the pause and blocks it like an app never paused, so a
+  later resume_app does not undo that block.
+* A block or unblock never wipes a limit either. An app that is not paused
+  (any more) is read live: already in the asked state (``BlockedAlways``,
+  or unblocked), nothing is written; with a limit, its policy is written
+  back with ``BlockedAlways`` or ``NotBlocked`` and the same day keys, so
+  the limit stays stored while blocked and comes back on unblock. Only an
+  app without a limit (or with one that cannot be written back) gets the
+  plain block_app / unblock_app write. An app that cannot be read is not
+  blocked or unblocked.
+* Mobile apps (``a:`` ids) are not read here and still get the plain
+  block_app / unblock_app writes.
 * Saved states are kept until resumed or until the config entry is removed,
   not pruned when a child is missing from one roster read.
 
@@ -453,33 +457,76 @@ class AppPauser:
         self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
         app_id: str,
     ) -> bool:
-        """Block a paused app through the pause, so its limit stays stored.
+        """Block a Windows or Xbox app without wiping its limit.
 
-        block_app's body has no day keys and would wipe it. True when the
-        pause still blocks it: nothing to write. False when the app is not
-        paused (also when resumed meanwhile), or its pause is no longer in
-        force (released or changed by a parent): the saved state is
-        forgotten, so a later resume_app cannot undo this block, and the
-        caller blocks it as usual. Raises HomeAssistantError, keeping the
-        saved state, when it cannot be read.
+        block_app's body has no day keys and would wipe it. The app is read
+        live. A paused app whose pause still blocks it: nothing to write. A
+        paused app whose pause is no longer in force (released or changed by
+        a parent): the saved state is forgotten, so a later resume_app cannot
+        undo this block, and it is blocked like any other app. Any other app:
+        already blocked, nothing is written; with a limit, its policy is
+        written back blocked with the same days, so a later unblock puts the
+        limit back. True when done. False when the app has no limit to keep
+        (or one that cannot be written back, or is not a Windows or Xbox
+        app): the caller blocks it as usual. Raises HomeAssistantError when
+        it cannot be read (writing nothing and keeping any saved state) or
+        when the write fails.
         """
         account_id = str(account_id)
-        if app_id not in self.saved(account_id):
+        platform = app_platform(app_id)
+        if platform is None:
             return False
-        async with self._lock:
-            saved = self._data.setdefault(account_id, {})
-            record = saved.get(app_id)
-            if record is None:
-                return False
-            now = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
-            if now is None:
-                raise HomeAssistantError(f"block_app failed: {app_id}: {UNREADABLE}")
-            if _parent_change(record, now) is None:
-                return True
-            saved.pop(app_id, None)
-            await self._async_save()
-        coordinator.async_update_listeners()
-        return False
+        forgot = False
+        try:
+            async with self._lock:
+                now = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
+                if now is None:
+                    raise HomeAssistantError(f"block_app failed: {app_id}: {UNREADABLE}")
+                saved = self._data.get(account_id) or {}
+                record = saved.get(app_id)
+                if record is not None:
+                    if _parent_change(record, now) is None:
+                        return True
+                    saved.pop(app_id, None)
+                    await self._async_save()
+                    forgot = True
+                return await self._async_block_live(
+                    coordinator, account_id, app_id, platform, now
+                )
+        finally:
+            if forgot:
+                coordinator.async_update_listeners()
+
+    @staticmethod
+    async def _async_block_live(
+        coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
+        app_id: str, platform: str, now: dict[str, Any],
+    ) -> bool:
+        """Block an app that is not paused, keeping its limit (self._lock held).
+
+        ``now`` is its read_entry() read just now. True when done (already
+        blocked, or written back blocked with its days), False when the plain
+        block_app write loses nothing.
+        """
+        if now["block"] == BLOCKED:
+            return True
+        try:
+            policy = saved_policy(now["policy"])
+        except ValueError:
+            return False
+        if policy is None or not policy["days"]:
+            return False
+        try:
+            await coordinator.async_write_app_policy(
+                account_id, app_id, platform,
+                write_body(app_id, now["name"], policy, BLOCKED),
+                blocked=True,
+            )
+        except Exception as err:  # noqa: BLE001 - one service call, one app
+            raise HomeAssistantError(
+                f"block_app failed: {app_id}: {err}"[:500]
+            ) from err
+        return True
 
     async def async_unblock(
         self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
