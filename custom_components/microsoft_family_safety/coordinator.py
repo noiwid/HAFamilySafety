@@ -562,11 +562,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return result
 
     async def async_block_app(self, account_id: str, app_id: str) -> None:
-        """Block an application."""
+        """Block an application (a paused one stays paused, its limit kept)."""
+        if await self.app_pauser.async_block(self, account_id, app_id):
+            return
         await self._async_set_app_blocked(account_id, app_id, True)
 
     async def async_unblock_app(self, account_id: str, app_id: str) -> None:
-        """Unblock an application."""
+        """Unblock an application (a paused one is resumed, its limit put back)."""
+        if await self.app_pauser.async_unblock(self, account_id, app_id):
+            await self.async_request_refresh()
+            return
         await self._async_set_app_blocked(account_id, app_id, False)
 
     async def _async_set_app_blocked(
@@ -2082,14 +2087,6 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_sync_roster_notification(accounts_data)
             self._accounts = new_accounts
             self._devices = new_devices
-            # Paused apps of a child no longer in the family can never be
-            # resumed; an empty roster is more likely a failed read.
-            if accounts_data and self.app_pauser.stale_accounts(
-                {str(a) for a in accounts_data}
-            ):
-                self.hass.async_create_task(
-                    self.app_pauser.async_prune({str(a) for a in accounts_data})
-                )
             pending = getattr(self.api, "pending_requests", None) or []
             self._is_retrying_auth = False
             return {"accounts": accounts_data, "devices": devices_data, "pending_requests": pending}

@@ -29,6 +29,11 @@ limit. So:
   (``released``). Its days or block changed since: a parent changed it
   (``changed_by_parent``). Either way the parent's state is left as it is
   and the saved state is forgotten. A failed read keeps it for later.
+* The block switch and the block_app / unblock_app services go through the
+  same paths for a paused app (``async_block`` / ``async_unblock``), so
+  turning the switch off puts the limit back instead of wiping it.
+* Saved states are kept until resumed or until the config entry is removed,
+  not pruned when a child is missing from one roster read.
 
 App ids are Microsoft's, with the platform prefix (``x:`` Xbox, ``appx:`` and
 ``win32:`` Windows), as the Applications sensor lists them.
@@ -246,24 +251,6 @@ class AppPauser:
         """app id -> saved record, for one child."""
         return dict(self._data.get(str(account_id)) or {})
 
-    def stale_accounts(self, account_ids: set[str]) -> set[str]:
-        """Children with saved pauses that are not in ``account_ids``."""
-        return {a for a, apps in self._data.items() if apps} - account_ids
-
-    async def async_prune(self, account_ids: set[str]) -> None:
-        """Forget the pauses of children no longer in the family."""
-        async with self._lock:
-            stale = self.stale_accounts(account_ids)
-            if not stale:
-                return
-            for account_id in stale:
-                _LOGGER.warning(
-                    "Forgetting the paused apps of account %s, no longer in the family",
-                    account_id,
-                )
-                self._data.pop(account_id, None)
-            await self._async_save()
-
     async def _async_save(self) -> None:
         self._data = {k: v for k, v in self._data.items() if v}
         await self._store.async_save(self._data)
@@ -441,3 +428,41 @@ class AppPauser:
             "skipped": skipped,
             "failed": failed,
         }
+
+    async def async_block(
+        self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
+        app_id: str,
+    ) -> bool:
+        """Block a paused app through the pause, so its limit stays stored.
+
+        block_app's body has no day keys and would wipe it. True when done
+        (still blocked by the pause, or blocked again after a release).
+        False when the app is not paused, or a parent changed it since: the
+        caller blocks it as usual.
+        """
+        if app_id not in self.saved(account_id):
+            return False
+        result = await self.async_pause(coordinator, account_id, [app_id])
+        return bool(result["paused"])
+
+    async def async_unblock(
+        self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
+        app_id: str,
+    ) -> bool:
+        """Unblock a paused app by resuming it, so its limit comes back.
+
+        unblock_app's body has no day keys and would wipe it. True when done
+        (resumed, or someone unblocked it already). False when the app is not
+        paused, or a parent changed it since and it is still blocked: the
+        caller unblocks it as usual. Raises HomeAssistantError, keeping the
+        saved state, when it cannot be read or written back.
+        """
+        if app_id not in self.saved(account_id):
+            return False
+        result = await self.async_resume(coordinator, account_id, [app_id])
+        if result["resumed"] or result["released"]:
+            return True
+        if result["changed_by_parent"]:
+            live = (await self._async_read(coordinator, str(account_id), [app_id]))[app_id]
+            return live is not None and live["block"] == NOT_BLOCKED
+        return False
