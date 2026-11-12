@@ -56,6 +56,11 @@ FIELD_ALLOWED_HOURS = "allowed_hours"
 MAX_PENDING_DAYS = 7
 
 
+def today_only_store(hass: HomeAssistant, entry_id: str) -> Store:
+    """The Store of an entry's today-only changes (removed with the entry)."""
+    return Store(hass, STORAGE_VERSION, f"{DOMAIN}.today_only.{entry_id}")
+
+
 def today_weekday(now: datetime | None = None) -> int:
     """Today's weekday in Microsoft's numbering (0 = Sunday)."""
     return ((now or dt_util.now()).weekday() + 1) % 7
@@ -100,7 +105,7 @@ class TodayOnlyChanges:
     ) -> None:
         self.hass = hass
         self._coordinator = coordinator
-        self._store: Store = Store(hass, STORAGE_VERSION, f"{DOMAIN}.today_only.{entry_id}")
+        self._store: Store = today_only_store(hass, entry_id)
         #: "child|platform|YYYY-MM-DD" -> {"child_id", "platform", "date",
         #: "day_of_week", "fields": {field: {"saved", "set", "written"}}}
         self._records: dict[str, dict[str, Any]] = {}

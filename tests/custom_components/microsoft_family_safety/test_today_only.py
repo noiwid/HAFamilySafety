@@ -479,3 +479,17 @@ async def test_normal_service_call_unchanged(hass, services, schedules):
     )
     services._set_screentime_allowance.assert_awaited_once_with(CHILD, 1, 2, 30)
     assert services.today_only.pending(CHILD) == {}
+
+
+async def test_removing_the_entry_deletes_the_today_only_store(hass, hass_storage):
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.microsoft_family_safety import async_remove_entry
+    from custom_components.microsoft_family_safety.const import DOMAIN
+
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    key = f"{DOMAIN}.today_only.{entry.entry_id}"
+    hass_storage[key] = {"version": 1, "key": key, "data": {"records": {}}}
+    await async_remove_entry(hass, entry)
+    await hass.async_block_till_done()
+    assert key not in hass_storage

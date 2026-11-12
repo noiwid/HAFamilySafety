@@ -342,10 +342,13 @@ def _register_services(hass: HomeAssistant) -> None:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the Xbox Family Settings refresh token kept for this entry."""
+    """Delete what this entry kept on disk: the Xbox Family Settings refresh
+    token and the today-only changes waiting to be put back."""
+    from .today_only import today_only_store
     from .xbox_family_api import XboxFamilyAPI
 
     await XboxFamilyAPI(hass, entry.entry_id).async_unlink()
+    await today_only_store(hass, entry.entry_id).async_remove()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
