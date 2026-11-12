@@ -9,6 +9,7 @@
  *   sources:                         # optional, same with a name and a limit entity
  *     - { entity: sensor.console_time, name: Console, limit: number.console_limit }
  *   title / language (en, fr) / chart: false (summary card) / days: 14 (history card)
+ *   history: true                    # summary card: add the daily history below it, as a second card (days: 14)
  *
  * A device is resolved by the websocket command "<integration>/card_entities" of the integration
  * that owns it. Contract (each integration answers the same way):
@@ -23,13 +24,13 @@ const STR = {
 		today: 'Screen time today', history: 'Last {n} days', left: 'left', no_limit: ' · no limit', locked: 'Locked', unlocked: 'Unlocked',
 		loading: 'Loading…', none: 'Choose at least one device or time sensor.', missing: 'Not found: ',
 		f_devices: 'Devices (Family Link, Family Safety)', f_entities: 'Other time sensors (minutes)', f_title: 'Title', f_language: 'Language',
-		f_chart: 'Hourly chart', f_days: 'Days',
+		f_chart: 'Hourly chart', f_days: 'Days', f_history: 'Daily history below (second card)',
 	},
 	fr: {
 		today: "Temps d'écran aujourd'hui", history: '{n} derniers jours', left: 'reste', no_limit: ' · sans limite', locked: 'Verrouillé', unlocked: 'Libre',
 		loading: 'Chargement…', none: "Choisissez au moins un appareil ou un capteur de temps.", missing: 'Introuvable : ',
 		f_devices: 'Appareils (Family Link, Family Safety)', f_entities: 'Autres capteurs de temps (minutes)', f_title: 'Titre', f_language: 'Langue',
-		f_chart: 'Graphique par heure', f_days: 'Jours',
+		f_chart: 'Graphique par heure', f_days: 'Jours', f_history: 'Historique par jour en dessous (seconde carte)',
 	},
 };
 const PLATFORMS = ['familylink', 'microsoft_family_safety'];
@@ -61,7 +62,9 @@ class Base extends HTMLElement {
 	_t(key) { return STR[lang(this)][key]; }
 	_watched() { return this._sources.flatMap((s) => [s.used, s.limit, s.remaining, s.lock, s.next, s.bonus].filter(Boolean)); }
 	_num(id) { const s = id && this._hass.states[id]; return s ? parseFloat(s.state) : NaN; }
-	_shell(body) { this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${body}</ha-card>`; }
+	_shell(body, second) {
+		this.shadowRoot.innerHTML = `<style>${CSS}</style><ha-card>${body}</ha-card>${second === undefined ? '' : `<ha-card class="second" id="history">${second}</ha-card>`}`;
+	}
 
 	async _resolve() {
 		if (this._resolving) return;
@@ -100,6 +103,36 @@ class Base extends HTMLElement {
 		return { ids, rows: res };
 	}
 
+	/** The daily history (header and bars) of the sources, for the last `days` days. */
+	async _historyHtml(title) {
+		const days = this._config.days || 14, t = (k) => this._t(k);
+		const key = `${new Date().toDateString()}|${days}`;
+		if (this._config.demo_data && this._key !== key) {  // shortcut: fixed values for screenshots of a demo without statistics
+			this._key = key;
+			const start = new Date(); start.setHours(0, 0, 0, 0);
+			this._days = this._config.demo_data.days.slice(-days).map((v, i, all) => ({ t: start.getTime() - (all.length - 1 - i) * 86400000, v }));
+		}
+		if (this._key !== key) {
+			this._key = key;
+			const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (days - 1));
+			const { ids, rows } = await this._stats('day', start);
+			this._days = Array.from({ length: days }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return { t: d.getTime(), v: 0 }; });
+			for (const id of ids) for (const r of rows[id] || []) {
+				const day = this._days.find((d) => d.t === new Date(ms(r.start)).setHours(0, 0, 0, 0));
+				if (day) day.v += r.max ?? r.state ?? 0;
+			}
+		}
+		// today from the live states, the statistics of the day are not complete yet
+		this._days[this._days.length - 1].v = sum(this._sources.filter((s) => !s.missing).map((s) => this._num(s.used) || 0));
+		const top = Math.max(...this._days.map((d) => d.v));
+		const step = top > 480 ? 240 : 60;
+		const every = Math.ceil(days / 7);  // about seven date labels whatever the period
+		return `
+			<div class="head"><ha-icon icon="mdi:chart-bar"></ha-icon><span>${esc(title || t('history').replace('{n}', days))}</span></div>
+			<div class="chart">${bars(this._days.map((d) => d.v), (i) => (i % every ? '' : `${new Date(this._days[i].t).getDate()}/${new Date(this._days[i].t).getMonth() + 1}`),
+				Math.max(step * 2, Math.ceil(top / step) * step), (v) => `${Math.round(v / 60)} h`, 4, true)}</div>`;
+	}
+
 	static getConfigElement() { return document.createElement('parental-screen-time-editor'); }
 	// sections view: full width by default, can be narrowed to half; the height follows the content
 	getGridOptions() { return { columns: 12, min_columns: 6, rows: 'auto' }; }
@@ -108,7 +141,9 @@ class Base extends HTMLElement {
 /** Today: total, per source, limit, locks, and the hourly chart. */
 class ScreenTimeCard extends Base {
 	static getStubConfig(hass) {
-		const dev = Object.values(hass.entities || {}).filter((e) => PLATFORMS.includes(e.platform) && e.device_id && e.entity_id.startsWith('button.')).map((e) => e.device_id);
+		// preview: the Family Link phones and tablets (they carry the bonus buttons; the child's account device has none).
+		// Family Safety accounts also carry buttons (approve / deny) but are the child, not a device: left out here.
+		const dev = Object.values(hass.entities || {}).filter((e) => e.platform === 'familylink' && e.device_id && e.entity_id.startsWith('button.')).map((e) => e.device_id);
 		return { devices: [...new Set(dev)] };
 	}
 
@@ -144,8 +179,13 @@ class ScreenTimeCard extends Base {
 				${missing.length ? `<div class="msg err">${t('missing')}${esc(missing.join(', '))}</div>` : ''}
 				${tiles ? `<div class="tiles">${tiles}</div>` : ''}
 			</div>
-			${this._config.chart === false ? '' : '<div class="chart" id="chart"></div>'}`);
+			${this._config.chart === false ? '' : '<div class="chart" id="chart"></div>'}`, this._config.history ? this._historyLast || '' : undefined);
 		if (this._config.chart !== false) this._chart();
+		if (this._config.history) this._historyHtml().then((html) => {
+			this._historyLast = html;
+			const el = this.shadowRoot.getElementById('history');
+			if (el) el.innerHTML = html;
+		});
 	}
 
 	async _chart() {
@@ -196,31 +236,7 @@ class HistoryCard extends Base {
 	getCardSize() { return 4; }
 
 	async _update() {
-		const days = this._config.days || 14, t = (k) => this._t(k);
-		const key = `${new Date().toDateString()}|${days}`;
-		if (this._config.demo_data && this._key !== key) {  // shortcut: fixed values for screenshots of a demo without statistics
-			this._key = key;
-			const start = new Date(); start.setHours(0, 0, 0, 0);
-			this._days = this._config.demo_data.days.slice(-days).map((v, i, all) => ({ t: start.getTime() - (all.length - 1 - i) * 86400000, v }));
-		}
-		if (this._key !== key) {
-			this._key = key;
-			const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (days - 1));
-			const { ids, rows } = await this._stats('day', start);
-			this._days = Array.from({ length: days }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return { t: d.getTime(), v: 0 }; });
-			for (const id of ids) for (const r of rows[id] || []) {
-				const day = this._days.find((d) => d.t === new Date(ms(r.start)).setHours(0, 0, 0, 0));
-				if (day) day.v += r.max ?? r.state ?? 0;
-			}
-		}
-		// today from the live states, the statistics of the day are not complete yet
-		this._days[this._days.length - 1].v = sum(this._sources.filter((s) => !s.missing).map((s) => this._num(s.used) || 0));
-		const top = Math.max(...this._days.map((d) => d.v));
-		const step = top > 480 ? 240 : 60;
-		this._shell(`
-			<div class="head"><ha-icon icon="mdi:chart-bar"></ha-icon><span>${esc(this._config.title || t('history').replace('{n}', days))}</span></div>
-			<div class="chart">${bars(this._days.map((d) => d.v), (i) => (i % 2 ? '' : `${new Date(this._days[i].t).getDate()}/${new Date(this._days[i].t).getMonth() + 1}`),
-				Math.max(step * 2, Math.ceil(top / step) * step), (v) => `${Math.round(v / 60)} h`, 4, true)}</div>`);
+		this._shell(await this._historyHtml(this._config.title));
 	}
 }
 
@@ -240,6 +256,7 @@ function bars(values, xLabel, top, yLabel, steps, shade) {
 
 const CSS = `
 	ha-card { overflow: hidden; }
+	ha-card.second { margin-top: var(--ha-section-grid-row-gap, 8px); }
 	.msg { padding: 16px; opacity: 0.7; } .msg.err { color: var(--error-color); opacity: 1; padding: 6px 0 0; }
 	.head { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-bottom: 1px solid var(--divider-color); }
 	.head ha-icon { --mdc-icon-size: 20px; opacity: 0.35; }
@@ -261,7 +278,7 @@ const CSS = `
 	.tile small { display: block; font-size: 12px; } .tr small { font-size: 11px; color: var(--secondary-text-color); }
 	.chart { padding: 16px 12px 10px 8px; }
 	.plot { display: grid; grid-template-columns: auto 1fr; grid-template-rows: 150px auto; column-gap: 6px; }
-	.y { display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; font-weight: 600; text-align: right; margin: -6px 0; }
+	.y { display: flex; flex-direction: column; justify-content: space-between; white-space: nowrap; font-size: 10px; font-weight: 600; text-align: right; margin: -6px 0; }
 	.area { position: relative; }
 	.area i { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(var(--rgb-primary-text-color, 255, 255, 255), 0.2); }
 	.cols { position: absolute; inset: 0; display: flex; gap: 3px; align-items: flex-end; }
@@ -291,12 +308,15 @@ class Editor extends HTMLElement {
 			this.appendChild(this._form);
 		}
 		this._form.hass = this._hass;
-		this._form.data = this._config;
+		// the card shows the chart unless chart is false: show the switch on when the option is absent
+		this._form.data = history ? this._config : { chart: true, ...this._config };
 		this._form.schema = [
 			{ name: 'devices', selector: { device: { multiple: true, filter: PLATFORMS.map((integration) => ({ integration })) } } },
 			{ name: 'entities', selector: { entity: { multiple: true, filter: { domain: 'sensor', device_class: 'duration' } } } },
 			{ name: 'title', selector: { text: {} } },
-			history ? { name: 'days', selector: { number: { min: 3, max: 31, mode: 'box' } } } : { name: 'chart', selector: { boolean: {} } },
+			...(history ? [{ name: 'days', selector: { number: { min: 3, max: 31, mode: 'box' } } }]
+				: [{ name: 'chart', selector: { boolean: {} } }, { name: 'history', selector: { boolean: {} } },
+					...(this._config.history ? [{ name: 'days', selector: { number: { min: 3, max: 31, mode: 'box' } } }] : [])]),
 			{ name: 'language', selector: { select: { mode: 'dropdown', options: [{ value: 'en', label: 'English' }, { value: 'fr', label: 'Français' }] } } },
 		];
 	}
