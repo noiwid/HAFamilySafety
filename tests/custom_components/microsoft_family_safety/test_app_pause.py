@@ -519,6 +519,46 @@ async def test_unblocking_a_paused_app_a_parent_reblocked_unblocks_it(hass, rig)
     assert coord.app_pauser.saved(CHILD) == {}
 
 
+def _slow_reads(api):
+    """Let other calls run while a read is in flight, as a real request does."""
+    read = api.get_app_activity
+
+    async def slow(child_id, platform):
+        await asyncio.sleep(0)
+        return await read(child_id, platform)
+
+    api.get_app_activity = slow
+
+
+async def test_two_concurrent_unblocks_of_a_paused_app_keep_its_limit(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    _slow_reads(api)
+    await asyncio.gather(
+        coord.async_unblock_app(CHILD, "x:racing"),
+        coord.async_unblock_app(CHILD, "x:racing"),
+    )
+    # The second one finds it resumed by the first: no limit-wiping write.
+    assert plain() == []
+    assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+    assert coord.app_pauser.saved(CHILD) == {}
+
+
+async def test_an_unblock_during_a_resume_keeps_the_limit(hass, rig):
+    coord, apps, api, _ = rig
+    plain = _plain_calls(apps)
+    await coord.async_pause_app(CHILD, ["x:racing"])
+    _slow_reads(api)
+    result, _ = await asyncio.gather(
+        coord.async_resume_app(CHILD),
+        coord.async_unblock_app(CHILD, "x:racing"),
+    )
+    assert result["resumed"] == ["x:racing"]
+    assert plain() == []
+    assert api.entries["x:racing"]["policy"] == _limit_policy("x:racing", "Racing")
+
+
 async def test_blocking_a_paused_app_keeps_its_limit(hass, rig):
     coord, apps, api, entry = rig
     plain = _plain_calls(apps)

@@ -378,48 +378,59 @@ class AppPauser:
         self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
         apps: list[str] | None,
     ) -> dict[str, Any]:
-        account_id = str(account_id)
+        async with self._lock:
+            result = await self._async_resume_locked(coordinator, str(account_id), apps)
+        coordinator.async_update_listeners()
+        _raise_if_nothing_done(
+            "resume_app",
+            result["resumed"] + result["released"] + result["changed_by_parent"],
+            result["failed"],
+        )
+        return result
+
+    async def _async_resume_locked(
+        self, coordinator: FamilySafetyDataUpdateCoordinator, account_id: str,
+        apps: list[str] | None,
+    ) -> dict[str, Any]:
+        """async_resume's work, with self._lock held by the caller."""
         resumed: list[str] = []
         released: list[str] = []
         changed: list[str] = []
         skipped: dict[str, str] = {}
         failed: dict[str, str] = {}
-        async with self._lock:
-            saved = self._data.setdefault(account_id, {})
-            todo: list[str] = []
-            for app_id in dict.fromkeys(apps if apps else list(saved)):
-                if app_id in saved:
-                    todo.append(app_id)
-                else:
-                    skipped[app_id] = "not paused"
-            live = await self._async_read(coordinator, account_id, todo)
-            for app_id in todo:
-                now = live[app_id]
-                if now is None:
-                    # Kept: a later resume_app can still put it back.
-                    failed[app_id] = UNREADABLE
-                    continue
-                record = saved[app_id]
-                change = _parent_change(record, now)
-                if change is not None:
-                    # Leave the parent's state; our pause is no longer in force.
-                    saved.pop(app_id, None)
-                    (released if change == "released" else changed).append(app_id)
-                    continue
-                try:
-                    await coordinator.async_write_app_policy(
-                        account_id, app_id, record["platform"],
-                        write_body(app_id, record["name"], record["policy"], NOT_BLOCKED),
-                        blocked=False,
-                    )
-                except Exception as err:  # noqa: BLE001 - kept for a later resume
-                    failed[app_id] = f"restore failed: {err}"[:200]
-                    continue
+        saved = self._data.setdefault(account_id, {})
+        todo: list[str] = []
+        for app_id in dict.fromkeys(apps if apps else list(saved)):
+            if app_id in saved:
+                todo.append(app_id)
+            else:
+                skipped[app_id] = "not paused"
+        live = await self._async_read(coordinator, account_id, todo)
+        for app_id in todo:
+            now = live[app_id]
+            if now is None:
+                # Kept: a later resume_app can still put it back.
+                failed[app_id] = UNREADABLE
+                continue
+            record = saved[app_id]
+            change = _parent_change(record, now)
+            if change is not None:
+                # Leave the parent's state; our pause is no longer in force.
                 saved.pop(app_id, None)
-                resumed.append(app_id)
-            await self._async_save()
-        coordinator.async_update_listeners()
-        _raise_if_nothing_done("resume_app", resumed + released + changed, failed)
+                (released if change == "released" else changed).append(app_id)
+                continue
+            try:
+                await coordinator.async_write_app_policy(
+                    account_id, app_id, record["platform"],
+                    write_body(app_id, record["name"], record["policy"], NOT_BLOCKED),
+                    blocked=False,
+                )
+            except Exception as err:  # noqa: BLE001 - kept for a later resume
+                failed[app_id] = f"restore failed: {err}"[:200]
+                continue
+            saved.pop(app_id, None)
+            resumed.append(app_id)
+        await self._async_save()
         return {
             "account_id": account_id,
             "resumed": resumed,
@@ -452,17 +463,31 @@ class AppPauser:
         """Unblock a paused app by resuming it, so its limit comes back.
 
         unblock_app's body has no day keys and would wipe it. True when done
-        (resumed, or someone unblocked it already). False when the app is not
-        paused, or a parent changed it since and it is still blocked: the
-        caller unblocks it as usual. Raises HomeAssistantError, keeping the
-        saved state, when it cannot be read or written back.
+        (resumed, or someone unblocked it already, also a concurrent resume).
+        False when the app is not paused, or a parent changed it since and it
+        is still blocked: the caller unblocks it as usual. Raises
+        HomeAssistantError, keeping the saved state, when it cannot be read
+        or written back.
         """
+        account_id = str(account_id)
         if app_id not in self.saved(account_id):
             return False
-        result = await self.async_resume(coordinator, account_id, [app_id])
-        if result["resumed"] or result["released"]:
-            return True
-        if result["changed_by_parent"]:
-            live = (await self._async_read(coordinator, str(account_id), [app_id]))[app_id]
-            return live is not None and live["block"] == NOT_BLOCKED
-        return False
+        async with self._lock:
+            if app_id not in self._data.get(account_id, {}):
+                # Paused when this call started and resumed meanwhile (by a
+                # concurrent unblock or resume_app): done unless it is
+                # blocked again, so the restored limit is not wiped.
+                live = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
+                return live is None or live["block"] == NOT_BLOCKED
+            result = await self._async_resume_locked(coordinator, account_id, [app_id])
+            done = bool(result["resumed"] or result["released"])
+            if not done and result["changed_by_parent"]:
+                live = (await self._async_read(coordinator, account_id, [app_id]))[app_id]
+                done = live is not None and live["block"] == NOT_BLOCKED
+        coordinator.async_update_listeners()
+        _raise_if_nothing_done(
+            "resume_app",
+            result["resumed"] + result["released"] + result["changed_by_parent"],
+            result["failed"],
+        )
+        return done
