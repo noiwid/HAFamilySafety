@@ -113,11 +113,28 @@ async def test_the_wait_gives_up_after_the_timeout(hass) -> None:
 
 async def test_after_the_wait_the_flow_moves_to_the_finish_step(hass) -> None:
     flow = _flow(hass)
-    flow._xbox_link_task = object()  # set: this is the re-entry after the wait
+    flow._xbox_link_task = SimpleNamespace(done=lambda: True)  # the re-entry after the wait
     flow._xbox_proxy = _proxy(CODE_URL)
     result = await flow.async_step_xbox_link()
     assert result["type"] == FlowResultType.SHOW_PROGRESS_DONE
     assert result["step_id"] == "finish_xbox_proxy"
+
+
+async def test_asking_again_during_the_sign_in_keeps_waiting(hass) -> None:
+    """The frontend can ask again before the sign-in is done (the app coming back
+    from the browser): that must not end the wait and fall back to the paste step."""
+    flow = _flow(hass)
+    with patch(f"{CONFIG_FLOW}._options_browser_hass_url", return_value="https://ha.example"), patch(
+        f"{NATIVE_PROXY}.register_native_proxy"
+    ), patch(f"{NATIVE_PROXY}.create_async_httpx_client", return_value=MagicMock()):
+        first = await flow.async_step_xbox_link()
+        task = flow._xbox_link_task
+        again = await flow.async_step_xbox_link()
+        assert again["type"] == FlowResultType.SHOW_PROGRESS
+        assert again["step_id"] == "xbox_link"
+        assert again["description_placeholders"] == first["description_placeholders"]
+        assert flow._xbox_link_task is task and not task.done()
+        task.cancel()
 
 
 async def test_finish_links_from_the_captured_code(hass) -> None:

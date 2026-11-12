@@ -1496,6 +1496,7 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         self._xbox_verifier: str | None = None
         self._xbox_proxy: Any = None
         self._xbox_link_task: asyncio.Task[None] | None = None
+        self._xbox_progress_url: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -1583,8 +1584,8 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                 bool(self._pending_options.get(CONF_ALLOW_INSECURE_HTTP_AUTH)),
             )
             if hass_url is None:
-                _LOGGER.debug(
-                    "No usable Home Assistant URL for the Xbox link proxy; "
+                _LOGGER.info(
+                    "No HTTPS Home Assistant URL for the Xbox link proxy; "
                     "using the manual paste step"
                 )
                 return await self.async_step_xbox_link_manual()
@@ -1601,15 +1602,19 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
                 completion_mode="oauth",
             )
             register_native_proxy(self.hass, self._xbox_proxy)
+            self._xbox_progress_url = str(
+                URL(hass_url).with_path(self._xbox_proxy.access_path)
+            )
             self._xbox_link_task = self.hass.async_create_task(
                 self._async_wait_xbox_redirect()
             )
+        if not self._xbox_link_task.done():
+            # Also when the frontend asks again while the sign-in is still
+            # open (the app coming back from the browser): keep waiting.
             return self.async_show_progress(
                 step_id="xbox_link",
                 progress_action="xbox_link",
-                description_placeholders={
-                    "url": str(URL(hass_url).with_path(self._xbox_proxy.access_path))
-                },
+                description_placeholders={"url": self._xbox_progress_url or ""},
                 progress_task=self._xbox_link_task,
             )
         return self.async_show_progress_done(next_step_id="finish_xbox_proxy")
@@ -1620,7 +1625,7 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         deadline = self.hass.loop.time() + XBOX_LINK_PROXY_TIMEOUT
         while proxy is not None and proxy.oauth_redirect_url is None:
             if self.hass.loop.time() > deadline:
-                _LOGGER.debug("Xbox link proxy timed out waiting for the sign-in")
+                _LOGGER.info("Xbox link proxy timed out waiting for the sign-in")
                 return
             await asyncio.sleep(1)
 
@@ -1635,6 +1640,11 @@ class FamilySafetyOptionsFlow(config_entries.OptionsFlow):
         await self._async_close_xbox_proxy()
         self._xbox_link_task = None
         if not (redirect_url and self._xbox_verifier):
+            _LOGGER.info(
+                "The Xbox link proxy saw no sign-in code (%s); using the manual paste step",
+                "error redirect" if redirect_url or (proxy and proxy.oauth_redirect_url)
+                else "no redirect",
+            )
             return await self.async_step_xbox_link_manual()
         # As in the manual step: through the running coordinator's instance, so
         # the new token is used at once.
