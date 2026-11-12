@@ -37,11 +37,11 @@
       },
       "check_mobile_proxy": {
         "title": "Microsoft sign-in",
-        "description": "Sign in with the Microsoft account that manages the family, and answer **Yes** when Microsoft asks \"Stay signed in?\". Keep the opened authentication window open: after the visible sign-in completes, Home Assistant switches to a waiting screen while the Family session and the mobile token are established."
+        "description": "Sign in with the Microsoft account that manages the family, and answer **Yes** when Microsoft asks \"Stay signed in?\". Keep the opened authentication window open: after the visible sign-in completes, Home Assistant switches to a waiting screen while the Family session and the mobile token are established.\n\nA passkey can't be used here, because the sign-in runs through Home Assistant's address rather than Microsoft's: if Microsoft offers one, choose **Sign in another way** and use your password or a code."
       },
       "check_proxy": {
         "title": "Microsoft Family web session",
-        "description": "**Sign in in the window that just opened**, with the Microsoft account that manages the family, and answer **Yes** to \"Stay signed in?\".\n\nThen come back here and **wait**: this dialog continues on its own, which can take up to about a minute after the sign-in. Do not press *Open website* again unless the Microsoft window never opened or was closed before you signed in."
+        "description": "**Sign in in the window that just opened**, with the Microsoft account that manages the family, and answer **Yes** to \"Stay signed in?\".\n\nThen come back here and **wait**: this dialog continues on its own, which can take up to about a minute after the sign-in. Do not press *Open website* again unless the Microsoft window never opened or was closed before you signed in.\n\nA passkey can't be used here, because the sign-in runs through Home Assistant's address rather than Microsoft's: if Microsoft offers one, choose **Sign in another way** and use your password or a code."
       },
       "auth_success": {
         "title": "Microsoft Family Safety sign-in completed",
@@ -92,7 +92,7 @@
           "xbox_link": "Xbox limits, the Xbox lock and Xbox play time then come from the Xbox Family Settings app's service, on their own sign-in, without the web session. Only with Xbox ticked. Usually linked automatically after a sign-in; tick this if the Connection sensor shows xbox_family: not_linked."
         }
       },
-      "xbox_link": {
+      "xbox_link_manual": {
         "title": "Link Xbox Family Settings",
         "description": "1. Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app.\n2. You end up on a blank page whose address starts with `{redirect_prefix}`. Copy that whole address and paste it below within a few minutes.",
         "data": {
@@ -102,6 +102,9 @@
     },
     "error": {
       "xbox_link_failed": "Microsoft did not accept that address. Sign in again with the new link and paste the address straight away."
+    },
+    "progress": {
+      "xbox_link": "Open [this Microsoft sign-in]({url}) and sign in with the parent account you use in the Xbox Family Settings app. Once Microsoft has accepted the sign-in, the window shows \"Sign-in received\" and can be closed; this step then continues on its own, with nothing to copy. If the sign-in does not finish within 5 minutes, you can paste the address instead. A passkey can't be used here, because the sign-in runs through Home Assistant's address rather than Microsoft's: if Microsoft offers one, choose **Sign in another way** and use your password or a code."
     }
   },
   "services": {

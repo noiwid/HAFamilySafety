@@ -37,11 +37,11 @@
       },
       "check_mobile_proxy": {
         "title": "Microsoft-Anmeldung",
-        "description": "Melde dich mit dem Microsoft-Konto an, das die Familie verwaltet, und antworte mit **Ja**, wenn Microsoft „Angemeldet bleiben?“ fragt. Lass das geöffnete Anmeldefenster offen: Nach der sichtbaren Anmeldung wechselt Home Assistant zu einer Warteanzeige, während die Family-Sitzung und das mobile Token eingerichtet werden."
+        "description": "Melde dich mit dem Microsoft-Konto an, das die Familie verwaltet, und antworte mit **Ja**, wenn Microsoft „Angemeldet bleiben?“ fragt. Lass das geöffnete Anmeldefenster offen: Nach der sichtbaren Anmeldung wechselt Home Assistant zu einer Warteanzeige, während die Family-Sitzung und das mobile Token eingerichtet werden.\n\nEin Passkey funktioniert hier nicht, weil die Anmeldung über die Adresse von Home Assistant läuft und nicht über die von Microsoft: Bietet Microsoft einen an, wähle **Andere Möglichkeiten zum Anmelden** und melde dich mit Passwort oder Code an."
       },
       "check_proxy": {
         "title": "Microsoft Family-Websitzung",
-        "description": "**Melde dich im gerade geöffneten Fenster an**, mit dem Microsoft-Konto, das die Familie verwaltet, und antworte bei „Angemeldet bleiben?“ mit **Ja**.\n\nKomm dann hierher zurück und **warte**: Dieser Dialog läuft von selbst weiter, was nach der Anmeldung bis zu etwa einer Minute dauern kann. Klicke nicht erneut auf *Website öffnen*, außer das Microsoft-Fenster hat sich nie geöffnet oder wurde vor der Anmeldung geschlossen."
+        "description": "**Melde dich im gerade geöffneten Fenster an**, mit dem Microsoft-Konto, das die Familie verwaltet, und antworte bei „Angemeldet bleiben?“ mit **Ja**.\n\nKomm dann hierher zurück und **warte**: Dieser Dialog läuft von selbst weiter, was nach der Anmeldung bis zu etwa einer Minute dauern kann. Klicke nicht erneut auf *Website öffnen*, außer das Microsoft-Fenster hat sich nie geöffnet oder wurde vor der Anmeldung geschlossen.\n\nEin Passkey funktioniert hier nicht, weil die Anmeldung über die Adresse von Home Assistant läuft und nicht über die von Microsoft: Bietet Microsoft einen an, wähle **Andere Möglichkeiten zum Anmelden** und melde dich mit Passwort oder Code an."
       },
       "auth_success": {
         "title": "Microsoft Family Safety-Anmeldung abgeschlossen",
@@ -92,7 +92,7 @@
           "xbox_link": "Xbox-Limits, die Xbox-Sperre und die Xbox-Spielzeit laufen dann über den Dienst der Xbox-Family-Settings-App, mit eigener Anmeldung und ohne die Websitzung. Nur wenn Xbox ausgewählt ist. Die Verknüpfung erfolgt meist automatisch nach einer Anmeldung; aktiviere dies, wenn der Verbindungssensor xbox_family: not_linked anzeigt."
         }
       },
-      "xbox_link": {
+      "xbox_link_manual": {
         "title": "Xbox Family Settings verknüpfen",
         "description": "1. Öffne [diese Microsoft-Anmeldung]({url}) und melde dich mit dem Elternkonto an, das du in der Xbox-Family-Settings-App verwendest.\n2. Du landest auf einer leeren Seite, deren Adresse mit `{redirect_prefix}` beginnt. Kopiere die vollständige Adresse und füge sie innerhalb weniger Minuten unten ein.",
         "data": {
@@ -102,6 +102,9 @@
     },
     "error": {
       "xbox_link_failed": "Microsoft hat diese Adresse nicht akzeptiert. Melde dich mit dem neuen Link erneut an und füge die Adresse sofort ein."
+    },
+    "progress": {
+      "xbox_link": "Öffne [diese Microsoft-Anmeldung]({url}) und melde dich mit dem Elternkonto an, das du in der Xbox-Family-Settings-App verwendest. Sobald Microsoft die Anmeldung angenommen hat, zeigt das Fenster „Sign-in received“ und kann geschlossen werden; dieser Schritt geht dann von selbst weiter, ohne dass du etwas kopieren musst. Ist die Anmeldung nach 5 Minuten nicht abgeschlossen, kannst du stattdessen die Adresse einfügen. Ein Passkey funktioniert hier nicht, weil die Anmeldung über die Adresse von Home Assistant läuft und nicht über die von Microsoft: Bietet Microsoft einen an, wähle **Andere Möglichkeiten zum Anmelden** und melde dich mit Passwort oder Code an."
     }
   },
   "services": {

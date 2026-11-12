@@ -1889,6 +1889,50 @@ def _callback_token_matches(hass: HomeAssistant, flow_id: str, token: str) -> bo
     return matches
 
 
+def _is_native_options_flow(hass: HomeAssistant, flow_id: str) -> bool:
+    """Return whether flow_id is an open options flow rather than a config flow.
+
+    The main sign-in runs in the config flow, the Xbox Family Settings link in
+    the options flow of one of this integration's entries.
+    """
+    try:
+        hass.config_entries.flow.async_get(flow_id)
+        return False
+    except UnknownFlow:
+        pass
+    try:
+        flow = hass.config_entries.options.async_get(flow_id)
+    except UnknownFlow:
+        return False
+    entry = hass.config_entries.async_get_entry(flow.get("handler"))
+    return entry is not None and entry.domain == DOMAIN
+
+
+def _sign_in_received_page() -> web.Response:
+    """A small "you can close this window" page.
+
+    Used for the options flow, which advances itself from its own progress task
+    once the proxy has captured Microsoft's redirect.
+    """
+    return web.Response(
+        text=(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<meta name='color-scheme' content='light dark'>"
+            "<style>body{font-family:system-ui,sans-serif;margin:24px;"
+            "background:#fff;color:#1c1c1c}"
+            "@media (prefers-color-scheme:dark){body{background:#111;color:#e8e8e8}}"
+            "</style><title>Microsoft Family Safety</title></head><body>"
+            "<h2>Sign-in received</h2>"
+            "<p>Home Assistant has received the answer of the Microsoft sign-in. "
+            "You can close this window and go back to Home Assistant.</p>"
+            "<script>setTimeout(function(){try{window.close();}catch(e){}},300);</script>"
+            "</body></html>"
+        ),
+        content_type="text/html",
+    )
+
+
 class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
     """Resume the config flow once Microsoft authentication is complete."""
 
@@ -1903,6 +1947,13 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
             raise web.HTTPBadRequest(text="Missing flow_id")
         if not _callback_token_matches(hass, flow_id, request.query.get("token", "")):
             raise web.HTTPForbidden(text="Invalid authentication callback")
+        if _is_native_options_flow(hass, flow_id):
+            # The Xbox Family Settings link (options flow) advances itself from
+            # its own progress task; configuring it here would race that task.
+            _LOGGER.debug(
+                "Native auth callback for options flow %s: close page only", flow_id
+            )
+            return _sign_in_received_page()
         try:
             try:
                 before = hass.config_entries.flow.async_get(flow_id)

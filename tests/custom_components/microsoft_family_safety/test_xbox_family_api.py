@@ -354,7 +354,8 @@ async def test_manual_link_is_used_without_a_reload(hass, coordinator):
         result["flow_id"],
         {"update_interval": 300, "platforms": ["Windows", "Xbox"], "xbox_link": True},
     )
-    assert result["step_id"] == "xbox_link"
+    # No usable Home Assistant URL for the sign-in proxy here: paste the redirect
+    assert result["step_id"] == "xbox_link_manual"
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {"redirect_url": "https://login.live.com/oauth20_desktop.srf?code=abc"},
@@ -364,6 +365,41 @@ async def test_manual_link_is_used_without_a_reload(hass, coordinator):
     coordinator.xbox_family.async_link_from_redirect.assert_awaited_once()
     assert coordinator._xbox_xuids == {}
     coordinator.async_request_refresh.assert_awaited()
+
+
+async def test_proxy_link_is_used_without_a_reload(hass, coordinator):
+    """The whole options flow: the proxy captures the code, the flow finishes."""
+    from unittest.mock import patch
+
+    coordinator.xbox_family.async_link_from_redirect = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    hass.data.setdefault(DOMAIN, {})[coordinator.entry.entry_id] = coordinator
+    flow_module = "custom_components.microsoft_family_safety.config_flow"
+    proxy_module = "custom_components.microsoft_family_safety.auth.native_proxy"
+    with patch(f"{flow_module}._options_browser_hass_url", return_value="https://ha.example"), patch(
+        f"{proxy_module}.create_async_httpx_client", return_value=MagicMock()
+    ), patch(f"{proxy_module}.register_native_proxy"), patch(
+        f"{proxy_module}.unregister_native_proxy", new=AsyncMock()
+    ) as close:
+        result = await hass.config_entries.options.async_init(coordinator.entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {"update_interval": 300, "platforms": ["Windows", "Xbox"], "xbox_link": True},
+        )
+        assert result["type"] == "progress"
+        assert result["step_id"] == "xbox_link"
+        flow = hass.config_entries.options._progress[result["flow_id"]]
+        proxy = flow._xbox_proxy
+        proxy._oauth_redirect_url = "https://login.live.com/oauth20_desktop.srf?code=abc"
+        proxy._complete = True
+        await hass.async_block_till_done()
+        result = await hass.config_entries.options.async_configure(result["flow_id"])
+        await hass.async_block_till_done()
+    assert result["type"] == "create_entry"
+    coordinator.xbox_family.async_link_from_redirect.assert_awaited_once()
+    assert coordinator.xbox_family.async_link_from_redirect.await_args.args[2] == "proxy"
+    coordinator.async_request_refresh.assert_awaited()
+    close.assert_awaited_once()
 
 
 async def test_removing_the_entry_deletes_the_xbox_token(hass, hass_storage):
