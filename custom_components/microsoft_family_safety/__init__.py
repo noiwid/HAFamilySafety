@@ -53,19 +53,33 @@ _LOGGER = logging.getLogger(__name__)
 # Service Schemas
 # ──────────────────────────────────────────────────────────────────────
 
+
+def _platform(*choices: str):
+    """A platform in any case (``xbox``, ``XBOX``), given on as the canonical choice."""
+    by_key = {choice.casefold(): choice for choice in choices}
+
+    def validate(value):
+        choice = by_key.get(str(value).strip().casefold())
+        if choice is None:
+            raise vol.Invalid(f"platform must be one of {', '.join(choices)}")
+        return choice
+
+    return validate
+
+
 SERVICE_BLOCK_APP_SCHEMA = child_schema({
     vol.Required("app_id"): cv.string,
 })
 
 SERVICE_LOCK_PLATFORM_SCHEMA = child_schema({
-    vol.Required("platform"): vol.In(["Windows", "Xbox", "Mobile"]),
+    vol.Required("platform"): _platform("Windows", "Xbox", "Mobile"),
     vol.Optional("duration_hours", default=24): vol.All(
         vol.Coerce(int), vol.Range(min=1, max=168)
     ),
 })
 
 SERVICE_UNLOCK_PLATFORM_SCHEMA = child_schema({
-    vol.Required("platform"): vol.In(["Windows", "Xbox", "Mobile"]),
+    vol.Required("platform"): _platform("Windows", "Xbox", "Mobile"),
 })
 
 SERVICE_APPROVE_REQUEST_SCHEMA = vol.Schema({
@@ -85,7 +99,7 @@ SERVICE_SET_SCREENTIME_LIMIT_SCHEMA = child_schema({
     vol.Required("day_of_week"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
     vol.Required("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
-    vol.Optional("platform", default="Windows"): vol.In(["Windows", "Xbox"]),
+    vol.Optional("platform", default="Windows"): _platform("Windows", "Xbox"),
 })
 
 SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = child_schema({
@@ -95,13 +109,13 @@ SERVICE_SET_SCREENTIME_INTERVALS_SCHEMA = child_schema({
     # 24 = midnight at the end of the day (with end_minute 0).
     vol.Required("end_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("end_minute", default=0): vol.In([0, 30]),
-    vol.Optional("platform", default="Windows"): vol.In(["Windows", "Xbox"]),
+    vol.Optional("platform", default="Windows"): _platform("Windows", "Xbox"),
 })
 
 SERVICE_SET_APP_TIME_LIMIT_SCHEMA = child_schema({
     vol.Required("app_id"): cv.string,
     vol.Required("app_name"): cv.string,
-    vol.Optional("platform", default="windows"): vol.In(["windows", "xbox", "mobile"]),
+    vol.Optional("platform", default="windows"): _platform("windows", "xbox", "mobile"),
     vol.Required("hours"): vol.All(vol.Coerce(int), vol.Range(min=0, max=24)),
     vol.Optional("minutes", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
     vol.Optional("start_time", default="07:00:00"): cv.string,
@@ -111,7 +125,7 @@ SERVICE_SET_APP_TIME_LIMIT_SCHEMA = child_schema({
 SERVICE_REMOVE_APP_TIME_LIMIT_SCHEMA = child_schema({
     vol.Required("app_id"): cv.string,
     vol.Required("app_name"): cv.string,
-    vol.Optional("platform", default="windows"): vol.In(["windows", "xbox", "mobile"]),
+    vol.Optional("platform", default="windows"): _platform("windows", "xbox", "mobile"),
 })
 
 SERVICE_BLOCK_WEBSITE_SCHEMA = child_schema({

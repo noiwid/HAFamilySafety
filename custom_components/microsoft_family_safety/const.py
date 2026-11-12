@@ -5,6 +5,9 @@ from typing import Final
 DOMAIN: Final = "microsoft_family_safety"
 INTEGRATION_NAME: Final = "Microsoft Family Safety"
 
+#: How long a temporary sign-in proxy stays open (main sign-in and Xbox link).
+AUTH_PROXY_LIFETIME_SECONDS: Final = 600
+
 # Configuration
 CONF_TOKEN: Final = "token"
 CONF_REDIRECT_URL: Final = "redirect_url"

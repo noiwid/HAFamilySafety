@@ -6,15 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 import voluptuous as vol
 
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import Context
+from homeassistant.exceptions import ServiceValidationError, Unauthorized
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.microsoft_family_safety import _register_services
-from custom_components.microsoft_family_safety.const import DOMAIN
+from custom_components.microsoft_family_safety.const import CONF_ALLOWED_USERS, DOMAIN
 
 CHILD = "1234567890123456"
 OTHER = "6543210987654321"
@@ -41,14 +42,20 @@ def coordinator(hass):
         yield coord
 
 
+def _device(hass, identifier: str, platform: str = DOMAIN) -> str:
+    entry = MockConfigEntry(domain=platform)
+    entry.add_to_hass(hass)
+    return dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(platform, identifier)}
+    ).id
+
+
 def _entity(hass, entity_id: str, identifier: str | None, platform: str = DOMAIN) -> str:
     entry = MockConfigEntry(domain=platform)
     entry.add_to_hass(hass)
     device_id = None
     if identifier is not None:
-        device_id = dr.async_get(hass).async_get_or_create(
-            config_entry_id=entry.entry_id, identifiers={(platform, identifier)}
-        ).id
+        device_id = _device(hass, identifier, platform)
     domain, object_id = entity_id.split(".", 1)
     er.async_get(hass).async_get_or_create(
         domain, platform, f"uid-{object_id}", suggested_object_id=object_id,
@@ -133,6 +140,114 @@ async def test_entities_of_two_children_are_refused(hass, coordinator) -> None:
     other = _entity(hass, "switch.sam_lock", OTHER)
     with pytest.raises(ServiceValidationError, match="different"):
         await _lock(hass, entity_id=[first, other])
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+# device_id, as a "target:" with devices gives it.
+
+
+async def _lock_target(hass, **target) -> None:
+    await hass.services.async_call(
+        DOMAIN, "lock_account", {}, blocking=True, target=target
+    )
+
+
+async def test_the_child_device_names_the_child(hass, coordinator) -> None:
+    await _lock_target(hass, device_id=_device(hass, CHILD))
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+async def test_a_physical_device_names_its_child(hass, coordinator) -> None:
+    await _lock_target(hass, device_id=[_device(hass, DEVICE)])
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+async def test_a_target_entity_names_the_child(hass, coordinator) -> None:
+    await _lock_target(hass, entity_id=_entity(hass, "switch.alex_lock", CHILD))
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+async def test_a_device_of_another_integration_is_refused(hass, coordinator) -> None:
+    with pytest.raises(ServiceValidationError, match="not a Microsoft Family Safety"):
+        await _lock_target(hass, device_id=_device(hass, "x", platform="hue"))
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+async def test_an_unknown_device_is_refused(hass, coordinator) -> None:
+    with pytest.raises(ServiceValidationError):
+        await _lock_target(hass, device_id="no-such-device")
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+async def test_a_device_without_a_child_is_refused(hass, coordinator) -> None:
+    with pytest.raises(ServiceValidationError, match="does not belong"):
+        await _lock_target(hass, device_id=_device(hass, "entry_service"))
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+@pytest.mark.parametrize("device_id", ["", "None", ["", " none "]])
+async def test_a_blank_device_is_no_child(hass, coordinator, device_id) -> None:
+    # What a template that rendered nothing gives, as for account_id.
+    with pytest.raises(vol.Invalid, match="Give the child"):
+        await _lock(hass, device_id=device_id)
+    await _lock(hass, device_id=device_id, account_id=CHILD)
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+async def test_a_blank_device_beside_a_real_one_is_ignored(hass, coordinator) -> None:
+    await _lock(hass, device_id=["", _device(hass, CHILD)])
+    coordinator.async_lock_account.assert_awaited_once_with(CHILD)
+
+
+@pytest.mark.parametrize("by", ["entity_id", "device_id"])
+async def test_a_child_before_the_first_update_is_not_known_yet(
+    hass, coordinator, by
+) -> None:
+    coordinator.data = None
+    target = (
+        _entity(hass, "switch.alex_lock", CHILD) if by == "entity_id"
+        else _device(hass, CHILD)
+    )
+    with pytest.raises(ServiceValidationError, match="does not know its child accounts yet"):
+        await _lock(hass, **{by: target})
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+async def test_a_device_and_an_entity_of_two_children_are_refused(hass, coordinator) -> None:
+    with pytest.raises(ServiceValidationError, match="different"):
+        await _lock_target(
+            hass,
+            device_id=_device(hass, CHILD),
+            entity_id=_entity(hass, "switch.sam_lock", OTHER),
+        )
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+async def test_area_targets_are_still_refused(hass, coordinator) -> None:
+    with pytest.raises(vol.Invalid):
+        await _lock_target(hass, area_id="living_room")
+    coordinator.async_lock_account.assert_not_awaited()
+
+
+@pytest.mark.parametrize("by", ["entity_id", "device_id"])
+async def test_an_unlisted_user_is_refused_by_entity_or_device(
+    hass, coordinator, by
+) -> None:
+    parent = MockUser().add_to_hass(hass)
+    kid = MockUser().add_to_hass(hass)
+    kid.mock_policy({"entities": True})
+    MockConfigEntry(
+        domain=DOMAIN, options={CONF_ALLOWED_USERS: [parent.id]}
+    ).add_to_hass(hass)
+    target = (
+        _entity(hass, "switch.alex_lock", CHILD) if by == "entity_id"
+        else _device(hass, CHILD)
+    )
+    with pytest.raises(Unauthorized):
+        await hass.services.async_call(
+            DOMAIN, "lock_account", {by: target}, blocking=True,
+            context=Context(user_id=kid.id),
+        )
     coordinator.async_lock_account.assert_not_awaited()
 
 

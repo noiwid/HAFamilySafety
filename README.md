@@ -183,7 +183,7 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 | Monitored platforms | Windows / Xbox / Mobile | Windows | One lock switch per platform. Xbox also decides whether the web session is used, see [below](#xbox-and-the-web-session) |
 | Users allowed to control Microsoft Family Safety | list of Home Assistant users | *(empty: everybody)* | See [Who can control the integration](#who-can-control-the-integration) |
 | Allow insecure local HTTP authentication (testing only) | on / off | off | See below |
-| Link the Xbox Family Settings sign-in | on / off | off | Only with Xbox ticked; for when the Connection sensor shows `xbox_family: not_linked`. Opens a Microsoft sign-in through the same temporary proxy as the setup, which picks up the result itself: sign in, close the window, done. A passkey does not work through the proxy (it is tied to Microsoft's address), here or in the main sign-in: choose *Sign in another way*. Without an HTTPS URL (or the local HTTP option below), or if the sign-in does not finish within 5 minutes, you paste the address of the blank page Microsoft ends on instead |
+| Link the Xbox Family Settings sign-in | on / off | off | Only with Xbox ticked; for when the Connection sensor shows `xbox_family: not_linked`. Opens a Microsoft sign-in through the same temporary proxy as the setup, which picks up the result itself: sign in, close the window, done. A passkey does not work through the proxy (it is tied to Microsoft's address), here or in the main sign-in: choose *Sign in another way*. Without an HTTPS URL (or the local HTTP option below), or if the sign-in does not finish within 10 minutes, you paste the address of the blank page Microsoft ends on instead |
 
 #### Who can control the integration
 
@@ -376,12 +376,14 @@ One start/end pair per day of the week, editable from the UI with optimistic upd
 
 The integration exposes **18 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
 
-Every service that acts on one child takes the child either as `account_id` (the Microsoft user ID, shown in the `user_id` attribute of the child's entities) or as `entity_id`: any Microsoft Family Safety entity of that child or of one of its devices. The account is looked up from the entity, so automations need no hard-coded ID. A list of entities is accepted as long as they all belong to the same child. When both are given, `account_id` wins.
+Every service that acts on one child takes the child either as `account_id` (the Microsoft user ID, shown in the `user_id` attribute of the child's entities) or as `entity_id`: any Microsoft Family Safety entity of that child or of one of its devices. `device_id` works the same way: the child's Microsoft Family Safety device or one of its physical devices. The account is looked up from the entity or device, so automations need no hard-coded ID. Lists are accepted as long as everything in them belongs to the same child. When `account_id` is given, it wins.
+
+These can go under `data:` or under `target:`. A `target:` may name entities and devices only: `area_id`, `floor_id` and `label_id` are refused, since an area can hold several children's devices.
 
 ```yaml
 # Same as account_id: "1234567890123456", read from the child's lock switch
 service: microsoft_family_safety.lock_account
-data:
+target:
   entity_id: switch.firstname_lock
 ```
 
