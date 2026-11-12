@@ -481,7 +481,8 @@ class FamilySafetyWebAPI:
                 return None
         text = await resp.text()
         raise FamilySafetyWebAPIError(
-            f"API request failed with status {resp.status}: {text[:200]}"
+            f"API request failed with status {resp.status}: {text[:200]}",
+            status=resp.status,
         )
 
     # ------------------------------------------------------------------
@@ -2327,6 +2328,53 @@ class FamilySafetyWebAPI:
         )
         return result if isinstance(result, dict) else {}
 
+    async def get_app_activity(
+        self, child_id: str, platform: str, days: int = 1
+    ) -> list[dict[str, Any]]:
+        """The app activity report's entries for one platform, last ``days`` days.
+
+        The per-app policy cannot be read directly: every GET on
+        v1-v4/AppLimits/policies answers 405. This report is the one source
+        of it: each entry is {appId, displayName, iconUrl, usage, policy,
+        blockState, isLegacyBlocked}, ``policy`` null for an app without a
+        limit, and every app is listed, used in the range or not. Plat-Info
+        is required (400 "The deviceInfo field is required" without it);
+        times are UTC. A range of 7 days or more answers 400
+        "BeginEndTimeRangeError".
+        """
+        days = max(1, min(int(days), 6))
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        begin = end - timedelta(days=days)
+        result = await self._request(
+            "GET",
+            f"/v4/activityReport/appUsage/{child_id}",
+            params={
+                "beginTime": begin.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "endTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+            extra_headers={
+                "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
+            },
+        )
+        entries = result.get("appActivity") if isinstance(result, dict) else None
+        if not isinstance(entries, list):
+            raise FamilySafetyWebAPIError("App activity report without appActivity")
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    async def write_app_policy(
+        self, child_id: str, app_id: str, platform: str, body: dict[str, Any]
+    ) -> dict | None:
+        """PATCH an app policy as given (app_pause.py builds the body)."""
+        result = await self._request(
+            "PATCH",
+            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            json_data=body,
+            extra_headers={
+                "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
+            },
+        )
+        return result if isinstance(result, dict) else {}
+
     @staticmethod
     def _website_url(website: str) -> str:
         """Microsoft wants an absolute URL in the exception list (#54).
@@ -2452,3 +2500,8 @@ class FamilySafetyWebAPI:
 
 class FamilySafetyWebAPIError(Exception):
     """Exception raised for API errors."""
+
+    def __init__(self, message: str = "", status: int | None = None) -> None:
+        super().__init__(message)
+        #: The HTTP status Microsoft answered, when it answered.
+        self.status = status

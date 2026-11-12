@@ -497,6 +497,34 @@
           "description": "N'importe quelle entité Microsoft Family Safety de l'enfant (ou de l'un de ses appareils), à la place de l'identifiant du compte."
         }
       }
+    },
+    "pause_app": {
+      "name": "Mettre une application en pause",
+      "description": "Bloque pour l'instant des applications Windows ou Xbox d'un enfant. La règle de chaque application (sa limite de temps quotidienne, ou aucune) est lue chez Microsoft et enregistrée avant sa première pause, puis conservée pendant le blocage ; resume_app la rétablit. Les applications déjà bloquées, ou dont la règle est illisible, ne sont pas mises en pause. Une nouvelle pause garde l'état enregistré la première fois, même après un redémarrage ; une application dont un parent a modifié la limite entre-temps est laissée telle quelle. Répond avec les applications mises en pause, modifiées par un parent, ignorées et en échec ; échoue si toutes les applications ont échoué.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "apps": {
+          "name": "Applications",
+          "description": "Identifiants des applications tels que le capteur Applications les liste (x:... pour Xbox, appx:... ou win32:... pour Windows)."
+        }
+      }
+    },
+    "resume_app": {
+      "name": "Reprendre une application",
+      "description": "Débloque les applications bloquées par pause_app en rétablissant la limite de temps que chacune avait avant (ou aucune), puis oublie leur état enregistré. Sans applications, toutes les applications en pause de l'enfant. Une application débloquée ou modifiée entre-temps par quelqu'un d'autre est laissée telle quelle. Répond avec les applications reprises, libérées, modifiées par un parent, ignorées et en échec ; échoue si toutes les applications ont échoué.",
+      "fields": {
+        "account_id": {
+          "name": "ID du compte",
+          "description": "L'identifiant utilisateur du compte enfant."
+        },
+        "apps": {
+          "name": "Applications",
+          "description": "Identifiants des applications à reprendre ; laisser vide pour toutes les applications en pause de l'enfant."
+        }
+      }
     }
   }
 }

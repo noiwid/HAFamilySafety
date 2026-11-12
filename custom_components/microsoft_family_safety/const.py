@@ -122,6 +122,8 @@ SERVICE_LOCK_ACCOUNT: Final = "lock_account"
 SERVICE_UNLOCK_ACCOUNT: Final = "unlock_account"
 SERVICE_REQUEST_REAUTH: Final = "request_reauth"
 SERVICE_GET_SITES: Final = "get_sites"
+SERVICE_PAUSE_APP: Final = "pause_app"
+SERVICE_RESUME_APP: Final = "resume_app"
 
 ALL_SERVICES: Final = [
     SERVICE_BLOCK_APP,
@@ -144,6 +146,8 @@ ALL_SERVICES: Final = [
     SERVICE_UNLOCK_ACCOUNT,
     SERVICE_REQUEST_REAUTH,
     SERVICE_GET_SITES,
+    SERVICE_PAUSE_APP,
+    SERVICE_RESUME_APP,
 ]
 
 # Platforms

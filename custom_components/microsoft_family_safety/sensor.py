@@ -508,10 +508,19 @@ class FamilySafetyApplicationCountSensor(FamilySafetyAccountSensor):
 
         applications = account_data.get("applications", [])
         blocked_apps = [app for app in applications if app.get("blocked")]
+        names = {app.get("app_id"): app.get("app_name") for app in applications}
 
         return {
             "blocked_count": len(blocked_apps),
             "applications": applications,
+            # Apps pause_app paused: "ours" while still blocked, "parent"
+            # once someone unblocked them in the meantime.
+            "paused_apps": [
+                {"app_id": app_id, "app_name": names.get(app_id) or app_id, "paused": who}
+                for app_id, who in sorted(
+                    self.coordinator.paused_apps(self._account_id).items()
+                )
+            ],
         }
 
 
