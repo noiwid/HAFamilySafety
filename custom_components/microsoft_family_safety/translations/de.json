@@ -190,7 +190,11 @@
       "fields": {
         "account_id": {
           "name": "Konto-ID",
-          "description": "Die Benutzer-ID des Kinderkontos."
+          "description": "Die Benutzer-ID des Kinderkontos. Gib diese oder eine Entität des Kindes an."
+        },
+        "entity_id": {
+          "name": "Entität des Kindes",
+          "description": "Eine beliebige Microsoft-Family-Safety-Entität des Kindes (oder eines seiner Geräte), statt der Konto-ID."
         },
         "platform": {
           "name": "Plattform",
@@ -216,7 +220,11 @@
       "fields": {
         "account_id": {
           "name": "Konto-ID",
-          "description": "Die Benutzer-ID des Kinderkontos."
+          "description": "Die Benutzer-ID des Kinderkontos. Gib diese oder eine Entität des Kindes an."
+        },
+        "entity_id": {
+          "name": "Entität des Kindes",
+          "description": "Eine beliebige Microsoft-Family-Safety-Entität des Kindes (oder eines seiner Geräte), statt der Konto-ID."
         },
         "platform": {
           "name": "Plattform",

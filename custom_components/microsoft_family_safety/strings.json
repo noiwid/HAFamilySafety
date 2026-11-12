@@ -190,7 +190,11 @@
       "fields": {
         "account_id": {
           "name": "Account ID",
-          "description": "The user ID of the child account."
+          "description": "The user ID of the child account. Give this or an entity of the child."
+        },
+        "entity_id": {
+          "name": "Child entity",
+          "description": "Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID."
         },
         "platform": {
           "name": "Platform",
@@ -216,7 +220,11 @@
       "fields": {
         "account_id": {
           "name": "Account ID",
-          "description": "The user ID of the child account."
+          "description": "The user ID of the child account. Give this or an entity of the child."
+        },
+        "entity_id": {
+          "name": "Child entity",
+          "description": "Any Microsoft Family Safety entity of the child (or of one of its devices), instead of the account ID."
         },
         "platform": {
           "name": "Platform",

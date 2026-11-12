@@ -10,6 +10,8 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from custom_components.microsoft_family_safety import _register_services
@@ -286,6 +288,35 @@ async def test_service_takes_minutes_or_until(hass):
             DOMAIN, "cancel_time_bonus", {"account_id": CHILD}, blocking=True, return_response=True
         )
         assert response == {"cancelled": False, "reason": "no_extra_time"}
+        coord.async_cancel_time_bonus.assert_awaited_once_with(CHILD, "Xbox")
+
+
+async def test_service_takes_an_entity_of_the_child(hass):
+    coord = SimpleNamespace(
+        data={"accounts": {CHILD: {}}, "devices": {}},
+        async_add_time_bonus=AsyncMock(return_value={"added": True}),
+        async_cancel_time_bonus=AsyncMock(return_value={"cancelled": True}),
+    )
+    hass.data.setdefault(DOMAIN, {})["entry"] = coord
+    entry = MockConfigEntry(domain=DOMAIN)
+    entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, CHILD)}
+    )
+    er.async_get(hass).async_get_or_create(
+        "switch", DOMAIN, "uid-alex_xbox", suggested_object_id="alex_xbox",
+        config_entry=entry, device_id=device.id,
+    )
+    with patch("custom_components.microsoft_family_safety._get_coordinator", return_value=coord):
+        _register_services(hass)
+        await hass.services.async_call(
+            DOMAIN, "add_time_bonus",
+            {"entity_id": "switch.alex_xbox", "minutes": 30}, blocking=True,
+        )
+        assert coord.async_add_time_bonus.await_args.args[0] == CHILD
+        await hass.services.async_call(
+            DOMAIN, "cancel_time_bonus", {"entity_id": "switch.alex_xbox"}, blocking=True
+        )
         coord.async_cancel_time_bonus.assert_awaited_once_with(CHILD, "Xbox")
 
 

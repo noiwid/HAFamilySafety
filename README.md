@@ -400,6 +400,7 @@ data:
 - The extra time is believed only when Microsoft's answer lists it ending when asked; otherwise the action fails. If a lock is still listed afterwards, the action fails and the lock stays.
 - While extra time runs, the Xbox lock switch reads off (Microsoft reports `allowUntil`).
 - `cancel_time_bonus` only ever cancels extra time. While the Xbox is locked it fails without sending anything (the cancel would lift the lock too); with no extra time in force it does nothing.
+- A lock that extra time replaced (`replace_lock: true`) does not come back: after `cancel_time_bonus`, or when the extra time ends, the Xbox follows its schedule again. Lock it again with `lock_platform` if needed.
 - Both can answer with what they did (`response_variable`): `add_time_bonus` with `{added, until, replaced_lock}`, `cancel_time_bonus` with `{cancelled: true, lock_in_force}` or `{cancelled: false, reason: "no_extra_time"}`.
 - Windows has no confirmed request for extra time yet, so only `platform: "Xbox"` (the default) is accepted.
 
@@ -422,10 +423,10 @@ response_variable: extra_time
 ```
 
 ```yaml
-# End the Xbox extra time early
+# End the Xbox extra time early (the child as one of its entities)
 service: microsoft_family_safety.cancel_time_bonus
 data:
-  account_id: "1234567890123456"
+  entity_id: switch.firstname_xbox_lock
 ```
 
 ### App Management
