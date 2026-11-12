@@ -85,7 +85,7 @@ async def test_entity_on_a_physical_device_names_its_child(hass, coordinator) ->
         DOMAIN, "block_website",
         {"entity_id": entity_id, "website": "example.com"}, blocking=True,
     )
-    coordinator.async_block_website.assert_awaited_once_with(CHILD, "example.com")
+    coordinator.async_block_website.assert_awaited_once_with(CHILD, ["example.com"])
 
 
 async def test_entity_without_device_uses_its_user_id_attribute(hass, coordinator) -> None:
