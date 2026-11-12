@@ -64,10 +64,12 @@ class FamilySafetyAllowedNowSensor(
     Off when a lock is in force, outside today's allowed hours, or once today's
     allowance is used up; on with limits turned off or extra time granted.
     Unknown while the schedule or today's usage is unknown. The minutes left
-    and used move every minute: they are not recorded.
+    are on the Time Remaining sensor, not here: they change every minute and
+    would make this entity write a state every minute. Today's minutes used
+    change with each poll: they are not recorded.
     """
 
-    _unrecorded_attributes = frozenset({"remaining_minutes", "used_minutes"})
+    _unrecorded_attributes = frozenset({"used_minutes"})
 
     def __init__(
         self,
@@ -91,7 +93,7 @@ class FamilySafetyAllowedNowSensor(
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Why, and the minutes left."""
+        """Why, today's allowance and minutes used, and any lock or extra time."""
         status = self.coordinator.platform_status(self._account_id, self._platform)
         current = status.get("override") or {}
         until = current.get("valid_until")
@@ -99,7 +101,6 @@ class FamilySafetyAllowedNowSensor(
             ATTR_USER_ID: self._account_id,
             ATTR_PLATFORM: self._platform,
             "reason": status["reason"],
-            "remaining_minutes": status["remaining_minutes"],
             "allowance_minutes": status["allowance_minutes"],
             "used_minutes": status["used_minutes"],
             "in_allowed_hours": status["in_allowed_hours"],

@@ -332,7 +332,22 @@ async def test_allowed_now_attributes(hass, coordinator):
     attrs = entity.extra_state_attributes
     assert (attrs["reason"], attrs["override"]) == ("locked", "blockUntil")
     assert dt_util.parse_datetime(attrs["override_until"]).tzinfo is not None
-    assert {"remaining_minutes", "used_minutes"} <= entity._unrecorded_attributes
+    assert "used_minutes" in entity._unrecorded_attributes
+
+
+async def test_allowed_now_does_not_change_with_the_clock(hass, coordinator, monkeypatch):
+    """The minutes left live on Time Remaining only: Allowed Now stays put."""
+    coord, entry = coordinator
+    coord.data["accounts"][CHILD]["screentime_policy"] = _policy(enabled=False)
+    binary = binary_sensor.FamilySafetyAllowedNowSensor(coord, entry, CHILD, "Windows")
+    remaining = sensor.FamilySafetyTimeRemainingSensor(coord, entry, CHILD)
+    assert "remaining_minutes" not in binary.extra_state_attributes
+    monkeypatch.setattr(dt_util, "now", lambda *a: _at(22, 0))
+    first = (binary._snapshot(), remaining.native_value)
+    monkeypatch.setattr(dt_util, "now", lambda *a: _at(22, 1))
+    second = (binary._snapshot(), remaining.native_value)
+    assert first[0] == second[0]
+    assert (first[1], second[1]) == (120, 119)
 
 
 async def test_minute_tick_writes_only_when_something_changed(hass, coordinator, monkeypatch):

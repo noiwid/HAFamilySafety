@@ -303,7 +303,7 @@ One of each for Windows, and for the Xbox once its schedule has been read. They 
 
 | Entity | Entity ID | State | Key Attributes |
 |--------|-----------|-------|----------------|
-| Allowed Now | `binary_sensor.{prefix}_{platform}_allowed_now` | ON while the platform may be used now | `reason`, `remaining_minutes`, `allowance_minutes`, `used_minutes`, `in_allowed_hours`, `override`, `override_until` |
+| Allowed Now | `binary_sensor.{prefix}_{platform}_allowed_now` | ON while the platform may be used now | `reason`, `allowance_minutes`, `used_minutes`, `in_allowed_hours`, `override`, `override_until`. The minutes left are on Time Remaining only, so this entity writes a state when something other than the clock changes |
 | Downtime Active | `binary_sensor.{prefix}_{platform}_downtime_active` | ON outside today's allowed hours | `downtime_start`, `downtime_end` (the current downtime, or the next one, local ISO times) |
 
 **How Allowed Now and Time Remaining decide**, in this order:
@@ -313,7 +313,10 @@ One of each for Windows, and for the Xbox once its schedule has been read. They 
 3. Outside today's allowed hours (`outside_allowed_hours`) → off, 0 minutes.
 4. Today's allowance used up (`allowance_used`) → off, 0 minutes. Otherwise on (`within_limits`), with the smaller of the allowance left and the time to the end of the current allowed window.
 
-Windows uses the Windows schedule and the minutes of the child's Windows devices; the Xbox uses the Xbox schedule, Xbox play time and the lock or extra time in the Xbox policy. The state is `unknown` (`reason: unknown`) while the schedule or today's usage has not been read, for example for a child without a Windows device. `remaining_minutes` and `used_minutes` are not stored in the history database.
+Windows uses the Windows schedule and the minutes of the child's Windows devices; the Xbox uses the Xbox schedule, Xbox play time and the lock or extra time in the Xbox policy. The state is `unknown` (`reason: unknown`) while the schedule or today's usage has not been read, for example for a child without a Windows device. `used_minutes` (and `allowed_ranges` on Time Remaining) are not stored in the history database.
+
+- All the time logic (allowed hours, today's allowance, midnight) uses Home Assistant's time zone, not the child's device's.
+- Windows extra time is not taken into account: Microsoft gives no Windows "allowed until" time. After an approved request for more time, Windows Allowed Now can stay off with `reason: allowance_used` (and Time Remaining at 0) while the child is in fact allowed. Xbox extra time is read from the Xbox policy and counts.
 
 ### Sensors — Per Physical Device
 
@@ -354,7 +357,7 @@ Windows uses the Windows schedule and the minutes of the child's Windows devices
 |--------|-----------|-------|------|
 | Daily Limit | `number.{prefix}_{day}_limit` | 0 – 1440 minutes | 15 min |
 
-One entity per day of the week (Sunday through Saturday). Adjustable directly from the UI with **optimistic updates** — values reflect immediately.
+One entity per day of the week (Sunday through Saturday). Adjustable directly from the UI with **optimistic updates** — values reflect immediately. A whole-day allowance, which Microsoft sends as `1.00:00:00`, reads as 1440 (earlier versions read it as 0).
 
 ### Time Entities — Per Child Account (14 per child)
 
