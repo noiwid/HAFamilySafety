@@ -865,7 +865,7 @@ Each line opens a sheet whose Save button calls the integration's services direc
 |--------|---------|-------------|
 | `device` | | The child's Family Safety device (required unless `child` is given) |
 | `title` | the child's name | Card title |
-| `show_extra`, `show_tiles`, `show_request`, `show_apps`, `show_websites`, `show_week` | `true` | Set one to `false` to hide that section: the extra time bar, the tiles, the pending request, the apps, the websites, the weekly limits (switches in the card editor) |
+| `bonus`, `show_tiles`, `show_request`, `show_apps`, `show_websites`, `show_week` | `true` | Set one to `false` to hide that section: the extra time bar (same key as the Family Link card), the tiles, the pending request, the apps, the websites, the weekly limits (switches in the card editor) |
 | `language` | Home Assistant's | `en` or `fr` |
 | `entities` | found from `device` | Override one entity by role, e.g. `entities: {lock: switch.my_lock}`. Roles: `screen_time`, `applications`, `websites`, `web_filter`, `pending_requests`, `allowed_now`, `time_remaining`, `downtime`, `lock`, `windows_lock`, `xbox_lock`, `limits`, `xbox_limits`, `app_limits` |
 | `child` | | Instead of `device`, give every entity by role yourself (`screen_time` is required) |

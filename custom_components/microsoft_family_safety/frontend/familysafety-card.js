@@ -244,7 +244,7 @@ class FamilySafetyCard extends HTMLElement {
 		const extraOn = ch.windows_lock ? 'Windows' : ch.xbox_lock ? 'Xbox' : null;
 		const extraUntil = extraOn === 'Windows' ? this._attr(ch.time_remaining, 'extra_time_until', null) : null;
 		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
-		const extraBar = extraOn && !compact && c.show_extra !== false ? `<div class="bonus">
+		const extraBar = extraOn && !compact && c.bonus !== false ? `<div class="bonus">
 				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:restart"></ha-icon></button>
 				<div class="btxt"><div>${esc(t('extra_bar'))}</div><small>${extraUntil ? esc(t('extra_until').replace('{t}', clock(extraUntil))) : esc(t('extra_none'))}</small></div>
 				${press(15)}${press(30)}${press(60)}
@@ -874,7 +874,7 @@ FamilySafetyDialog.css = `
 	@keyframes spin { to { transform: rotate(360deg); } }
 `;
 
-const SECTIONS = ['show_extra', 'show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
+const SECTIONS = ['bonus', 'show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
 
 /** Visual editor: the child (its Family Safety device), a title, the sections shown, the language. */
 class FamilySafetyCardEditor extends HTMLElement {
@@ -889,7 +889,7 @@ class FamilySafetyCardEditor extends HTMLElement {
 			this._form.computeLabel = (s) => ({
 				device: fr ? 'Enfant (son appareil Family Safety)' : 'Child (its Family Safety device)', title: fr ? 'Titre' : 'Title',
 				language: fr ? 'Langue' : 'Language',
-				show_extra: fr ? 'Barre temps en plus' : 'Extra time bar', show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
+				bonus: fr ? 'Barre de temps en plus (+15 / +30 / +60 min)' : 'Extra time bar (+15 / +30 / +60 min)', show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
 				show_apps: fr ? 'Applications' : 'Applications', show_websites: fr ? 'Sites web' : 'Websites', show_week: fr ? 'Limites de la semaine' : 'Weekly limits',
 			}[s.name]);
 			this._form.addEventListener('value-changed', (e) => {
