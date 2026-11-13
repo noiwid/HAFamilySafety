@@ -6,6 +6,9 @@
  * websites, weekly limits). Every line opens a sheet whose draft lives in the sheet itself:
  * no helper and no script is needed, Save calls the integration's services directly.
  *
+ * Options: bonus (true by default, false hides the extra time bar; same key as the Family
+ * Link card), show_tiles / show_request / show_apps / show_websites / show_week (true by default).
+ *
  * Plain custom element, no build step and no dependency.
  */
 const DOMAIN = 'microsoft_family_safety';
@@ -152,7 +155,7 @@ class FamilySafetyCard extends HTMLElement {
 	static getStubConfig(hass) {
 		const e = Object.values(hass.entities || {}).find((x) => x.platform === DOMAIN && x.device_id && x.entity_id.startsWith('sensor.') && /_screen_time$/.test(x.entity_id)
 			&& !/_(xbox|windows)_screen_time$/.test(x.entity_id) && Object.values(hass.entities).some((y) => y.device_id === x.device_id && y.entity_id.endsWith('_applications')));
-		return { device: e ? e.device_id : '' };
+		return { device: e ? e.device_id : '', bonus: true };
 	}
 
 	getCardSize() { return this._compact() ? 5 : 9; }
@@ -895,7 +898,7 @@ class FamilySafetyCardEditor extends HTMLElement {
 			this._form.addEventListener('value-changed', (e) => {
 				const config = { ...e.detail.value };
 				delete config.compact;  // replaced by the show_* switches
-				Object.keys(config).forEach((k) => (config[k] === '' || config[k] === undefined || (SECTIONS.includes(k) && config[k] === true)) && delete config[k]);
+				Object.keys(config).forEach((k) => (config[k] === '' || config[k] === undefined || (k !== 'bonus' && SECTIONS.includes(k) && config[k] === true)) && delete config[k]);
 				this._config = config;
 				this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
 			});
