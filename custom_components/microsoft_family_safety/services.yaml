@@ -48,7 +48,7 @@ unblock_app:
 
 lock_platform:
   name: Lock Platform
-  description: Lock a platform (Windows/Xbox/Mobile) for a child account.
+  description: "Lock a platform (Windows/Xbox/Mobile) for a child account until a time. The first lock saves the lock or extra time Microsoft had in force so unlock_platform can put a lock back; a lock already in force that ends later is kept. Answers with the saved prior state and the lock applied. Xbox needs the Xbox Family Settings sign-in linked."
   fields:
     account_id:
       name: Account ID
@@ -75,18 +75,22 @@ lock_platform:
             - "Mobile"
     duration_hours:
       name: Duration (hours)
-      description: Duration of the lock in hours (default 24).
-      default: 24
+      description: Duration of the lock in hours (default 24). Give this or until, not both.
       selector:
         number:
           min: 1
           max: 168
           step: 1
           unit_of_measurement: hours
+    until:
+      name: Until
+      description: When the lock ends, instead of duration_hours. A time without an offset is Home Assistant's local time. At most 168 hours away.
+      selector:
+        datetime:
 
 unlock_platform:
   name: Unlock Platform
-  description: Unlock a platform (Windows/Xbox/Mobile) for a child account.
+  description: "Unlock a platform (Windows/Xbox/Mobile) for a child account. Puts back a lock that was in force before lock_platform if it has not run out yet, otherwise cancels the lock. A lock or extra time set in the Family Safety app since is left alone. Answers with the prior state and what was applied."
   fields:
     account_id:
       name: Account ID

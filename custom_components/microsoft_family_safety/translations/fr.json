@@ -84,11 +84,13 @@
           "platforms": "Plateformes surveillées",
           "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)",
           "allowed_users": "Utilisateurs autorisés à piloter Microsoft Family Safety",
+          "strict_mode": "Mode strict : rétablir un verrouillage de plateforme annulé ailleurs",
           "xbox_link": "Lier la connexion Xbox Family Settings"
         },
         "data_description": {
           "platforms": "Windows, Xbox, Mobile : un interrupteur de verrouillage par plateforme cochée. Cocher Xbox active aussi le temps de jeu et le verrou Xbox, qui nécessitent la session web Microsoft (certains comptes doivent la renouveler par une connexion toutes les 24 heures). Laissez Xbox décoché si vos enfants n'ont pas de Xbox : l'intégration fonctionne alors uniquement avec le jeton mobile, avec une connexion plus courte.",
           "allowed_users": "Laisser vide pour que tous les utilisateurs puissent utiliser les boutons et réglages (par défaut). Dès que des utilisateurs sont cochés, seuls eux et les administrateurs le peuvent : le compte non administrateur d'un enfant est refusé sur chaque bouton, interrupteur, limite et horaire, et sur les actions microsoft_family_safety. Les automatisations et scripts lancés par Home Assistant ne sont pas concernés. Donnez à l'enfant un compte non administrateur : un administrateur peut modifier cette option.",
+          "strict_mode": "Désactivé par défaut. Lorsqu'il est activé, un verrouillage posé par microsoft_family_safety.lock_platform que Microsoft signale comme annulé avant sa fin (par exemple depuis l'application Family Safety) est reposé à la mise à jour suivante, au plus toutes les 10 minutes, et l'événement microsoft_family_safety_lock_reasserted est déclenché. unlock_platform y met fin. Un verrouillage Xbox n'est vérifié qu'avec la connexion Xbox Family Settings liée. Laissez-le désactivé si une autre intégration ou automatisation gère ces verrouillages : il reverrouillerait juste après un déverrouillage fait par un parent dans l'application Family Safety.",
           "xbox_link": "Les limites Xbox, le verrouillage Xbox et le temps de jeu Xbox passent alors par le service de l'application Xbox Family Settings, avec leur propre connexion, sans la session web. Uniquement si Xbox est coché. La liaison se fait en général automatiquement après une connexion ; cochez ceci si le capteur Connexion indique xbox_family: not_linked."
         }
       },
@@ -146,7 +148,7 @@
     },
     "lock_platform": {
       "name": "Verrouiller une plateforme",
-      "description": "Verrouille une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
+      "description": "Verrouille une plateforme (Windows/Xbox/Mobile) pour un compte enfant jusqu'à une heure donnée. Le premier verrouillage mémorise le verrouillage ou le temps supplémentaire en vigueur chez Microsoft, pour que unlock_platform puisse rétablir un verrouillage ; un verrouillage déjà en vigueur qui se termine plus tard est conservé. Répond avec l'état antérieur mémorisé et le verrouillage appliqué. Pour la Xbox, la connexion Xbox Family Settings doit être liée.",
       "fields": {
         "account_id": {
           "name": "ID du compte",
@@ -162,13 +164,17 @@
         },
         "duration_hours": {
           "name": "Durée (heures)",
-          "description": "Durée du verrouillage en heures."
+          "description": "Durée du verrouillage en heures (24 par défaut). Indiquez cette durée ou until, pas les deux."
+        },
+        "until": {
+          "name": "Jusqu'à",
+          "description": "Fin du verrouillage, à la place de duration_hours. Une heure sans décalage horaire est l'heure locale de Home Assistant. Au plus 168 heures plus tard."
         }
       }
     },
     "unlock_platform": {
       "name": "Déverrouiller une plateforme",
-      "description": "Déverrouille une plateforme (Windows/Xbox/Mobile) pour un compte enfant.",
+      "description": "Déverrouille une plateforme (Windows/Xbox/Mobile) pour un compte enfant. Rétablit le verrouillage en vigueur avant lock_platform s'il n'a pas encore expiré, sinon annule le verrouillage. Un verrouillage ou un temps supplémentaire défini depuis dans l'application Family Safety n'est pas modifié. Répond avec l'état antérieur et ce qui a été appliqué.",
       "fields": {
         "account_id": {
           "name": "ID du compte",

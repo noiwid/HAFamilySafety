@@ -84,11 +84,13 @@
           "platforms": "Überwachte Plattformen",
           "allow_insecure_http_auth": "Unsichere lokale HTTP-Anmeldung erlauben (nur zum Testen)",
           "allowed_users": "Benutzer, die Microsoft Family Safety steuern dürfen",
+          "strict_mode": "Strikter Modus: anderswo aufgehobene Plattformsperre wieder setzen",
           "xbox_link": "Xbox-Family-Settings-Anmeldung verknüpfen"
         },
         "data_description": {
           "platforms": "Windows, Xbox, Mobile: ein Sperrschalter pro ausgewählter Plattform. Xbox aktiviert außerdem die Xbox-Spielzeit und die Xbox-Sperre, die die Microsoft-Websitzung benötigen (manche Konten müssen sie alle 24 Stunden mit einer Anmeldung erneuern). Xbox nicht auswählen, wenn die Kinder keine Xbox haben: Die Integration nutzt dann nur das mobile Token, mit einer kürzeren Anmeldung.",
           "allowed_users": "Leer lassen, damit alle Benutzer die Schalter und Einstellungen verwenden können (Standard). Sobald Benutzer ausgewählt sind, dürfen nur sie und die Administratoren das: Das Nicht-Administrator-Konto eines Kindes wird bei jeder Taste, jedem Schalter, jedem Limit und jedem Zeitfenster sowie bei den microsoft_family_safety-Aktionen abgewiesen. Automatisierungen und Skripte, die Home Assistant ausführt, sind nicht betroffen. Gib dem Kind ein Nicht-Administrator-Konto: Ein Administrator kann diese Option ändern.",
+          "strict_mode": "Standardmäßig aus. Wenn aktiv, wird eine mit microsoft_family_safety.lock_platform gesetzte Sperre, die Microsoft vor ihrem Ende als aufgehoben meldet (zum Beispiel über die Family Safety App), beim nächsten Update erneut gesetzt, höchstens alle 10 Minuten, und das Ereignis microsoft_family_safety_lock_reasserted wird ausgelöst. unlock_platform beendet das. Eine Xbox-Sperre wird nur mit verknüpfter Xbox Family Settings-Anmeldung geprüft. Lass ihn aus, wenn eine andere Integration oder Automatisierung diese Sperren verwaltet: Er würde direkt nach dem Entsperren durch ein Elternteil in der Family Safety App wieder sperren.",
           "xbox_link": "Xbox-Limits, die Xbox-Sperre und die Xbox-Spielzeit laufen dann über den Dienst der Xbox-Family-Settings-App, mit eigener Anmeldung und ohne die Websitzung. Nur wenn Xbox ausgewählt ist. Die Verknüpfung erfolgt meist automatisch nach einer Anmeldung; aktiviere dies, wenn der Verbindungssensor xbox_family: not_linked anzeigt."
         }
       },
@@ -146,7 +148,7 @@
     },
     "lock_platform": {
       "name": "Plattform sperren",
-      "description": "Eine Plattform (Windows/Xbox/Mobile) für ein Kinderkonto sperren.",
+      "description": "Eine Plattform (Windows/Xbox/Mobile) für ein Kinderkonto bis zu einem Zeitpunkt sperren. Die erste Sperre merkt sich die Sperre oder Extrazeit, die bei Microsoft gerade gilt, damit unlock_platform eine Sperre wiederherstellen kann; eine bereits geltende Sperre, die später endet, bleibt bestehen. Antwortet mit dem gemerkten vorherigen Zustand und der gesetzten Sperre. Für die Xbox muss die Xbox Family Settings-Anmeldung verknüpft sein.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
@@ -162,13 +164,17 @@
         },
         "duration_hours": {
           "name": "Dauer (Stunden)",
-          "description": "Dauer der Sperre in Stunden."
+          "description": "Dauer der Sperre in Stunden (Standard 24). Entweder dies oder until angeben, nicht beides."
+        },
+        "until": {
+          "name": "Bis",
+          "description": "Wann die Sperre endet, anstelle von duration_hours. Eine Zeit ohne Zeitzonenangabe gilt als lokale Zeit von Home Assistant. Höchstens 168 Stunden entfernt."
         }
       }
     },
     "unlock_platform": {
       "name": "Plattform entsperren",
-      "description": "Eine Plattform (Windows/Xbox/Mobile) für ein Kinderkonto entsperren.",
+      "description": "Eine Plattform (Windows/Xbox/Mobile) für ein Kinderkonto entsperren. Stellt eine Sperre wieder her, die vor lock_platform galt und noch nicht abgelaufen ist, sonst wird die Sperre aufgehoben. Eine Sperre oder Extrazeit, die seitdem in der Family Safety App gesetzt wurde, bleibt unangetastet. Antwortet mit dem vorherigen Zustand und dem, was gesetzt wurde.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
