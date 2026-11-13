@@ -130,6 +130,16 @@ class FamilySafetyCard extends HTMLElement {
 		this._tab = 'today';
 		this._seen = '';
 		if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
+		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
+	}
+
+	/** Same rule as familylink-card: tab words only when the row is 420 px or wider and nothing is cut; icons and counts always stay. */
+	_fitTabs() {
+		const tabs = this.shadowRoot && this.shadowRoot.querySelector('.tabs');
+		if (!tabs) return;
+		const cut = () => tabs.scrollWidth > tabs.clientWidth + 1 || [...tabs.children].some((b) => b.scrollWidth > b.clientWidth + 1);
+		tabs.classList.remove('short');
+		if (tabs.clientWidth < 420 || cut()) tabs.classList.add('short');
 	}
 
 	/** The default config of the card picker: the first child with a screen time sensor. */
@@ -316,6 +326,9 @@ class FamilySafetyCard extends HTMLElement {
 				${sitesPart}
 				${weekPart}
 			</ha-card>`;
+		this._fitTabs();
+		// icons and fonts arrive after the first layout (slower on a phone) and widen the tabs: measure again
+		for (const ms of [300, 1500]) setTimeout(() => this._fitTabs(), ms);
 		const $ = (sel, fn) => this.shadowRoot.querySelectorAll(sel).forEach((el) => el.addEventListener('click', (ev) => fn(el, ev)));
 		$('[data-tab]', (b) => { this._tab = b.dataset.tab; this._render(); });
 		$('[data-app]', (r) => { const a = apps.find((x) => x.app_id === r.dataset.app); if (a) this._open(appSheet(this, a, paused.has(a.app_id))); });
@@ -398,10 +411,11 @@ FamilySafetyCard.css = `
 	.label::before { content: ''; width: 3px; height: 12px; border-radius: 2px; background: var(--accent-color); }
 	.label .add { margin-left: auto; opacity: 1; }
 	.tabs { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
-	.tab { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 12px 2px; font-size: 13px;
+	.tab { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 12px 2px; font-size: 13px;
 		font-weight: 600; opacity: 0.6; border-bottom: 3px solid transparent; white-space: nowrap; }
 	.tab span { overflow: hidden; text-overflow: ellipsis; }
 	.tab ha-icon { --mdc-icon-size: 18px; flex: none; }
+	.tabs.short .tab .w { display: none; } .tabs.short .tab { gap: 4px; }
 	.tab.on { opacity: 1; border-bottom-color: var(--accent-color); }
 	.tab.on ha-icon { color: var(--accent-color); }
 	.list { padding: 6px 16px 14px; }
@@ -436,7 +450,6 @@ FamilySafetyCard.css = `
 	.tab[data-tip]:hover::after { right: auto; left: 50%; transform: translateX(-50%); }
 	/* narrow card (half width, phone, card picker preview): icons and counts only, tighter rows */
 	@container (max-width: 420px) {
-		.tab .w { display: none; } .tab { gap: 4px; }
 		.head { gap: 8px; } .title { font-size: 14px; } .used { font-size: 13px; }
 		.tile { font-size: 12px; padding: 8px 2px; } .day b { font-size: 13px; } .day i { font-size: 8px; }
 	}
