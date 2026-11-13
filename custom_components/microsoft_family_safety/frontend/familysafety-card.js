@@ -45,7 +45,7 @@ const STR = {
 		app_limits_sw_sub: 'Off: no per-app limit is enforced', web_row: 'Web and content', web_row_sub: 'Filter, age rating, ask to buy',
 		conn: 'Connection', conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed',
 		conn_terms: 'Microsoft asks to accept updated terms on account.microsoft.com', conn_proof: 'Microsoft asks to confirm your identity: sign in again',
-		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant', reauth_done: 'Check the notification to finish signing in',
+		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant',
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
 		bonus: 'Extra time', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
 		cancel_bonus_sub: 'Ends the extra time running now',
@@ -85,7 +85,7 @@ const STR = {
 		app_limits_sw_sub: "Coupées : aucune limite d'appli ne s'applique", web_row: 'Web et contenus', web_row_sub: "Filtre, âge, demander avant d'acheter",
 		conn: 'Connexion', conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire',
 		conn_terms: 'Microsoft demande d’accepter ses nouvelles conditions sur account.microsoft.com', conn_proof: 'Microsoft demande de confirmer votre identité : reconnectez-vous',
-		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant', reauth_done: 'Ouvrez la notification pour terminer la connexion',
+		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant',
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
 		bonus: 'Temps en plus', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
 		cancel_bonus_sub: 'Arrête le temps en plus en cours',
@@ -634,6 +634,11 @@ function lockSheet(card, target) {
 	};
 }
 
+function openIntegration() {
+	history.pushState(null, '', '/config/integrations/integration/' + DOMAIN);
+	window.dispatchEvent(new CustomEvent('location-changed'));
+}
+
 function settingsSheet(card) {
 	const t = (k) => card._t(k), ch = card._config.child;
 	const sw = (id) => { const s = card._state(id); return s && s.state !== 'unavailable' ? s.state === 'on' : null; };
@@ -655,10 +660,11 @@ function settingsSheet(card) {
 			...toggles.map(([key, icon, title, sub]) => ({ kind: 'toggle', key, icon, title, sub })),
 			...(ch.web_filter ? [{ kind: 'action', nav: true, icon: 'mdi:shield-check-outline', title: t('web_row'), sub: t('web_row_sub'), run: () => card._open(webSheet(card)) }] : []),
 			{ kind: 'info', icon: conn && conn.state === 'connected' && !a.reauth_required ? 'mdi:lan-connect' : 'mdi:lan-disconnect', title: t('conn'), sub: connText },
-			{ kind: 'action', icon: 'mdi:login', title: t('reauth'), sub: t('reauth_sub'), done: t('reauth_done'),
-				run: () => card._hass.callService(DOMAIN, 'request_reauth', {}) },
+			// both continue on the integration's page (the sign-in is started there): close the sheet and go
+			{ kind: 'action', icon: 'mdi:login', title: t('reauth'), sub: t('reauth_sub'), close: true,
+				run: async () => { await card._hass.callService(DOMAIN, 'request_reauth', {}); openIntegration(); } },
 			{ kind: 'action', icon: 'mdi:open-in-app', title: t('configure'), sub: t('configure_sub'), close: true,
-				run: async () => { history.pushState(null, '', '/config/integrations/integration/' + DOMAIN); window.dispatchEvent(new CustomEvent('location-changed')); } },
+				run: async () => openIntegration() },
 		],
 		buttons: [{ label: t('save'), icon: 'mdi:content-save-outline', run: async (d) => {
 			for (const [key] of toggles) {
