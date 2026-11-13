@@ -34,6 +34,7 @@ from custom_components.microsoft_family_safety.const import (
 from custom_components.microsoft_family_safety.coordinator import (
     FamilySafetyDataUpdateCoordinator,
 )
+from custom_components.microsoft_family_safety.sensor import FamilySafetyScreenTimeSensor
 
 CHILD = "1234567890123456"
 XBOX_URL = "https://account.microsoft.com/family/api/xbox/screen-time-xbox"
@@ -470,3 +471,45 @@ async def test_manual_reauth_survives_a_later_automatic_reason(make_coordinator,
     await coord._async_withdraw_unneeded_reauth()
     assert coord._reauth_requested is True
     abort.assert_not_called()
+
+
+# --- Screen Time marked when Xbox play time cannot be read -----------------------
+@pytest.mark.parametrize(
+    ("xbox", "token", "state", "web", "missing"),
+    [
+        (True, "linked", "ok", None, False),  # Xbox Family Settings link
+        (True, None, "not_linked", "ready", False),  # web session reads it
+        (True, None, "not_linked", None, True),  # neither
+        (True, None, "not_linked", "auth_required", True),  # web session down
+        (True, None, "not_linked", "backing_off", True),
+        (True, "refused", "auth_failed", "auth_required", True),
+        (True, "refused", "auth_failed", "ready", False),
+        (False, None, "not_linked", None, False),  # Xbox not ticked
+    ],
+)
+async def test_screen_time_is_marked_when_xbox_time_cannot_be_read(
+    make_coordinator, xbox, token, state, web, missing
+):
+    """Values stay as they are; only the marker says the Xbox part may be absent."""
+    coord = make_coordinator(xbox=xbox)
+    coord.xbox_family._refresh_token = token
+    coord.xbox_family.state = state
+    if web is not None:
+        coord.web_api = _web_api()
+        if web == "backing_off":
+            coord.web_api._family_web_backoff_until = time.monotonic() + 600
+        else:
+            coord.web_api.family_context_state = web
+    coord.api = MagicMock()
+    coord.data = {"accounts": {CHILD: {
+        "first_name": "Alex", "today_screentime_usage": 42, "xbox_today_usage": None,
+    }}}
+    sensor = FamilySafetyScreenTimeSensor(coord, coord.entry, CHILD)
+
+    assert sensor.native_value == 42
+    attributes = sensor.extra_state_attributes
+    if missing:
+        assert attributes["xbox_time_missing"] is True
+    else:
+        assert "xbox_time_missing" not in attributes
+    assert coord.connection_state()["xbox_time_missing"] is missing

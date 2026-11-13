@@ -291,7 +291,7 @@ class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
         total_minutes = account_data.get("today_screentime_usage", 0)
         total_seconds = total_minutes * 60
 
-        return {
+        attributes = {
             ATTR_USER_ID: account_data.get(ATTR_USER_ID),
             ATTR_AVERAGE_SCREENTIME: account_data.get("average_screentime_usage", 0),
             "date": account_data.get("screen_time_date") or dt_util.now().date().isoformat(),
@@ -305,6 +305,10 @@ class FamilySafetyScreenTimeSensor(FamilySafetyAccountSensor):
             ),
             **_format_duration_attributes(total_seconds),
         }
+        if self.coordinator.xbox_time_missing:
+            # Xbox ticked but not readable: this total may leave Xbox play out.
+            attributes["xbox_time_missing"] = True
+        return attributes
 
 
 def _xbox_schedule(account_data: dict[str, Any] | None) -> dict[str, Any] | None:
