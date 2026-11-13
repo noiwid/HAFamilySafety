@@ -49,6 +49,9 @@ const STR = {
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
 		bonus: 'Extra time', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
 		cancel_bonus_sub: 'Ends the extra time running now',
+		extra_bar: 'Extra time', extra_none: 'None running', extra_until: 'Allowed until {t}',
+		tip_extra: 'Allow {p} for {n} min from now, even past the limit (not added to the day: replaces any extra time running)',
+		tip_extra_end: 'End the extra time now', tip_extra_custom: 'Another duration',
 		dnames: { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' },
 	},
 	fr: {
@@ -87,6 +90,9 @@ const STR = {
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
 		bonus: 'Temps en plus', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
 		cancel_bonus_sub: 'Arrête le temps en plus en cours',
+		extra_bar: 'Temps en plus', extra_none: 'Aucun en cours', extra_until: "Autorisé jusqu'à {t}",
+		tip_extra: "Autorise {p} pendant {n} min à partir de maintenant, même au-delà de la limite (ne s'ajoute pas à la journée : remplace le temps en plus en cours)",
+		tip_extra_end: 'Arrête le temps en plus maintenant', tip_extra_custom: 'Une autre durée',
 		dnames: { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' },
 	},
 };
@@ -229,6 +235,16 @@ class FamilySafetyCard extends HTMLElement {
 			down && down.state === 'on' ? esc(t('downtime_now').replace('{t}', clock(down.attributes.downtime_end)))
 				: down && down.attributes.downtime_start ? esc(t('downtime_at').replace('{t}', clock(down.attributes.downtime_start))) : '',
 		].filter(Boolean).join(' · ') : '';
+		// extra time: a window from now (Microsoft's AllowUntil), not minutes added to the day
+		const extraOn = ch.windows_lock ? 'Windows' : ch.xbox_lock ? 'Xbox' : null;
+		const extraUntil = extraOn === 'Windows' ? this._attr(ch.time_remaining, 'extra_time_until', null) : null;
+		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{p}', extraOn).replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
+		const extraBar = extraOn && !compact && c.show_extra !== false ? `<div class="bonus">
+				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:timer-off-outline"></ha-icon></button>
+				<div class="btxt"><div>${esc(t('extra_bar'))}</div><small>${extraUntil ? esc(t('extra_until').replace('{t}', clock(extraUntil))) : esc(t('extra_none'))}</small></div>
+				${press(15)}${press(30)}${press(60)}
+				<button class="round" data-extra-custom data-tip="${esc(t('tip_extra_custom'))}" aria-label="${esc(t('tip_extra_custom'))}"><ha-icon icon="mdi:timer-edit-outline"></ha-icon></button>
+			</div>` : '';
 		const tile = (key, icon, label, on, col) => `<button class="tile${on ? ' on' : ''}" data-tile="${key}" style="--on:var(${col})"><ha-icon icon="${icon}"></ha-icon><span>${esc(label)}</span></button>`;
 		const tiles = [
 			ch.lock && tile('Account', accLocked ? 'mdi:lock' : 'mdi:lock-open-variant', t('lock'), accLocked, '--error-color'),
@@ -312,6 +328,8 @@ class FamilySafetyCard extends HTMLElement {
 					<button class="gear" data-settings aria-label="${esc(t('settings'))}" data-tip="${esc(t('settings'))}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
 				</div>
 				<div class="track big"><div style="width:${pct}%"></div></div>
+				${extraBar}
+				${this._err ? `<div class="warn" role="alert">${esc(this._err)}</div>` : ''}
 				${missing.length ? `<div class="warn">${t('missing')}${esc(missing.join(', '))}</div>` : ''}
 				${tiles && c.show_tiles !== false ? `<div class="tiles">${tiles}</div>` : ''}
 				${compact || c.show_request === false ? '' : reqLine}
@@ -338,6 +356,12 @@ class FamilySafetyCard extends HTMLElement {
 		$('[data-tile]', (b) => this._open(b.dataset.tile === 'web' ? webSheet(this) : lockSheet(this, b.dataset.tile)));
 		$('[data-req]', () => { if (req) this._open(requestSheet(this, req)); });
 		$('[data-day]', (b) => this._open(daySheet(this, b.dataset.day, b.dataset.xbox === '1')));
+		const extra = (service, data) => this._call(service, { platform: extraOn, ...data })
+			.then(() => { this._err = ''; this._render(); })
+			.catch((err) => { this._err = (err && err.message) || String(err); this._render(); });
+		$('[data-extra]', (b) => extra('add_time_bonus', { minutes: Number(b.dataset.extra) }));
+		$('[data-extra-end]', () => extra('cancel_time_bonus', {}));
+		$('[data-extra-custom]', () => this._open(lockSheet(this, extraOn)));
 	}
 
 	/** The allowed and blocked lists: get_sites when read, else the web filter sensor's exceptions. */
@@ -395,6 +419,14 @@ FamilySafetyCard.css = `
 	.track { height: 6px; border-radius: 3px; background: var(--divider-color); grid-column: 1 / 3; }
 	.track > div { height: 100%; border-radius: 3px; background: var(--primary-color); }
 	.track.big { height: 8px; margin: 0 16px 12px; }
+	.bonus { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--divider-color); }
+	.btxt { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+	.btxt small { display: block; font-weight: 400; opacity: 0.6; font-size: 12px; }
+	.round { position: relative; width: 36px; height: 36px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center;
+		background: rgba(var(--rgb-primary-text-color, 255, 255, 255), 0.08); opacity: 0.75; }
+	.round.big { width: 40px; height: 40px; border-radius: 20px; }
+	.round[disabled] { opacity: 0.3; cursor: default; }
+	.round ha-icon { --mdc-icon-size: 20px; }
 	.track.big > div { background: var(--accent-color); }
 	.warn { margin: 0 16px 8px; font-size: 12px; color: var(--error-color); }
 	.tiles { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
@@ -822,7 +854,7 @@ FamilySafetyDialog.css = `
 	@keyframes spin { to { transform: rotate(360deg); } }
 `;
 
-const SECTIONS = ['show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
+const SECTIONS = ['show_extra', 'show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
 
 /** Visual editor: the child (its Family Safety device), a title, the sections shown, the language. */
 class FamilySafetyCardEditor extends HTMLElement {
@@ -837,7 +869,7 @@ class FamilySafetyCardEditor extends HTMLElement {
 			this._form.computeLabel = (s) => ({
 				device: fr ? 'Enfant (son appareil Family Safety)' : 'Child (its Family Safety device)', title: fr ? 'Titre' : 'Title',
 				language: fr ? 'Langue' : 'Language',
-				show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
+				show_extra: fr ? 'Barre temps en plus' : 'Extra time bar', show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
 				show_apps: fr ? 'Applications' : 'Applications', show_websites: fr ? 'Sites web' : 'Websites', show_week: fr ? 'Limites de la semaine' : 'Weekly limits',
 			}[s.name]);
 			this._form.addEventListener('value-changed', (e) => {
