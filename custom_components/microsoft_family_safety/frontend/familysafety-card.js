@@ -164,6 +164,13 @@ class FamilySafetyCard extends HTMLElement {
 	connectedCallback() {
 		// where the card sits is only known once it is in the page: render again for the picker
 		if (this._hass && this._picker === undefined) { this._seen = ''; this.hass = this._hass; }
+		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
+	}
+
+	/** Removed from the page (view change, dashboard rebuilt): stop watching it, close its sheet. */
+	disconnectedCallback() {
+		if (this._resize) { this._resize.disconnect(); this._resize = null; }
+		if (this._dialog) { this._dialog.remove(); this._dialog = null; }
 	}
 
 	/** true inside the "add card" picker, whose preview boxes are small (not in a dashboard being edited) */
