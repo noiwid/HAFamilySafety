@@ -130,6 +130,16 @@ class FamilySafetyCard extends HTMLElement {
 		this._tab = 'today';
 		this._seen = '';
 		if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
+		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
+	}
+
+	/** Same rule as familylink-card: tab words only when the row is 405 px or wider and nothing is cut; icons and counts always stay. */
+	_fitTabs() {
+		const tabs = this.shadowRoot && this.shadowRoot.querySelector('.tabs');
+		if (!tabs) return;
+		const cut = () => tabs.scrollWidth > tabs.clientWidth + 1 || [...tabs.children].some((b) => b.scrollWidth > b.clientWidth + 1);
+		tabs.classList.remove('short');
+		if (tabs.clientWidth < 405 || cut()) tabs.classList.add('short');
 	}
 
 	/** The default config of the card picker: the first child with a screen time sensor. */
@@ -297,11 +307,10 @@ class FamilySafetyCard extends HTMLElement {
 			<ha-card>
 				<div class="head">
 					<ha-icon icon="${esc(c.icon || 'mdi:laptop')}" style="color:var(${accLocked ? '--error-color' : '--success-color'})"></ha-icon>
-					<span class="title">${esc(c.title || '')}</span>
+					<div class="tt"><span class="title">${esc(c.title || '')}</span>${status ? `<span class="status">${status}</span>` : ''}</div>
 					<span class="used">${isNaN(used) ? '' : hm(used)}${limit > 0 ? ' / ' + hm(limit) : ''}</span>
 					<button class="gear" data-settings aria-label="${esc(t('settings'))}" data-tip="${esc(t('settings'))}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
 				</div>
-				${status ? `<div class="status">${status}</div>` : ''}
 				<div class="track big"><div style="width:${pct}%"></div></div>
 				${missing.length ? `<div class="warn">${t('missing')}${esc(missing.join(', '))}</div>` : ''}
 				${tiles && c.show_tiles !== false ? `<div class="tiles">${tiles}</div>` : ''}
@@ -317,6 +326,9 @@ class FamilySafetyCard extends HTMLElement {
 				${sitesPart}
 				${weekPart}
 			</ha-card>`;
+		this._fitTabs();
+		// icons and fonts arrive after the first layout (slower on a phone) and widen the tabs: measure again
+		for (const ms of [300, 1500]) setTimeout(() => this._fitTabs(), ms);
 		const $ = (sel, fn) => this.shadowRoot.querySelectorAll(sel).forEach((el) => el.addEventListener('click', (ev) => fn(el, ev)));
 		$('[data-tab]', (b) => { this._tab = b.dataset.tab; this._render(); });
 		$('[data-app]', (r) => { const a = apps.find((x) => x.app_id === r.dataset.app); if (a) this._open(appSheet(this, a, paused.has(a.app_id))); });
@@ -371,13 +383,14 @@ FamilySafetyCard.css = `
 	:host { display: block; container-type: inline-size; }
 	ha-card { overflow: hidden; }
 	button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
-	.head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
+	.head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+	.tt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 	.head ha-icon { --mdc-icon-size: 28px; }
 	.title { font-weight: 700; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.used { margin-left: auto; font-weight: 700; font-size: 14px; white-space: nowrap; flex: none; }
 	.gear { width: 32px; height: 32px; margin: -6px -6px -6px 0; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.6; }
 	.gear ha-icon { --mdc-icon-size: 20px; }
-	.status { margin: -6px 16px 8px 54px; font-size: 13px; color: var(--secondary-text-color); }
+	.status { font-size: 13px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	em.warn2 { color: var(--warning-color, #ff9800); }
 	.track { height: 6px; border-radius: 3px; background: var(--divider-color); grid-column: 1 / 3; }
 	.track > div { height: 100%; border-radius: 3px; background: var(--primary-color); }
@@ -398,10 +411,11 @@ FamilySafetyCard.css = `
 	.label::before { content: ''; width: 3px; height: 12px; border-radius: 2px; background: var(--accent-color); }
 	.label .add { margin-left: auto; opacity: 1; }
 	.tabs { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
-	.tab { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 12px 2px; font-size: 13px;
+	.tab { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 12px 2px; font-size: 13px;
 		font-weight: 600; opacity: 0.6; border-bottom: 3px solid transparent; white-space: nowrap; }
 	.tab span { overflow: hidden; text-overflow: ellipsis; }
 	.tab ha-icon { --mdc-icon-size: 18px; flex: none; }
+	.tabs.short .tab .w { display: none; } .tabs.short .tab { gap: 4px; }
 	.tab.on { opacity: 1; border-bottom-color: var(--accent-color); }
 	.tab.on ha-icon { color: var(--accent-color); }
 	.list { padding: 6px 16px 14px; }
@@ -435,8 +449,9 @@ FamilySafetyCard.css = `
 		padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: #fff; background: rgba(40, 40, 40, 0.92); }
 	.tab[data-tip]:hover::after { right: auto; left: 50%; transform: translateX(-50%); }
 	/* narrow card (half width, phone, card picker preview): icons and counts only, tighter rows */
+	/* a little room in the tabs, so their words still fit down to about 400 px */
+	@container (max-width: 560px) { .tab { font-size: 12px; gap: 3px; padding: 10px 0; } }
 	@container (max-width: 420px) {
-		.tab .w { display: none; } .tab { gap: 4px; }
 		.head { gap: 8px; } .title { font-size: 14px; } .used { font-size: 13px; }
 		.tile { font-size: 12px; padding: 8px 2px; } .day b { font-size: 13px; } .day i { font-size: 8px; }
 	}
