@@ -92,4 +92,5 @@ def guard_service(
         await async_check_service_call(hass, call)
         return await handler(call)
 
+    guarded.familysafety_guarded = True  # checked by the tests: no service may skip the guard
     return guarded

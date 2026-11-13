@@ -6,6 +6,9 @@
  * websites, weekly limits). Every line opens a sheet whose draft lives in the sheet itself:
  * no helper and no script is needed, Save calls the integration's services directly.
  *
+ * Options: bonus (true by default, false hides the extra time bar; same key as the Family
+ * Link card), show_tiles / show_request / show_apps / show_websites / show_week (true by default).
+ *
  * Plain custom element, no build step and no dependency.
  */
 const DOMAIN = 'microsoft_family_safety';
@@ -43,9 +46,9 @@ const STR = {
 		settings: 'Settings', limits_sw: 'Screen time limits', limits_sw_sub: 'Off: no daily limit, the schedule comes back when on',
 		xbox_limits_sw: 'Xbox limits', xbox_limits_sw_sub: 'The console follows its own schedule', app_limits_sw: 'App limits',
 		app_limits_sw_sub: 'Off: no per-app limit is enforced', web_row: 'Web and content', web_row_sub: 'Filter, age rating, ask to buy',
-		conn: 'Connection', conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed',
+		conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed', pill_ok: 'Account linked', pill_reauth: 'Sign in again', pill_action: 'Action needed', pill_partial: 'Partly linked',
 		conn_terms: 'Microsoft asks to accept updated terms on account.microsoft.com', conn_proof: 'Microsoft asks to confirm your identity: sign in again',
-		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant', reauth_done: 'Check the notification to finish signing in',
+		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant',
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
 		bonus: 'Extra time', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
 		cancel_bonus_sub: 'Ends the extra time running now',
@@ -83,9 +86,9 @@ const STR = {
 		settings: 'Réglages', limits_sw: "Limites de temps d'écran", limits_sw_sub: 'Coupées : plus de limite du jour, le planning revient à la réactivation',
 		xbox_limits_sw: 'Limites Xbox', xbox_limits_sw_sub: 'La console suit son propre planning', app_limits_sw: 'Limites des applis',
 		app_limits_sw_sub: "Coupées : aucune limite d'appli ne s'applique", web_row: 'Web et contenus', web_row_sub: "Filtre, âge, demander avant d'acheter",
-		conn: 'Connexion', conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire',
+		conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire', pill_ok: 'Compte lié', pill_reauth: 'À reconnecter', pill_action: 'Action requise', pill_partial: 'Lien partiel',
 		conn_terms: 'Microsoft demande d’accepter ses nouvelles conditions sur account.microsoft.com', conn_proof: 'Microsoft demande de confirmer votre identité : reconnectez-vous',
-		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant', reauth_done: 'Ouvrez la notification pour terminer la connexion',
+		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant',
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
 		bonus: 'Temps en plus', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
 		cancel_bonus_sub: 'Arrête le temps en plus en cours',
@@ -152,7 +155,7 @@ class FamilySafetyCard extends HTMLElement {
 	static getStubConfig(hass) {
 		const e = Object.values(hass.entities || {}).find((x) => x.platform === DOMAIN && x.device_id && x.entity_id.startsWith('sensor.') && /_screen_time$/.test(x.entity_id)
 			&& !/_(xbox|windows)_screen_time$/.test(x.entity_id) && Object.values(hass.entities).some((y) => y.device_id === x.device_id && y.entity_id.endsWith('_applications')));
-		return { device: e ? e.device_id : '' };
+		return { device: e ? e.device_id : '', bonus: true };
 	}
 
 	getCardSize() { return this._compact() ? 5 : 9; }
@@ -164,6 +167,13 @@ class FamilySafetyCard extends HTMLElement {
 	connectedCallback() {
 		// where the card sits is only known once it is in the page: render again for the picker
 		if (this._hass && this._picker === undefined) { this._seen = ''; this.hass = this._hass; }
+		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
+	}
+
+	/** Removed from the page (view change, dashboard rebuilt): stop watching it, close its sheet. */
+	disconnectedCallback() {
+		if (this._resize) { this._resize.disconnect(); this._resize = null; }
+		if (this._dialog) { this._dialog.remove(); this._dialog = null; }
 	}
 
 	/** true inside the "add card" picker, whose preview boxes are small (not in a dashboard being edited) */
@@ -237,7 +247,7 @@ class FamilySafetyCard extends HTMLElement {
 		const extraOn = ch.windows_lock ? 'Windows' : ch.xbox_lock ? 'Xbox' : null;
 		const extraUntil = extraOn === 'Windows' ? this._attr(ch.time_remaining, 'extra_time_until', null) : null;
 		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
-		const extraBar = extraOn && !compact && c.show_extra !== false ? `<div class="bonus">
+		const extraBar = extraOn && !compact && c.bonus !== false ? `<div class="bonus">
 				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:restart"></ha-icon></button>
 				<div class="btxt"><div>${esc(t('extra_bar'))}</div><small>${extraUntil ? esc(t('extra_until').replace('{t}', clock(extraUntil))) : esc(t('extra_none'))}</small></div>
 				${press(15)}${press(30)}${press(60)}
@@ -627,6 +637,11 @@ function lockSheet(card, target) {
 	};
 }
 
+function openIntegration() {
+	history.pushState(null, '', '/config/integrations/integration/' + DOMAIN);
+	window.dispatchEvent(new CustomEvent('location-changed'));
+}
+
 function settingsSheet(card) {
 	const t = (k) => card._t(k), ch = card._config.child;
 	const sw = (id) => { const s = card._state(id); return s && s.state !== 'unavailable' ? s.state === 'on' : null; };
@@ -643,15 +658,21 @@ function settingsSheet(card) {
 		: a.reauth_required || a.reauth_requested ? t('conn_reauth') : conn.state === 'connected' ? t('conn_ok') : t('conn_degraded').replace('{r}', conn.state);
 	return {
 		icon: 'mdi:cog-outline', title: t('settings'), chip: 'mdi:account-child-circle', name: card._config.title || t('settings'), sub: '',
+		// connection as a coloured pill next to the name (full text as tooltip), not a row that looks like a button
+		pill: !conn ? null : {
+			ok: conn.state === 'connected' && !a.reauth_required && !a.account_interrupt,
+			text: t(a.account_interrupt ? 'pill_action' : a.reauth_required || a.reauth_requested ? 'pill_reauth' : conn.state === 'connected' ? 'pill_ok' : 'pill_partial'),
+			tip: connText,
+		},
 		draft,
 		rows: () => [
 			...toggles.map(([key, icon, title, sub]) => ({ kind: 'toggle', key, icon, title, sub })),
 			...(ch.web_filter ? [{ kind: 'action', nav: true, icon: 'mdi:shield-check-outline', title: t('web_row'), sub: t('web_row_sub'), run: () => card._open(webSheet(card)) }] : []),
-			{ kind: 'info', icon: conn && conn.state === 'connected' && !a.reauth_required ? 'mdi:lan-connect' : 'mdi:lan-disconnect', title: t('conn'), sub: connText },
-			{ kind: 'action', icon: 'mdi:login', title: t('reauth'), sub: t('reauth_sub'), done: t('reauth_done'),
-				run: () => card._hass.callService(DOMAIN, 'request_reauth', {}) },
+			// both continue on the integration's page (the sign-in is started there): close the sheet and go
+			{ kind: 'action', icon: 'mdi:login', title: t('reauth'), sub: t('reauth_sub'), close: true,
+				run: async () => { await card._hass.callService(DOMAIN, 'request_reauth', {}); openIntegration(); } },
 			{ kind: 'action', icon: 'mdi:open-in-app', title: t('configure'), sub: t('configure_sub'), close: true,
-				run: async () => { history.pushState(null, '', '/config/integrations/integration/' + DOMAIN); window.dispatchEvent(new CustomEvent('location-changed')); } },
+				run: async () => openIntegration() },
 		],
 		buttons: [{ label: t('save'), icon: 'mdi:content-save-outline', run: async (d) => {
 			for (const [key] of toggles) {
@@ -764,7 +785,6 @@ class FamilySafetyDialog extends HTMLElement {
 			if (r.kind === 'toggle') {
 				return `<div class="opt${d[r.key] ? ' on' : ''}" data-row="${i}">${chip(r.icon)}${txt(r)}<div class="sw${d[r.key] === null ? ' unk' : d[r.key] ? ' on' : ''}"><i></i></div></div>`;
 			}
-			if (r.kind === 'info') return `<div class="opt flat">${chip(r.icon)}${txt(r)}</div>`;
 			if (r.kind === 'action') return `<div class="opt act" data-row="${i}">${chip(r.icon)}${txt(r)}<ha-icon class="go" icon="mdi:chevron-right"></ha-icon></div>`;
 			return `<div class="opt flat">${chip(r.icon)}${txt(r)}${stepper(r)}</div>`;
 		};
@@ -775,7 +795,7 @@ class FamilySafetyDialog extends HTMLElement {
 			<div class="veil"></div>
 			<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(s.title)}">
 				<div class="bar"><ha-icon icon="${s.icon}"></ha-icon><span>${esc(s.title)}</span><button class="x" aria-label="${esc(t('close'))}"><ha-icon icon="mdi:close"></ha-icon></button></div>
-				<div class="head"><div class="chip sq"><ha-icon icon="${s.chip}"></ha-icon></div><div class="txt"><div class="big">${esc(s.name)}</div>${s.sub ? `<small>${esc(s.sub)}</small>` : ''}</div></div>
+				<div class="head"><div class="chip sq"><ha-icon icon="${s.chip}"></ha-icon></div><div class="txt"><div class="big">${esc(s.name)}</div>${s.sub ? `<small>${esc(s.sub)}</small>` : ''}</div>${s.pill ? `<span class="pill${s.pill.ok ? ' ok' : ''}" title="${esc(s.pill.tip)}" role="status"><ha-icon icon="mdi:microsoft"></ha-icon>${esc(s.pill.text)}</span>` : ''}</div>
 				${rows.map(row).join('')}
 				${this._error ? `<div class="err" role="alert">${esc(this._error)}</div>` : ''}
 				${this._notice ? `<div class="note" role="status">${esc(this._notice)}</div>` : ''}
@@ -814,7 +834,7 @@ class FamilySafetyDialog extends HTMLElement {
 FamilySafetyDialog.css = `
 	:host { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
 	.veil { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
-	.sheet { position: relative; width: min(440px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 16px;
+	.sheet { position: relative; width: min(440px, calc(100vw - 24px)); max-height: calc(100% - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); overflow: auto; box-sizing: border-box; padding: 16px;
 		border-radius: 28px; background: #1c1c1e; color: #ebebf0; }
 	.bar { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; margin-bottom: 14px; }
 	.bar span { flex: 1; }
@@ -822,6 +842,10 @@ FamilySafetyDialog.css = `
 	.x { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.08); display: inline-flex; align-items: center; justify-content: center; }
 	.head, .opt { display: flex; align-items: center; gap: 14px; }
 	.head { margin-bottom: 14px; }
+	.pill { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+		background: rgba(244, 67, 54, 0.15); color: #ff8a80; }
+	.pill ha-icon { --mdc-icon-size: 14px; }
+	.pill.ok { background: rgba(76, 175, 80, 0.15); color: #81c784; }
 	.opt { padding: 12px 14px; margin-bottom: 8px; border-radius: 18px; background: rgba(255, 255, 255, 0.06); border: 2px solid transparent; cursor: pointer; min-height: 48px; }
 	.opt.flat { cursor: default; }
 	.opt.on { border-color: #ff9800; }
@@ -853,7 +877,7 @@ FamilySafetyDialog.css = `
 	@keyframes spin { to { transform: rotate(360deg); } }
 `;
 
-const SECTIONS = ['show_extra', 'show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
+const SECTIONS = ['bonus', 'show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
 
 /** Visual editor: the child (its Family Safety device), a title, the sections shown, the language. */
 class FamilySafetyCardEditor extends HTMLElement {
@@ -868,13 +892,13 @@ class FamilySafetyCardEditor extends HTMLElement {
 			this._form.computeLabel = (s) => ({
 				device: fr ? 'Enfant (son appareil Family Safety)' : 'Child (its Family Safety device)', title: fr ? 'Titre' : 'Title',
 				language: fr ? 'Langue' : 'Language',
-				show_extra: fr ? 'Barre temps en plus' : 'Extra time bar', show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
+				bonus: fr ? 'Barre de temps en plus (+15 / +30 / +60 min)' : 'Extra time bar (+15 / +30 / +60 min)', show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
 				show_apps: fr ? 'Applications' : 'Applications', show_websites: fr ? 'Sites web' : 'Websites', show_week: fr ? 'Limites de la semaine' : 'Weekly limits',
 			}[s.name]);
 			this._form.addEventListener('value-changed', (e) => {
 				const config = { ...e.detail.value };
 				delete config.compact;  // replaced by the show_* switches
-				Object.keys(config).forEach((k) => (config[k] === '' || config[k] === undefined || (SECTIONS.includes(k) && config[k] === true)) && delete config[k]);
+				Object.keys(config).forEach((k) => (config[k] === '' || config[k] === undefined || (k !== 'bonus' && SECTIONS.includes(k) && config[k] === true)) && delete config[k]);
 				this._config = config;
 				this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
 			});

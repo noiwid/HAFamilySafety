@@ -118,6 +118,14 @@ def _range_to_slots(start_hour: int, start_minute: int, end_hour: int, end_minut
     return intervals
 
 
+#: Restore point key: which operation holds it ("lock" or "limits_off").
+SAVED_BY = "_saved_by"
+
+
+def _saved_by(operation: str) -> str:
+    return "lock" if operation == "lock" else "limits_off"
+
+
 def _policy_intervals_to_slots(day_data: dict[str, Any]) -> list[bool] | None:
     """Convert saved Microsoft interval formats to 48 half-hour slots.
 
@@ -1342,7 +1350,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ValueError("day_of_week must be between 0 and 6")
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
             raise ValueError("screen-time allowance must be between 0 and 24 hours")
-        await self._set_screentime_allowance(child_id, day_of_week, hours, minutes)
+        async with self._account_lock(child_id):
+            await self._set_screentime_allowance(child_id, day_of_week, hours, minutes)
+            await self._update_saved_day(
+                child_id, day_of_week, allowance=f"{hours:02d}:{minutes:02d}:00"
+            )
         self._update_cached_day(
             child_id, day_of_week, allowance=f"{hours:02d}:{minutes:02d}:00"
         )
@@ -1372,9 +1384,41 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not 0 <= start_total < end_total <= 1440:
             raise ValueError("screen-time interval end must be later than start")
         slots = _range_to_slots(start_hour, start_minute, end_hour, end_minute)
-        await self._set_screentime_intervals(child_id, day_of_week, slots)
+        async with self._account_lock(child_id):
+            await self._set_screentime_intervals(child_id, day_of_week, slots)
+            await self._update_saved_day(child_id, day_of_week, slots=slots)
         self._update_cached_day(child_id, day_of_week, slots=slots)
         await self.async_request_refresh()
+
+    async def _update_saved_day(
+        self,
+        child_id: str,
+        day_of_week: int,
+        *,
+        allowance: str | None = None,
+        slots: list[bool] | None = None,
+    ) -> None:
+        """Carry a day written during a lock or "limits off" into the restore point.
+
+        Otherwise the unlock (or "limits on") writes the old day back and the
+        parent's change is lost.
+        """
+        saved = self._saved_screentime.get(self._policy_key(child_id))
+        if not saved:
+            return
+        daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions")
+        if not isinstance(daily, dict):
+            return
+        day_key = DAY_KEYS[day_of_week]
+        key = day_key if day_key in daily or day_key.capitalize() not in daily else day_key.capitalize()
+        day = dict(daily.get(key) or {})
+        if allowance is not None:
+            day.pop("Allowance", None)
+            day["allowance"] = allowance
+        if slots is not None:
+            day["timeline"] = list(slots)
+        daily[key] = day
+        await self._async_save_screentime()
 
     def _update_cached_day(
         self,
@@ -2245,6 +2289,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A restore point is only worth something if `_saved_week` can read
         # it back; otherwise the unlock would refuse and the child stay at 0.
         saved_ok = self._saved_week(self._saved_screentime.get(key) or {}) is not None
+        if saved_ok:
+            # The schedule still in place is the one written by the operation
+            # that saved this point (a lock's zeros, a "limits off" 24 h week,
+            # or a day edited since): only the saved one is the child's real
+            # schedule, so it is kept and only the operation is noted.
+            self._saved_screentime[key][SAVED_BY] = _saved_by(operation)
+            await self._async_save_screentime()
+            return
         if current_policy:
             if self._has_nonzero_allowance(current_policy):
                 if self._saved_week(current_policy) is None:
@@ -2253,7 +2305,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "has a day this integration cannot read back, so it could not "
                         "be restored afterwards."
                     )
-                self._saved_screentime[key] = current_policy
+                self._saved_screentime[key] = {**current_policy, SAVED_BY: _saved_by(operation)}
                 # A new restore point supersedes any earlier release.
                 self._released_screentime.discard(key)
                 await self._async_save_screentime()
@@ -2445,12 +2497,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mobile_ok = True
                 except Exception as err:  # noqa: BLE001 - fall back to the web path
                     _LOGGER.warning("Mobile schedule on/off failed, trying web: %s", err)
-            has_saved = self._policy_key(account_id) in self._saved_screentime
+            saved = self._saved_screentime.get(self._policy_key(account_id))
+            has_saved = saved is not None
             if enabled:
-                # The flag is on; a restore point left by the web fallback
-                # (or a lock) is restored too. Without one, the flag alone
-                # was the whole job.
-                if has_saved:
+                # The flag is on; a restore point left by the web fallback is
+                # restored too. One held by a lock is not: turning limits on
+                # must not unlock the child (only unlock_account does).
+                if has_saved and saved.get(SAVED_BY) == "lock":
+                    if not mobile_ok:
+                        await self._set_schedule_flag(account_id, True)
+                elif has_saved:
                     await self._restore_saved(
                         account_id, "re-enable screen time limits for", enabled=True
                     )

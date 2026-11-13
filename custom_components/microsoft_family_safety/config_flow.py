@@ -1354,18 +1354,13 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 try:
                     info = await validate_redirect_url(self.hass, redirect_url)
-                    refresh_token = info["refresh_token"]
-                    await self.async_set_unique_id(refresh_token[:20])
-                    self._abort_if_unique_id_configured()
-                    data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
-                    return self.async_create_entry(
-                        title=info["title"], data=data, options=self._pending_options or {}
-                    )
                 except InvalidAuth:
                     errors["base"] = ERROR_AUTH_FAILED
                 except Exception:
                     _LOGGER.exception("Unexpected exception during manual authentication")
                     errors["base"] = "unknown"
+                else:
+                    return await self._async_finish_manual_auth(info)
 
         return self.async_show_form(
             step_id="auth",
@@ -1376,6 +1371,33 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             description_placeholders={"auth_url": _build_auth_url()},
             errors=errors,
+        )
+
+    async def _async_finish_manual_auth(self, info: dict[str, Any]) -> FlowResult:
+        """The manual step's result, keyed on the Microsoft user id like the other paths.
+
+        A reauth or reconfigure updates its entry (same account only); a new
+        entry gets the user id as unique id, so the same account is not added twice.
+        """
+        refresh_token = info["refresh_token"]
+        user_id = str(info.get("user_id") or "")
+        if self._is_existing_entry_auth_flow():
+            entry = self._get_existing_entry()
+            old_user_id = str(entry.data.get(CONF_AUTH_USER_ID, ""))
+            if old_user_id and user_id and old_user_id != user_id:
+                return self.async_abort(reason="wrong_account")
+            self._prepare_existing_entry_update(entry, refresh_token, user_id)
+            assert self._pending_data is not None
+            # The manual step only gives the mobile token: no web session.
+            self._pending_data[CONF_WEB_COOKIES] = None
+            return await self.async_step_reauth_success(user_input={})
+        await self.async_set_unique_id(user_id or refresh_token[:20])
+        self._abort_if_unique_id_configured()
+        data: dict[str, Any] = {CONF_REFRESH_TOKEN: refresh_token}
+        if user_id:
+            data[CONF_AUTH_USER_ID] = user_id
+        return self.async_create_entry(
+            title=info["title"], data=data, options=self._pending_options or {}
         )
 
     async def async_step_reconfigure(
@@ -1452,6 +1474,10 @@ class FamilySafetyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except NativeAuthLocalHttpRequired:
             return self.async_abort(reason="native_http_not_local")
         except NativeAuthHttpsRequired:
+            # Without Xbox the mobile token is all an entry needs: the manual
+            # redirect step renews it on an HTTP-only instance, as at creation.
+            if self._mobile_only():
+                return await self.async_step_auth()
             return self.async_abort(reason="native_https_required")
 
 

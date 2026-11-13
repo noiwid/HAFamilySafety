@@ -470,3 +470,13 @@ async def test_manual_reauth_survives_a_later_automatic_reason(make_coordinator,
     await coord._async_withdraw_unneeded_reauth()
     assert coord._reauth_requested is True
     abort.assert_not_called()
+
+
+async def test_an_html_page_with_status_200_is_not_a_success():
+    """Audit 2026-11-13: a sign-in page answered 200 must not count as a done write."""
+    api = _web_api(FakeResponse(200, body="<!DOCTYPE html><html><form id='fmHF'></form></html>"))
+    assert await _xbox_request(api) is None
+    assert api.last_isolated_error_code == "NON_JSON_2XX"
+    # An empty body still means done.
+    api = _web_api(FakeResponse(200, body=""))
+    assert await _xbox_request(api) == {"success": True, "status": 200}
