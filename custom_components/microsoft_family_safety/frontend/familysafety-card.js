@@ -133,13 +133,13 @@ class FamilySafetyCard extends HTMLElement {
 		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
 	}
 
-	/** Same rule as familylink-card: tab words only when the row is 420 px or wider and nothing is cut; icons and counts always stay. */
+	/** Same rule as familylink-card: tab words only when the row is 405 px or wider and nothing is cut; icons and counts always stay. */
 	_fitTabs() {
 		const tabs = this.shadowRoot && this.shadowRoot.querySelector('.tabs');
 		if (!tabs) return;
 		const cut = () => tabs.scrollWidth > tabs.clientWidth + 1 || [...tabs.children].some((b) => b.scrollWidth > b.clientWidth + 1);
 		tabs.classList.remove('short');
-		if (tabs.clientWidth < 420 || cut()) tabs.classList.add('short');
+		if (tabs.clientWidth < 405 || cut()) tabs.classList.add('short');
 	}
 
 	/** The default config of the card picker: the first child with a screen time sensor. */
@@ -449,6 +449,8 @@ FamilySafetyCard.css = `
 		padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: #fff; background: rgba(40, 40, 40, 0.92); }
 	.tab[data-tip]:hover::after { right: auto; left: 50%; transform: translateX(-50%); }
 	/* narrow card (half width, phone, card picker preview): icons and counts only, tighter rows */
+	/* a little room in the tabs, so their words still fit down to about 400 px */
+	@container (max-width: 560px) { .tab { font-size: 12px; gap: 3px; padding: 10px 0; } }
 	@container (max-width: 420px) {
 		.head { gap: 8px; } .title { font-size: 14px; } .used { font-size: 13px; }
 		.tile { font-size: 12px; padding: 8px 2px; } .day b { font-size: 13px; } .day i { font-size: 8px; }
