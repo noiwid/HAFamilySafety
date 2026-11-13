@@ -1,4 +1,4 @@
-"""add_time_bonus / cancel_time_bonus: Xbox extra time through xapprove only."""
+"""add_time_bonus / cancel_time_bonus: Xbox extra time through xapprove, Windows through the mobile overrides."""
 
 from __future__ import annotations
 
@@ -169,9 +169,76 @@ async def test_without_the_xbox_link_it_fails_clearly(coordinator):
     coordinator.xbox_family.async_create_override.assert_not_awaited()
 
 
-async def test_windows_is_refused(coordinator):
-    with pytest.raises(HomeAssistantError, match="only be given on the Xbox"):
+def _windows(*overrides: tuple[str, str]) -> dict:
+    """A mobile overrides document with the Windows entry (listed as "Desktop", as Microsoft may)."""
+    return {"lockablePlatforms": [{
+        "appliesTo": "Desktop",
+        "overrides": [{"overrideType": t, "validUntil": u} for t, u in overrides],
+        "devices": [],
+    }]}
+
+
+@pytest.fixture
+def mobile(coordinator):
+    """The mobile API of the coordinator: overrides read and written."""
+    coordinator.web_api = MagicMock()
+    coordinator.web_api.get_mobile_device_overrides = AsyncMock(return_value=_windows())
+    coordinator.web_api.set_mobile_device_override = AsyncMock()
+    coordinator._MOBILE_READBACK_DELAYS = (0,)
+    return coordinator.web_api
+
+
+async def test_windows_extra_time_is_an_allow_until_override(coordinator, mobile):
+    until = dt_util.utcnow() + timedelta(minutes=30)
+    mobile.set_mobile_device_override.return_value = _windows(("AllowUntil", _iso(until)))
+    answer = await coordinator.async_add_time_bonus(CHILD, "Windows", until)
+    assert answer["added"] is True and answer["replaced_lock"] is False
+    assert mobile.set_mobile_device_override.await_args.args[1:3] == ("Desktop", "AllowUntil")
+    # Allowed now reads it until a poll does
+    acct = coordinator._accounts[int(CHILD)]
+    acct.extra_time = {}
+    assert coordinator._merge_extra_time(acct)["Windows"]
+
+
+async def test_windows_extra_time_is_refused_while_locked(coordinator, mobile):
+    mobile.get_mobile_device_overrides.return_value = _windows(("BlockUntil", FAR))
+    with pytest.raises(HomeAssistantError, match="Windows is locked"):
         await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=5))
+    mobile.set_mobile_device_override.assert_not_awaited()
+
+
+async def test_windows_extra_time_not_listed_by_microsoft_fails(coordinator, mobile):
+    mobile.set_mobile_device_override.return_value = _windows()
+    with pytest.raises(HomeAssistantError, match="did not confirm the Windows extra time"):
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=5))
+
+
+async def test_cancelling_windows_extra_time(coordinator, mobile):
+    assert await coordinator.async_cancel_time_bonus(CHILD, "Windows") == {
+        "cancelled": False, "reason": "no_extra_time",
+    }
+    mobile.set_mobile_device_override.assert_not_awaited()
+    mobile.get_mobile_device_overrides.return_value = _windows(("AllowUntil", FAR))
+    mobile.set_mobile_device_override.return_value = _windows()
+    assert await coordinator.async_cancel_time_bonus(CHILD, "Windows") == {
+        "cancelled": True, "lock_in_force": False,
+    }
+    assert mobile.set_mobile_device_override.await_args.args[2] == "Cancel"
+    # a lock is never lifted by a cancel of the extra time
+    mobile.set_mobile_device_override.reset_mock()
+    coordinator._mobile_writes.clear()  # our cancel would otherwise stand over the read for 2 min
+    mobile.get_mobile_device_overrides.return_value = _windows(("BlockUntil", FAR), ("AllowUntil", FAR))
+    with pytest.raises(HomeAssistantError, match="locked"):
+        await coordinator.async_cancel_time_bonus(CHILD, "Windows")
+    mobile.set_mobile_device_override.assert_not_awaited()
+
+
+async def test_windows_allowed_now_counts_the_extra_time(coordinator):
+    later = dt_util.utcnow() + timedelta(minutes=40)
+    coordinator.data = {"accounts": {CHILD: {"extra_time": {"Windows": later.isoformat()}}}, "devices": {}}
+    status = coordinator.platform_status(CHILD, "Windows")
+    assert status["allowed"] is True and status["reason"] == "extra_time"
+    assert 38 <= status["remaining_minutes"] <= 40
 
 
 async def test_an_unknown_child_is_refused(coordinator):
@@ -320,7 +387,7 @@ async def test_service_takes_an_entity_of_the_child(hass):
         coord.async_cancel_time_bonus.assert_awaited_once_with(CHILD, "Xbox")
 
 
-async def test_service_refuses_windows(hass):
+async def test_service_refuses_mobile(hass):
     import voluptuous as vol
 
     with patch("custom_components.microsoft_family_safety._get_coordinator", return_value=MagicMock()):
@@ -328,7 +395,7 @@ async def test_service_refuses_windows(hass):
         with pytest.raises(vol.Invalid):
             await hass.services.async_call(
                 DOMAIN, "add_time_bonus",
-                {"account_id": CHILD, "platform": "Windows", "minutes": 5}, blocking=True,
+                {"account_id": CHILD, "platform": "Mobile", "minutes": 5}, blocking=True,
             )
 
 
@@ -341,5 +408,6 @@ def test_platform_is_accepted_in_any_case() -> None:
 
     for schema in (SERVICE_ADD_TIME_BONUS_SCHEMA, SERVICE_CANCEL_TIME_BONUS_SCHEMA):
         assert schema({"account_id": "1", "platform": " xbox "})["platform"] == "Xbox"
+        assert schema({"account_id": "1", "platform": "windows"})["platform"] == "Windows"
         with pytest.raises(Exception):
-            schema({"account_id": "1", "platform": "windows"})
+            schema({"account_id": "1", "platform": "mobile"})

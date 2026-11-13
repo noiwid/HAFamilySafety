@@ -94,6 +94,7 @@ from .mobile_overrides import (
     MOBILE_OVERRIDES_PLAT_INFO,
     is_overrides_document,
     mobile_blocked_platforms,
+    mobile_extra_time,
     mobile_lock_of,
 )
 
@@ -831,6 +832,7 @@ def _patch_v4_overrides_read() -> bool:
             return
         setattr(self, _OVERRIDES_UNREAD_ATTR, False)
         self.blocked_platforms = mobile_blocked_platforms(state)
+        self.extra_time = mobile_extra_time(state)
         for entry in state.get("lockablePlatforms") or []:
             if not isinstance(entry, dict):
                 continue

@@ -47,7 +47,7 @@ const STR = {
 		conn_terms: 'Microsoft asks to accept updated terms on account.microsoft.com', conn_proof: 'Microsoft asks to confirm your identity: sign in again',
 		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant', reauth_done: 'Check the notification to finish signing in',
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
-		bonus: 'Extra time on the Xbox', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
+		bonus: 'Extra time', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
 		cancel_bonus_sub: 'Ends the extra time running now',
 		dnames: { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' },
 	},
@@ -85,7 +85,7 @@ const STR = {
 		conn_terms: 'Microsoft demande d’accepter ses nouvelles conditions sur account.microsoft.com', conn_proof: 'Microsoft demande de confirmer votre identité : reconnectez-vous',
 		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant', reauth_done: 'Ouvrez la notification pour terminer la connexion',
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
-		bonus: 'Temps en plus sur la Xbox', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
+		bonus: 'Temps en plus', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
 		cancel_bonus_sub: 'Arrête le temps en plus en cours',
 		dnames: { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' },
 	},
@@ -580,13 +580,13 @@ function lockSheet(card, target) {
 		rows: (d) => [
 			...choices,
 			{ kind: 'stepper', key: 'hours', step: 1, min: 1, max: 168, fmt: hrs, icon: 'mdi:timer-sand', title: t('duration'), sub: t('duration_sub') },
-			// extra time exists on the Xbox only (Xbox Family Settings service)
-			...(d.target === 'Xbox' ? [
+			// extra time: Xbox (Xbox Family Settings service) and Windows (mobile overrides)
+			...(d.target === 'Xbox' || d.target === 'Windows' ? [
 				{ kind: 'stepper', key: 'bonus', step: 15, min: 15, max: 240, fmt: hm, icon: 'mdi:timer-plus-outline', title: t('bonus'), sub: t('bonus_sub') },
 				{ kind: 'action', icon: 'mdi:plus-circle-outline', title: t('add_bonus'), sub: '', close: true,
-					run: (dd) => card._call('add_time_bonus', { platform: 'Xbox', minutes: dd.bonus }) },
+					run: (dd) => card._call('add_time_bonus', { platform: dd.target, minutes: dd.bonus }) },
 				{ kind: 'action', icon: 'mdi:close-circle-outline', title: t('cancel_bonus'), sub: t('cancel_bonus_sub'), close: true,
-					run: () => card._call('cancel_time_bonus', { platform: 'Xbox' }) },
+					run: (dd) => card._call('cancel_time_bonus', { platform: dd.target }) },
 			] : []),
 		],
 		buttons: [

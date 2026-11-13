@@ -101,6 +101,32 @@ def mobile_lock_of(entry: dict | None, now: datetime | None = None) -> dict | No
     return None
 
 
+def mobile_extra_time_of(entry: dict | None, now: datetime | None = None) -> datetime | None:
+    """When the extra time (AllowUntil) in force on a platform entry ends, if any."""
+    now = now or dt_util.utcnow()
+    for override in (entry or {}).get("overrides") or []:
+        if not isinstance(override, dict):
+            continue
+        if str(override.get("overrideType") or "").lower() != MOBILE_OVERRIDE_ALLOW.lower():
+            continue
+        until = _until(override.get("validUntil"))
+        if until is not None and until > now:
+            return until
+    return None
+
+
+def mobile_extra_time(state: Any, now: datetime | None = None) -> dict[str, str]:
+    """Platform name -> end of the extra time in force (UTC ISO), for each platform that has some."""
+    now = now or dt_util.utcnow()
+    result: dict[str, str] = {}
+    for entry in _platforms(state):
+        name = mobile_platform_name(entry.get("appliesTo"))
+        until = mobile_extra_time_of(entry, now)
+        if name and until is not None and name not in result:
+            result[name] = until.isoformat()
+    return result
+
+
 def mobile_blocked_platforms(state: Any, now: datetime | None = None) -> list[str]:
     """The platforms locked right now, by the integration's platform names."""
     now = now or dt_util.utcnow()
