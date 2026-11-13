@@ -1662,16 +1662,37 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         xapprove answering, the policy is not read from the web; the usage is,
         when only xapprove's usage report failed.
         """
-        web_gate = bool(
+        web_gate = self._family_web_ready
+        return (
+            web_gate and xapprove is None,
+            web_gate and (xapprove is None or xapprove.get("usage") is None),
+        )
+
+    @property
+    def _family_web_ready(self) -> bool:
+        """The Family web session can serve the Xbox reads right now."""
+        return bool(
             self.web_api is not None
             and self.web_api.has_web_cookies
             and self.web_api.family_context_state == "ready"
             and float(getattr(self.web_api, "_family_web_backoff_until", 0.0) or 0.0)
             <= time.monotonic()
         )
+
+    @property
+    def xbox_time_missing(self) -> bool:
+        """Xbox is ticked but Xbox play time cannot be read.
+
+        Neither the Xbox Family Settings sign-in (missing or refused) nor the
+        Family web session can serve the Xbox usage report, so the Xbox play
+        time sensor has nothing new, and the account's Screen Time is left with
+        the mobile aggregator's figure, which on some accounts leaves Xbox play
+        out or reads 0. The value is not changed; this marks it.
+        """
         return (
-            web_gate and xapprove is None,
-            web_gate and (xapprove is None or xapprove.get("usage") is None),
+            self.xbox_features
+            and not self.xbox_family.usable
+            and not self._family_web_ready
         )
 
     async def _async_fetch_xapprove(
@@ -2439,6 +2460,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             **self.xbox_family.diagnostics(),
             "xbox_family_matched_children": len(self._xbox_xuids),
             "xbox_family_unmatched_children": len(self._xbox_unmatched - set(self._xbox_xuids)),
+            "xbox_time_missing": self.xbox_time_missing,
             "runtime_credentials_persisted": bool(self._runtime_auth_state),
             "reauth_requested": self._reauth_requested,
             "reauth_required": self._reauth_requested,

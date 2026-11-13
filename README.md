@@ -286,7 +286,7 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 
 | Entity | Entity ID | State | Key Attributes |
 |--------|-----------|-------|----------------|
-| Screen Time | `sensor.{prefix}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `average_screentime`, `date`, `raw_microsoft_minutes`, `last_api_poll`, `update_interval_seconds` |
+| Screen Time | `sensor.{prefix}_screen_time` | Minutes used today | `formatted_time`, `hours`, `minutes`, `average_screentime`, `date`, `raw_microsoft_minutes`, `last_api_poll`, `update_interval_seconds`, `xbox_time_missing` (only when Xbox is ticked and neither the Xbox Family Settings sign-in nor the Family web session can read Xbox play: the total may then leave Xbox play out) |
 | Account Info | `sensor.{prefix}_account_info` | Full name | `user_id`, `first_name`, `surname`, `profile_picture`, `device_count` |
 | Applications | `sensor.{prefix}_applications` | App count | `blocked_count`, `applications` (each app: `app_id`, `app_name`, `blocked`, `icon`, `usage_minutes`, plus today's `limit_minutes`, null without a limit, `limit_start` / `limit_end` as "HH:MM" when the limit has an allowed window, and `limit_enabled`; not recorded in history), `paused_apps` (apps paused by `pause_app`: `app_id`, `app_name`, `paused`: `ours` while still blocked, `parent` once someone unblocked them) |
 | Balance | `sensor.{prefix}_balance` | Account balance | *(monetary sensor, only if available)* |
@@ -330,7 +330,7 @@ Windows uses the Windows schedule and the minutes of the child's Windows devices
 
 | Entity | Entity ID | State | Key Attributes |
 |--------|-----------|-------|----------------|
-| Connection | `sensor.microsoft_family_safety_connection` | connected / degraded / disconnected | `mobile_api`, `web_session`, `web_api`, `family_context`, `screentime_policy_source`, `native_web_auth`, `reauth_required`, `reauth_recommended`, `last_update_success` |
+| Connection | `sensor.microsoft_family_safety_connection` | connected / degraded / disconnected | `mobile_api`, `web_session`, `web_api`, `family_context`, `screentime_policy_source`, `native_web_auth`, `xbox_time_missing`, `reauth_required`, `reauth_recommended`, `last_update_success` |
 
 `degraded` means the mobile API works but the Family web session does not. Since 2.0.20 that only affects the Xbox play time and the Xbox lock; the schedules keep working on the mobile API. Without Xbox the web session is not used and the state is `connected` whenever the mobile API answers (attribute `xbox_features: false`). When that state persists for two consecutive updates, `reauth_recommended` turns `true`, a notification is raised and the reauthentication flow is started automatically. Only a real login redirect, an expired account session or that two-update condition triggers reauthentication; a single rejected request does not, to avoid loops on a merely stale token. This is a **diagnostic** entity; enable it in the entity list if it is hidden.
 
