@@ -49,9 +49,8 @@ const STR = {
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
 		bonus: 'Extra time', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
 		cancel_bonus_sub: 'Ends the extra time running now',
-		extra_bar: 'Extra time', extra_none: 'None running', extra_until: 'Allowed until {t}',
-		tip_extra: 'Allow {p} for {n} min from now, even past the limit (not added to the day: replaces any extra time running)',
-		tip_extra_end: 'End the extra time now', tip_extra_custom: 'Another duration',
+		extra_bar: 'Reset', extra_none: 'No extra time', extra_until: 'Free until {t}',
+		tip_extra: '{n} min free from now', tip_extra_end: 'End the extra time', tip_extra_custom: 'Custom duration',
 		dnames: { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' },
 	},
 	fr: {
@@ -90,9 +89,8 @@ const STR = {
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
 		bonus: 'Temps en plus', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
 		cancel_bonus_sub: 'Arrête le temps en plus en cours',
-		extra_bar: 'Temps en plus', extra_none: 'Aucun en cours', extra_until: "Autorisé jusqu'à {t}",
-		tip_extra: "Autorise {p} pendant {n} min à partir de maintenant, même au-delà de la limite (ne s'ajoute pas à la journée : remplace le temps en plus en cours)",
-		tip_extra_end: 'Arrête le temps en plus maintenant', tip_extra_custom: 'Une autre durée',
+		extra_bar: 'Reset', extra_none: 'Aucun temps en plus', extra_until: "Libre jusqu'à {t}",
+		tip_extra: '{n} min libres dès maintenant', tip_extra_end: 'Arrêter le temps en plus', tip_extra_custom: 'Durée au choix',
 		dnames: { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' },
 	},
 };
@@ -238,9 +236,9 @@ class FamilySafetyCard extends HTMLElement {
 		// extra time: a window from now (Microsoft's AllowUntil), not minutes added to the day
 		const extraOn = ch.windows_lock ? 'Windows' : ch.xbox_lock ? 'Xbox' : null;
 		const extraUntil = extraOn === 'Windows' ? this._attr(ch.time_remaining, 'extra_time_until', null) : null;
-		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{p}', extraOn).replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
+		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
 		const extraBar = extraOn && !compact && c.show_extra !== false ? `<div class="bonus">
-				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:timer-off-outline"></ha-icon></button>
+				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:restart"></ha-icon></button>
 				<div class="btxt"><div>${esc(t('extra_bar'))}</div><small>${extraUntil ? esc(t('extra_until').replace('{t}', clock(extraUntil))) : esc(t('extra_none'))}</small></div>
 				${press(15)}${press(30)}${press(60)}
 				<button class="round" data-extra-custom data-tip="${esc(t('tip_extra_custom'))}" aria-label="${esc(t('tip_extra_custom'))}"><ha-icon icon="mdi:timer-edit-outline"></ha-icon></button>
@@ -427,6 +425,7 @@ FamilySafetyCard.css = `
 	.round.big { width: 40px; height: 40px; border-radius: 20px; }
 	.round[disabled] { opacity: 0.3; cursor: default; }
 	.round ha-icon { --mdc-icon-size: 20px; }
+	.round.big[data-tip]:hover::after { right: auto; left: 0; }
 	.track.big > div { background: var(--accent-color); }
 	.warn { margin: 0 16px 8px; font-size: 12px; color: var(--error-color); }
 	.tiles { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
