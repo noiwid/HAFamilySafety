@@ -1293,6 +1293,16 @@ class FamilySafetyWebAPI:
                     try:
                         payload = await resp.json(content_type=None)
                     except (aiohttp.ContentTypeError, ValueError):
+                        if text.lstrip().startswith("<"):
+                            # A sign-in or interstitial page answered 200: every
+                            # /family/api endpoint answers JSON, so nothing was done.
+                            _set_error("NON_JSON_2XX")
+                            warn(
+                                "Family web API %s answered an HTML page with status %s; "
+                                "treating it as a failure",
+                                endpoint, resp.status,
+                            )
+                            return None
                         return {"success": True, "status": resp.status}
                     self._cache_relationship_tokens(payload)
                     return payload
