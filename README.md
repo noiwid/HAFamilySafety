@@ -2,6 +2,7 @@
 
 [![GitHub Release][releases-shield]][releases]
 [![Marketplace][marketplace-shield]][marketplace]
+[![Downloads][downloads-shield]][releases]
 [![License][license-shield]][license]
 [![Buy Me A Beer](https://img.shields.io/badge/Buy%20me%20a%20beer-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/noiwid)
 
@@ -1205,6 +1206,7 @@ When reporting an issue, please include: HA version, integration version, whethe
 
 [releases-shield]: https://img.shields.io/github/release/noiwid/HAFamilySafety.svg?style=for-the-badge
 [releases]: https://github.com/noiwid/HAFamilySafety/releases
+[downloads-shield]: https://img.shields.io/github/downloads/noiwid/HAFamilySafety/total.svg?style=for-the-badge
 [license-shield]: https://img.shields.io/github/license/noiwid/HAFamilySafety.svg?style=for-the-badge
 [license]: LICENSE
 [marketplace-shield]: https://img.shields.io/badge/Marketplace-Default-41BDF5.svg?style=for-the-badge
