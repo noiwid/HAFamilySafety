@@ -17,6 +17,7 @@ import logging
 import re
 import time
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 from yarl import URL
@@ -2411,7 +2412,7 @@ class FamilySafetyWebAPI:
         body = {**self._app_limit_base(app_id, display_name), **{d: day for d in DAY_KEYS}}
         result = await self._request(
             "PATCH",
-            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            f"/v3/AppLimits/policies/{child_id}/{quote(str(app_id), safe=':')}",
             json_data=body,
             extra_headers={
                 "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
@@ -2425,7 +2426,7 @@ class FamilySafetyWebAPI:
         """Remove the app's time limit: the same PATCH without the day keys."""
         result = await self._request(
             "PATCH",
-            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            f"/v3/AppLimits/policies/{child_id}/{quote(str(app_id), safe=':')}",
             json_data=self._app_limit_base(app_id, display_name),
             extra_headers={
                 "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
@@ -2472,7 +2473,7 @@ class FamilySafetyWebAPI:
         """PATCH an app policy as given (app_pause.py builds the body)."""
         result = await self._request(
             "PATCH",
-            f"/v3/AppLimits/policies/{child_id}/{app_id}",
+            f"/v3/AppLimits/policies/{child_id}/{quote(str(app_id), safe=':')}",
             json_data=body,
             extra_headers={
                 "Plat-Info": self._APP_LIMIT_PLATFORMS.get(str(platform).lower(), "Windows")
