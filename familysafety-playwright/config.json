@@ -1,6 +1,6 @@
 {
   "name": "Microsoft Family Safety Auth",
-  "version": "2.2.0",
+  "version": "2.3.0rc1",
   "slug": "familysafety-playwright",
   "description": "Authentication service for Microsoft Family Safety integration using browser automation",
   "url": "https://github.com/noiwid/HAFamilySafety",

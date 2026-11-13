@@ -94,15 +94,14 @@ SERVICE_UNLOCK_PLATFORM_SCHEMA = child_schema({
 })
 
 SERVICE_ADD_TIME_BONUS_SCHEMA = child_schema({
-    # Only the Xbox has a confirmed request for extra time so far.
-    vol.Optional("platform", default="Xbox"): _platform("Xbox"),
+    vol.Optional("platform", default="Xbox"): _platform("Xbox", "Windows"),
     vol.Optional("minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
     vol.Optional("until"): cv.datetime,
     vol.Optional("replace_lock", default=False): cv.boolean,
 })
 
 SERVICE_CANCEL_TIME_BONUS_SCHEMA = child_schema({
-    vol.Optional("platform", default="Xbox"): _platform("Xbox"),
+    vol.Optional("platform", default="Xbox"): _platform("Xbox", "Windows"),
 })
 
 SERVICE_APPROVE_REQUEST_SCHEMA = vol.Schema({

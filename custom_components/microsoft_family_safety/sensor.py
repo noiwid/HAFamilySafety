@@ -396,6 +396,9 @@ class FamilySafetyTimeRemainingSensor(MinuteUpdateMixin, FamilySafetyAccountSens
             "allowance_minutes": status["allowance_minutes"],
             "used_minutes": status["used_minutes"],
         }
+        override = status.get("override") or {}
+        if status["reason"] == "extra_time" and override.get("valid_until"):
+            attrs["extra_time_until"] = override["valid_until"]
         policy = self._schedule()
         if policy is not None:
             attrs["limits_enabled"] = policy.get("isEnabled", policy.get("IsEnabled")) is not False
