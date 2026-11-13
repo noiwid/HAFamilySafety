@@ -43,7 +43,7 @@ const STR = {
 		settings: 'Settings', limits_sw: 'Screen time limits', limits_sw_sub: 'Off: no daily limit, the schedule comes back when on',
 		xbox_limits_sw: 'Xbox limits', xbox_limits_sw_sub: 'The console follows its own schedule', app_limits_sw: 'App limits',
 		app_limits_sw_sub: 'Off: no per-app limit is enforced', web_row: 'Web and content', web_row_sub: 'Filter, age rating, ask to buy',
-		conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed', pill_ok: 'Connected', pill_reauth: 'Sign in again', pill_action: 'Action needed', pill_partial: 'Partly connected',
+		conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed', pill_ok: 'Account linked', pill_reauth: 'Sign in again', pill_action: 'Action needed', pill_partial: 'Partly linked',
 		conn_terms: 'Microsoft asks to accept updated terms on account.microsoft.com', conn_proof: 'Microsoft asks to confirm your identity: sign in again',
 		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant',
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
@@ -83,7 +83,7 @@ const STR = {
 		settings: 'Réglages', limits_sw: "Limites de temps d'écran", limits_sw_sub: 'Coupées : plus de limite du jour, le planning revient à la réactivation',
 		xbox_limits_sw: 'Limites Xbox', xbox_limits_sw_sub: 'La console suit son propre planning', app_limits_sw: 'Limites des applis',
 		app_limits_sw_sub: "Coupées : aucune limite d'appli ne s'applique", web_row: 'Web et contenus', web_row_sub: "Filtre, âge, demander avant d'acheter",
-		conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire', pill_ok: 'Connecté', pill_reauth: 'À reconnecter', pill_action: 'Action requise', pill_partial: 'Partiel',
+		conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire', pill_ok: 'Compte lié', pill_reauth: 'À reconnecter', pill_action: 'Action requise', pill_partial: 'Lien partiel',
 		conn_terms: 'Microsoft demande d’accepter ses nouvelles conditions sur account.microsoft.com', conn_proof: 'Microsoft demande de confirmer votre identité : reconnectez-vous',
 		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant',
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
@@ -792,7 +792,7 @@ class FamilySafetyDialog extends HTMLElement {
 			<div class="veil"></div>
 			<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(s.title)}">
 				<div class="bar"><ha-icon icon="${s.icon}"></ha-icon><span>${esc(s.title)}</span><button class="x" aria-label="${esc(t('close'))}"><ha-icon icon="mdi:close"></ha-icon></button></div>
-				<div class="head"><div class="chip sq"><ha-icon icon="${s.chip}"></ha-icon></div><div class="txt"><div class="big">${esc(s.name)}</div>${s.sub ? `<small>${esc(s.sub)}</small>` : ''}</div>${s.pill ? `<span class="pill${s.pill.ok ? ' ok' : ''}" title="${esc(s.pill.tip)}" role="status"><i></i>${esc(s.pill.text)}</span>` : ''}</div>
+				<div class="head"><div class="chip sq"><ha-icon icon="${s.chip}"></ha-icon></div><div class="txt"><div class="big">${esc(s.name)}</div>${s.sub ? `<small>${esc(s.sub)}</small>` : ''}</div>${s.pill ? `<span class="pill${s.pill.ok ? ' ok' : ''}" title="${esc(s.pill.tip)}" role="status"><ha-icon icon="mdi:microsoft"></ha-icon>${esc(s.pill.text)}</span>` : ''}</div>
 				${rows.map(row).join('')}
 				${this._error ? `<div class="err" role="alert">${esc(this._error)}</div>` : ''}
 				${this._notice ? `<div class="note" role="status">${esc(this._notice)}</div>` : ''}
@@ -841,7 +841,7 @@ FamilySafetyDialog.css = `
 	.head { margin-bottom: 14px; }
 	.pill { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
 		background: rgba(244, 67, 54, 0.15); color: #ff8a80; }
-	.pill i { width: 8px; height: 8px; border-radius: 4px; background: currentColor; }
+	.pill ha-icon { --mdc-icon-size: 14px; }
 	.pill.ok { background: rgba(76, 175, 80, 0.15); color: #81c784; }
 	.opt { padding: 12px 14px; margin-bottom: 8px; border-radius: 18px; background: rgba(255, 255, 255, 0.06); border: 2px solid transparent; cursor: pointer; min-height: 48px; }
 	.opt.flat { cursor: default; }
