@@ -317,7 +317,7 @@ One of each for Windows, and for the Xbox once its schedule has been read. They 
 Windows uses the Windows schedule and the minutes of the child's Windows devices; the Xbox uses the Xbox schedule, Xbox play time and the lock or extra time in the Xbox policy. The state is `unknown` (`reason: unknown`) while the schedule or today's usage has not been read, for example for a child without a Windows device. `used_minutes` (and `allowed_ranges` on Time Remaining) are not stored in the history database.
 
 - All the time logic (allowed hours, today's allowance, midnight) uses Home Assistant's time zone, not the child's device's.
-- Windows extra time is not taken into account: Microsoft gives no Windows "allowed until" time. After an approved request for more time, Windows Allowed Now can stay off with `reason: allowance_used` (and Time Remaining at 0) while the child is in fact allowed. Xbox extra time is read from the Xbox policy and counts.
+- Extra time counts on both platforms: on Windows it is read from Microsoft's device-limits overrides (`AllowUntil`), on the Xbox from the Xbox policy. While it runs, `reason` is `extra_time`, and Windows Time Remaining gives `extra_time_until`.
 
 ### Sensors — Per Physical Device
 
@@ -422,17 +422,19 @@ data:
   platform: "Windows"
 ```
 
-#### Xbox extra time
+#### Extra time (Xbox and Windows)
 
-`add_time_bonus` gives a child extra time on the Xbox, for some `minutes` (1 – 1440) or `until` a time (at most 24 hours ahead); `cancel_time_bonus` takes it back. Both go through the Xbox Family Settings service (the same "add time" as the Xbox Family Settings app), so they need **Xbox** among the monitored platforms and the Xbox Family Settings sign-in linked; otherwise they fail with an error saying so. They never use the web session.
+`add_time_bonus` gives a child extra time on the Xbox (`platform: "Xbox"`, the default) or on Windows (`platform: "Windows"`), for some `minutes` (1 to 1440) or `until` a time (at most 24 hours ahead); `cancel_time_bonus` takes it back. Extra time is a window from now: the child may use the platform until it ends, even past the day's limit. It is not added to the day's limit, and a new one replaces the one running.
 
-- Microsoft keeps **one** Xbox override, so extra time replaces a lock. While the Xbox is locked (by `lock_platform` or by a parent in the app), `add_time_bonus` is refused unless you pass `replace_lock: true`.
+- **Xbox**: through the Xbox Family Settings service (the same "add time" as the Xbox Family Settings app), so it needs **Xbox** among the monitored platforms and the Xbox Family Settings sign-in linked; otherwise it fails with an error saying so.
+- **Windows**: through the Family Safety mobile API (an `AllowUntil` device-limits override, as when a request for more time is approved). Nothing else is needed.
+- Neither uses the web session.
+- Microsoft keeps **one** override per platform, so extra time replaces a lock. While the platform is locked (by `lock_platform` or by a parent in the app), `add_time_bonus` is refused unless you pass `replace_lock: true`.
 - The extra time is believed only when Microsoft's answer lists it ending when asked; otherwise the action fails. If a lock is still listed afterwards, the action fails and the lock stays.
-- While extra time runs, the Xbox lock switch reads off (Microsoft reports `allowUntil`).
-- `cancel_time_bonus` only ever cancels extra time. While the Xbox is locked it fails without sending anything (the cancel would lift the lock too); with no extra time in force it does nothing.
-- A lock that extra time replaced (`replace_lock: true`) does not come back: after `cancel_time_bonus`, or when the extra time ends, the Xbox follows its schedule again. Lock it again with `lock_platform` if needed.
+- While extra time runs, the platform's lock switch reads off.
+- `cancel_time_bonus` only ever cancels extra time. While the platform is locked it fails without sending anything (the cancel would lift the lock too); with no extra time in force it does nothing.
+- A lock that extra time replaced (`replace_lock: true`) does not come back: after `cancel_time_bonus`, or when the extra time ends, the platform follows its schedule again. Lock it again with `lock_platform` if needed.
 - Both can answer with what they did (`response_variable`): `add_time_bonus` with `{added, until, replaced_lock}`, `cancel_time_bonus` with `{cancelled: true, lock_in_force}` or `{cancelled: false, reason: "no_extra_time"}`.
-- Windows has no confirmed request for extra time yet, so only `platform: "Xbox"` (the default) is accepted.
 
 ```yaml
 # 30 minutes of extra time on the Xbox
@@ -450,6 +452,15 @@ data:
   minutes: 60
   replace_lock: true
 response_variable: extra_time
+```
+
+```yaml
+# 15 free minutes on Windows from now
+service: microsoft_family_safety.add_time_bonus
+data:
+  entity_id: switch.firstname_lock
+  platform: Windows
+  minutes: 15
 ```
 
 ```yaml
@@ -825,6 +836,7 @@ device: <device id of "Firstname Lastname (Family Safety)">
 Pick the child's **Firstname Lastname (Family Safety)** device in the card editor; the card finds the child's entities by itself. It shows:
 
 - A header with whether Windows may be used right now, the time left today, and when downtime starts or ends
+- An extra time bar: Reset, +15 / +30 / +60 minutes free from now, and a custom duration (Windows, or the Xbox for a child without a Windows lock)
 - Tiles for the account lock, the Windows lock, the Xbox lock (when the Xbox features are on) and the web settings
 - The pending request, with Approve and Deny
 - The apps: today's use, all installed apps, limited apps and blocked apps, each with an icon for its rule (blocked, paused, limited)
@@ -838,7 +850,7 @@ Each line opens a sheet whose Save button calls the integration's services direc
 | Application | No limit, limited (minutes per day, optionally within allowed hours), paused (blocked now, its limit comes back on resume), blocked |
 | Website | Always allowed, always blocked, removed from the lists |
 | Web and content | Web filter, age rating, ask to buy |
-| Lock | Whole account, Windows or Xbox for a set time, Xbox extra time |
+| Lock | Whole account, Windows or Xbox for a set time, extra time on Windows or the Xbox |
 | Day | Daily limit and allowed hours, Windows or Xbox |
 | Settings (gear) | Screen time limits, Xbox limits and app limits switches, connection state, sign in again, link to the integration options |
 
@@ -852,7 +864,7 @@ Each line opens a sheet whose Save button calls the integration's services direc
 |--------|---------|-------------|
 | `device` | | The child's Family Safety device (required unless `child` is given) |
 | `title` | the child's name | Card title |
-| `show_tiles`, `show_request`, `show_apps`, `show_websites`, `show_week` | `true` | Set one to `false` to hide that section: the tiles, the pending request, the apps, the websites, the weekly limits (switches in the card editor) |
+| `show_extra`, `show_tiles`, `show_request`, `show_apps`, `show_websites`, `show_week` | `true` | Set one to `false` to hide that section: the extra time bar, the tiles, the pending request, the apps, the websites, the weekly limits (switches in the card editor) |
 | `language` | Home Assistant's | `en` or `fr` |
 | `entities` | found from `device` | Override one entity by role, e.g. `entities: {lock: switch.my_lock}`. Roles: `screen_time`, `applications`, `websites`, `web_filter`, `pending_requests`, `allowed_now`, `time_remaining`, `downtime`, `lock`, `windows_lock`, `xbox_lock`, `limits`, `xbox_limits`, `app_limits` |
 | `child` | | Instead of `device`, give every entity by role yourself (`screen_time` is required) |
