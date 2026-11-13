@@ -33,6 +33,8 @@ from ._pyfamilysafety_compat import (
     _WEB_BACKOFF_SECONDS,
     apply_patches,
     is_stale_roster_error,
+    locks_unknown,
+    set_locks_read,
 )
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
 from .app_pause import AppPauser, app_limit_today
@@ -48,6 +50,7 @@ from .mobile_overrides import (
 from .auth.addon_client import AddonCookieClient
 from .screen_time import (
     BLOCK_UNTIL,
+    REASON_UNKNOWN,
     override as make_override,
     platform_allowance,
     xbox_policy_override,
@@ -1095,6 +1098,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account.blocked_platforms = mobile_blocked_platforms(
             self._with_recent_writes(child, state)
         )
+        set_locks_read(account)
         if locked(state) != lock:
             await self.async_request_refresh()
             answer = (
@@ -2036,12 +2040,32 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             until = self._platform_override_until.get((str(account_id), platform.lower()))
             current = make_override(BLOCK_UNTIL, until)
-        return platform_allowance(
+        status = platform_allowance(
             policy if isinstance(policy, dict) else None,
             used if isinstance(used, int) else None,
             now or dt_util.now(),
             current,
         )
+        if status["allowed"] and not self.platform_lock_known(account_id, platform):
+            # The schedule allows it, but a lock may be in force that could not
+            # be read: unknown, never "allowed". A "not allowed" stands.
+            status = {
+                **status, "allowed": None, "remaining_minutes": None,
+                "reason": REASON_UNKNOWN,
+            }
+        return status
+
+    def platform_lock_known(self, account_id: Any, platform: str) -> bool:
+        """Whether the last update read the Windows/Mobile locks of a child.
+
+        False while no overrides document has been read for the child (see
+        _pyfamilysafety_compat.locks_unknown). The Xbox lock is judged from
+        the Xbox policy, not from these overrides: always True for it here.
+        """
+        if platform.lower() == "xbox":
+            return True
+        account = ((self.data or {}).get("accounts") or {}).get(account_id) or {}
+        return account.get("lock_state_known", True) is not False
 
     def is_account_locked(self, account_id: str) -> bool | None:
         account = self.account_data(account_id)
@@ -2714,6 +2738,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "account_balance": account.account_balance,
             "account_currency": account.account_currency,
             "blocked_platforms": self._merge_blocked_platforms(account),
+            # False while no overrides document has been read for this member:
+            # blocked_platforms is then a stand-in and the Windows/Mobile
+            # locks are unknown, not "unlocked" (the Xbox has xbox_lock_known).
+            "lock_state_known": not locks_unknown(account),
             # Endpoints Microsoft could not resolve for this member on the
             # last poll (see _pyfamilysafety_compat._patch_account_roster_tolerance).
             "roster_errors": dict(getattr(account, "roster_errors", None) or {}),
