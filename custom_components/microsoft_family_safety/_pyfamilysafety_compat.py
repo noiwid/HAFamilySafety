@@ -145,6 +145,21 @@ def is_stale_roster_error(text: str) -> bool:
     return any(marker in lowered for marker in _STALE_ROSTER_MARKERS)
 
 
+def locks_unknown(account: Any) -> bool:
+    """True while an account's Windows/Mobile locks have never been read.
+
+    Its ``blocked_platforms`` is then an empty stand-in that keeps the update
+    going (see _patch_v4_overrides_read and _patch_account_roster_tolerance),
+    not an answer: nothing may read it as "unlocked".
+    """
+    return getattr(account, _OVERRIDES_UNREAD_ATTR, False) is True
+
+
+def set_locks_read(account: Any) -> None:
+    """Mark an account's locks as read from an overrides document."""
+    setattr(account, _OVERRIDES_UNREAD_ATTR, False)
+
+
 def _empty_screentime_report() -> dict[str, Any]:
     """Shape ``Device.from_dict`` and the usage aggregates can consume safely."""
     return {
@@ -805,9 +820,10 @@ def _patch_v4_overrides_read() -> bool:
                 self.blocked_platforms is None
                 or getattr(self, _OVERRIDES_UNREAD_ATTR, False) is True
             ):
-                # None known yet: only this child goes without locks, listed
-                # as a roster error, instead of failing every child's update
-                # (Account.update gathers all requests).
+                # None known yet: only this child's locks are unknown (an
+                # empty stand-in, marked so nothing reads it as "unlocked"),
+                # listed as a roster error, instead of failing every child's
+                # update (Account.update gathers all requests).
                 if self.blocked_platforms is None:
                     self.blocked_platforms = []
                 setattr(self, _OVERRIDES_UNREAD_ATTR, True)
@@ -818,7 +834,7 @@ def _patch_v4_overrides_read() -> bool:
                 _LOGGER.log(
                     logging.DEBUG if key in _ROSTER_WARNED else logging.WARNING,
                     "The device-limits overrides answer for %s has no platform "
-                    "list and no locks are known yet; showing none for now",
+                    "list and no locks are known yet; showing them as unknown",
                     self.user_id,
                 )
                 _ROSTER_WARNED.add(key)
@@ -829,7 +845,7 @@ def _patch_v4_overrides_read() -> bool:
                 self.user_id,
             )
             return
-        setattr(self, _OVERRIDES_UNREAD_ATTR, False)
+        set_locks_read(self)
         self.blocked_platforms = mobile_blocked_platforms(state)
         for entry in state.get("lockablePlatforms") or []:
             if not isinstance(entry, dict):
@@ -904,7 +920,10 @@ def _patch_account_roster_tolerance() -> bool:
         if self.devices is None:
             self.devices = []
         if self.blocked_platforms is None:
+            # The overrides read failed (a stale roster answer) before any
+            # document was read: a stand-in, the locks stay unknown.
             self.blocked_platforms = []
+            setattr(self, _OVERRIDES_UNREAD_ATTR, True)
 
     setattr(_patched_update, _ROSTER_TOLERANCE_PATCH_MARKER, True)
     Account.update = _patched_update
