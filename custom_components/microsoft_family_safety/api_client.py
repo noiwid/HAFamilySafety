@@ -287,6 +287,11 @@ class FamilySafetyWebAPI:
         self.accept_language = "en-US,en;q=0.9"
         #: child id -> (time.monotonic(), payload) of the last schedules GET.
         self._mobile_schedule_cache: dict[str, tuple[float, dict]] = {}
+        #: Schedule writes (Windows and Xbox) go one at a time. Each is a GET
+        #: then a PATCH of the same schedules document: several sent at once
+        #: (one per day, e.g. setting a whole week) mostly fail with dropped
+        #: connections, and an interleaved GET could send back a stale day.
+        self._mobile_schedule_write_lock = asyncio.Lock()
         # Keep authentication health separate from endpoint-specific failures.
         # A private endpoint may return 401/403 while the account.microsoft.com
         # Family browser session itself is still authenticated.
@@ -2259,6 +2264,21 @@ class FamilySafetyWebAPI:
         intervals: list[dict[str, str]] | None = None,
         platform: str = "Windows",
     ) -> None:
+        async with self._mobile_schedule_write_lock:
+            await self._patch_mobile_day_unlocked(
+                child_id, day_of_week, allowance_ms=allowance_ms,
+                intervals=intervals, platform=platform,
+            )
+
+    async def _patch_mobile_day_unlocked(
+        self,
+        child_id: str,
+        day_of_week: int,
+        *,
+        allowance_ms: int | None = None,
+        intervals: list[dict[str, str]] | None = None,
+        platform: str = "Windows",
+    ) -> None:
         payload = await self._get_mobile_schedules(child_id)
         schedule = self._mobile_platform_schedule(payload, platform)
         if schedule is None:
@@ -2288,18 +2308,19 @@ class FamilySafetyWebAPI:
         self, child_id: str, enabled: bool, platform: str = "Windows"
     ) -> bool:
         """Turn the platform's weekly schedule on or off, keeping its days intact."""
-        payload = await self._get_mobile_schedules(child_id)
-        await self._request(
-            "PATCH", f"/v4/devicelimits/schedules/{child_id}",
-            json_data={
-                "enabled": bool(enabled),
-                "appliesTo": platform,
-                "culture": "en-us",
-                "mode": payload.get("mode") or "PerDeviceType",
-                "time": self._mobile_now(),
-            },
-            extra_headers={"Plat-Info": "Windows"},
-        )
+        async with self._mobile_schedule_write_lock:
+            payload = await self._get_mobile_schedules(child_id)
+            await self._request(
+                "PATCH", f"/v4/devicelimits/schedules/{child_id}",
+                json_data={
+                    "enabled": bool(enabled),
+                    "appliesTo": platform,
+                    "culture": "en-us",
+                    "mode": payload.get("mode") or "PerDeviceType",
+                    "time": self._mobile_now(),
+                },
+                extra_headers={"Plat-Info": "Windows"},
+            )
         return True
 
     async def set_mobile_screentime_allowance(
