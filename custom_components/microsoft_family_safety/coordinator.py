@@ -33,6 +33,8 @@ from ._pyfamilysafety_compat import (
     _WEB_BACKOFF_SECONDS,
     apply_patches,
     is_stale_roster_error,
+    locks_unknown,
+    set_locks_read,
 )
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
 from .app_pause import AppPauser, app_limit_today
@@ -51,6 +53,7 @@ from .auth.addon_client import AddonCookieClient
 from .screen_time import (
     ALLOW_UNTIL,
     BLOCK_UNTIL,
+    REASON_UNKNOWN,
     override as make_override,
     parse_utc,
     platform_allowance,
@@ -1121,6 +1124,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         account.blocked_platforms = mobile_blocked_platforms(
             self._with_recent_writes(child, state)
         )
+        set_locks_read(account)
         if locked(state) != lock:
             await self.async_request_refresh()
             answer = (
@@ -1340,9 +1344,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         platform: str = "Windows",
     ) -> None:
         if platform == "Xbox":
-            await self.async_set_xbox_screentime_limit(
-                child_id, day_of_week, hours, minutes, require_xapprove=True
-            )
+            await self.async_set_xbox_screentime_limit(child_id, day_of_week, hours, minutes)
             return
         if platform != "Windows":
             raise ValueError("platform must be Windows or Xbox")
@@ -1934,35 +1936,24 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         day_of_week: int,
         hours: int,
         minutes: int,
-        *,
-        require_xapprove: bool = False,
     ) -> None:
         """Set one day of the Xbox schedule (the one the console enforces).
 
-        With ``require_xapprove`` the write is refused instead of falling back
-        to the mobile Xbox schedule when xapprove is not available.
+        Only through xapprove: the console does not enforce the Xbox schedule
+        of the Family Safety mobile API, so a write there would be accepted and
+        change nothing. Without xapprove the write is refused.
         """
         if not 0 <= day_of_week <= 6:
             raise ValueError("day_of_week must be between 0 and 6")
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
             raise ValueError("screen-time allowance must be between 0 and 24 hours")
-        if require_xapprove:
-            xuid: str | None = await self._xapprove_xuid_required(child_id)
-        else:
-            if not self.web_api:
-                raise RuntimeError("Web API not initialized")
-            xuid = await self._xapprove_xuid_for(child_id)
-        if xuid is not None:
-            try:
-                await self.xbox_family.async_set_day(
-                    xuid, day_of_week, minutes=hours * 60 + minutes
-                )
-            except XboxFamilyError as err:
-                raise HomeAssistantError(f"Could not set the Xbox limit: {err}") from err
-        else:
-            await self.web_api.set_mobile_xbox_screentime_allowance(
-                child_id, day_of_week, hours, minutes
+        xuid = await self._xapprove_xuid_required(child_id)
+        try:
+            await self.xbox_family.async_set_day(
+                xuid, day_of_week, minutes=hours * 60 + minutes
             )
+        except XboxFamilyError as err:
+            raise HomeAssistantError(f"Could not set the Xbox limit: {err}") from err
         day = DAY_KEYS[day_of_week]
 
         def _update(policy: dict) -> None:
@@ -2021,19 +2012,18 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_request_refresh()
 
     async def async_set_xbox_schedule_enabled(self, child_id: str, enabled: bool) -> None:
-        """Turn the Xbox schedule on or off, keeping its days as they are."""
-        if not self.web_api:
-            raise RuntimeError("Web API not initialized")
-        xuid = await self._xapprove_xuid_for(child_id)
-        if xuid is not None:
-            # xapprove takes isEnabled with one day; send today unchanged.
-            today = (dt_util.now().weekday() + 1) % 7  # DAY_KEYS: 0 = Sunday
-            try:
-                await self.xbox_family.async_set_day(xuid, today, enabled=enabled)
-            except XboxFamilyError as err:
-                raise HomeAssistantError(f"Could not switch the Xbox limits: {err}") from err
-        else:
-            await self.web_api.set_mobile_schedule_enabled(child_id, enabled, platform="Xbox")
+        """Turn the Xbox schedule on or off, keeping its days as they are.
+
+        Only through xapprove, like the day limits: the console does not
+        enforce the Xbox schedule of the Family Safety mobile API.
+        """
+        xuid = await self._xapprove_xuid_required(child_id)
+        # xapprove takes isEnabled with one day; send today unchanged.
+        today = (dt_util.now().weekday() + 1) % 7  # DAY_KEYS: 0 = Sunday
+        try:
+            await self.xbox_family.async_set_day(xuid, today, enabled=enabled)
+        except XboxFamilyError as err:
+            raise HomeAssistantError(f"Could not switch the Xbox limits: {err}") from err
 
         def _update(policy: dict) -> None:
             policy["isEnabled"] = bool(enabled)
@@ -2201,12 +2191,32 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             until = self._platform_override_until.get((str(account_id), platform.lower()))
             current = make_override(BLOCK_UNTIL, until)
-        return platform_allowance(
+        status = platform_allowance(
             policy if isinstance(policy, dict) else None,
             used if isinstance(used, int) else None,
             now or dt_util.now(),
             current,
         )
+        if status["allowed"] and not self.platform_lock_known(account_id, platform):
+            # The schedule allows it, but a lock may be in force that could not
+            # be read: unknown, never "allowed". A "not allowed" stands.
+            status = {
+                **status, "allowed": None, "remaining_minutes": None,
+                "reason": REASON_UNKNOWN,
+            }
+        return status
+
+    def platform_lock_known(self, account_id: Any, platform: str) -> bool:
+        """Whether the last update read the Windows/Mobile locks of a child.
+
+        False while no overrides document has been read for the child (see
+        _pyfamilysafety_compat.locks_unknown). The Xbox lock is judged from
+        the Xbox policy, not from these overrides: always True for it here.
+        """
+        if platform.lower() == "xbox":
+            return True
+        account = ((self.data or {}).get("accounts") or {}).get(account_id) or {}
+        return account.get("lock_state_known", True) is not False
 
     def is_account_locked(self, account_id: str) -> bool | None:
         account = self.account_data(account_id)
@@ -2892,6 +2902,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "account_currency": account.account_currency,
             "blocked_platforms": self._merge_blocked_platforms(account),
             "extra_time": self._merge_extra_time(account),
+            # False while no overrides document has been read for this member:
+            # blocked_platforms is then a stand-in and the Windows/Mobile
+            # locks are unknown, not "unlocked" (the Xbox has xbox_lock_known).
+            "lock_state_known": not locks_unknown(account),
             # Endpoints Microsoft could not resolve for this member on the
             # last poll (see _pyfamilysafety_compat._patch_account_roster_tolerance).
             "roster_errors": dict(getattr(account, "roster_errors", None) or {}),
