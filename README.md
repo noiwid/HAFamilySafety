@@ -850,10 +850,11 @@ Each line opens a sheet whose Save button calls the integration's services direc
 |-------|---------|
 | Application | No limit, limited (minutes per day, optionally within allowed hours), paused (blocked now, its limit comes back on resume), blocked |
 | Website | Always allowed, always blocked, removed from the lists |
-| Web and content | Web filter, age rating, ask to buy |
-| Lock | Whole account, Windows or Xbox for a set time, extra time on Windows or the Xbox |
+| Web and content | Web filter, age rating, ask to buy (Microsoft does not give its current value: it shows as unknown until you pick one) |
+| Lock | Whole account, Windows or Xbox for a set time, and a row to the extra time sheet |
+| Extra time (timer button, or from the lock sheet) | Duration, Add or Stop, the extra time in force as a pill (Windows) |
 | Day | Daily limit and allowed hours, Windows or Xbox |
-| Settings (gear) | Screen time limits, Xbox limits and app limits switches, connection state, sign in again, link to the integration options |
+| Settings (gear) | Screen time limits, Xbox limits and app limits switches, Microsoft account link state, renew the Microsoft link, link to the integration options |
 
 <p>
 <img src="https://raw.githubusercontent.com/noiwid/HAFamilySafety/main/examples/sheet-app.png" alt="Application sheet" width="260">
