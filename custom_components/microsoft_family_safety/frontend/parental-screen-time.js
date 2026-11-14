@@ -9,7 +9,7 @@
  *   entities: [sensor.switch_used_screen_time]      # any other time sensor in minutes
  *   sources:                         # optional, same with a name and a limit entity
  *     - { entity: sensor.console_time, name: Console, limit: number.console_limit }
- *   title / language (en, fr) / chart: false (summary card) / days: 14 (history card)
+ *   title / language (en, fr, pl, de, es) / chart: false (summary card) / days: 14 (history card)
  *   history: true                    # summary card: add the daily history below it, as a second card (days: 14)
  *
  * A device is resolved by the websocket command "<integration>/card_entities" of the integration
@@ -28,6 +28,16 @@ const STR = {
 		next_tr: (s) => s,
 		f_chart: 'Hourly chart', f_days: 'Days', f_history: 'Daily history below (second card)',
 	},
+	de: {
+		close: 'Schließen', prev_day: 'Vorheriger Tag', next_day: 'Nächster Tag',
+		today: 'Bildschirmzeit heute', history: 'Letzte {n} Tage', left: 'übrig', no_limit: ' · kein Limit', locked: 'Gesperrt', unlocked: 'Entsperrt',
+		loading: 'Wird geladen…', none: 'Bitte mindestens ein Gerät oder einen Zeitsensor wählen.', missing: 'Nicht gefunden: ',
+		f_devices: 'Geräte (Family Link, Family Safety)', f_entities: 'Weitere Zeitsensoren (Minuten)', f_title: 'Titel', f_language: 'Sprache',
+		next_tr: (s) => s.replace('Daily limit soon reached', 'Tageslimit bald erreicht').replace('No restrictions', 'Keine Einschränkungen')
+			.replace('School time', 'Schulzeit').replace('Bedtime', 'Schlafenszeit').replace('(ends ', '(endet ').replace(/\bat (\d)/, 'um $1').replace('tomorrow', 'morgen')
+			.replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/, (d) => ({ Mon: 'Mo.', Tue: 'Di.', Wed: 'Mi.', Thu: 'Do.', Fri: 'Fr.', Sat: 'Sa.', Sun: 'So.' })[d]),
+		f_chart: 'Stundendiagramm', f_days: 'Tage', f_history: 'Tagesverlauf darunter (zweite Karte)',
+	},
 	fr: {
 		today: "Temps d'écran aujourd'hui", history: '{n} derniers jours', left: 'reste', no_limit: ' · sans limite', locked: 'Verrouillé', unlocked: 'Libre',
 		loading: 'Chargement…', close: 'Fermer', prev_day: 'Jour précédent', next_day: 'Jour suivant', none: "Choisissez au moins un appareil ou un capteur de temps.", missing: 'Introuvable : ',
@@ -38,6 +48,35 @@ const STR = {
 		f_chart: 'Graphique par heure', f_days: 'Jours', f_history: 'Historique par jour en dessous (seconde carte)',
 	},
 };
+STR.pl = {
+    close: 'Zamknij', prev_day: 'Poprzedni dzień', next_day: 'Następny dzień',
+    today: 'Czas ekranowy dzisiaj', history: 'Ostatnie {n} dni', left: 'pozostało',
+    no_limit: ' · bez limitu', locked: 'Zablokowany', unlocked: 'Odblokowany',
+    loading: 'Wczytywanie…', none: 'Wybierz co najmniej jedno urządzenie lub czujnik czasu.', missing: 'Nie znaleziono: ',
+    f_devices: 'Urządzenia (Family Link, Family Safety)',
+    f_entities: 'Inne czujniki czasu (minuty)', f_title: 'Tytuł', f_language: 'Język',
+    next_tr: (s) => String(s ?? '')
+        .replace('Daily limit soon reached', 'Dzienny limit wkrótce się skończy')
+        .replace('No restrictions', 'Brak ograniczeń')
+        .replace('School time', 'Zajęcia szkolne')
+        .replace('Bedtime', 'Pora snu')
+        .replace('(ends ', '(koniec ')
+        .replace(/\bat (\d)/, 'o $1')
+        .replace('tomorrow', 'jutro')
+        .replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/g, (d) => ({Mon:'pon.',Tue:'wt.',Wed:'śr.',Thu:'czw.',Fri:'pt.',Sat:'sob.',Sun:'niedz.'})[d]),
+    f_chart: 'Wykres godzinowy', f_days: 'Dni', f_history: 'Historia dni poniżej (druga karta)',
+};
+STR.es = {
+	today: 'Tiempo de pantalla hoy', history: 'Últimos {n} días', left: 'restante', no_limit: ' · sin límite', locked: 'Bloqueado', unlocked: 'Libre',
+	loading: 'Cargando…', close: 'Cerrar', prev_day: 'Día anterior', next_day: 'Día siguiente',
+	none: 'Elige al menos un dispositivo o un sensor de tiempo.', missing: 'No encontrado: ',
+	f_devices: 'Dispositivos (Family Link, Family Safety)', f_entities: 'Otros sensores de tiempo (minutos)', f_title: 'Título', f_language: 'Idioma',
+	next_tr: (s) => s.replace('Daily limit soon reached', 'Límite diario a punto de agotarse').replace('No restrictions', 'Sin restricciones')
+		.replace('School time', 'Horario escolar').replace('Bedtime', 'Hora de dormir').replace('(ends ', '(termina ').replace(/\bat (\d)/, 'a las $1').replace('tomorrow', 'mañana')
+		.replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/, (d) => ({ Mon: 'lun.', Tue: 'mar.', Wed: 'mié.', Thu: 'jue.', Fri: 'vie.', Sat: 'sáb.', Sun: 'dom.' })[d]),
+	f_chart: 'Gráfico por horas', f_days: 'Días', f_history: 'Historial por día debajo (segunda tarjeta)',
+};
+
 const PLATFORMS = ['familylink', 'microsoft_family_safety'];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const hm = (m) => { m = Math.round(m); const h = Math.floor(m / 60); return h ? `${h} h ${String(m % 60).padStart(2, '0')}` : `${m} min`; };
@@ -67,7 +106,7 @@ class Base extends HTMLElement {
 		this._update();
 	}
 
-	_t(key) { return STR[lang(this)][key]; }
+	_t(key) { return STR[lang(this)][key] ?? STR.en[key]; }  // a language added later may lack the newest strings
 	_watched() { return this._sources.flatMap((s) => [s.used, s.limit, s.remaining, s.lock, s.next, s.bonus].filter(Boolean)); }
 	_num(id) { const s = id && this._hass.states[id]; return s ? parseFloat(s.state) : NaN; }
 	_shell(body, second) {
@@ -92,7 +131,8 @@ class Base extends HTMLElement {
 			const d = found.device;
 			sources.push({
 				name: (typeof item === 'object' && item.name) || (dev && (dev.name_by_user || dev.name || '').trim()) || d.daily_screen_time, used: d.daily_screen_time,
-				limit: d.daily_limit || (found.child || {})[`daily_limit_${todayNum()}`], remaining: d.screen_time_remaining,
+				// read at each use: a card left open overnight takes the new weekday's quota
+				get limit() { return d.daily_limit || (found.child || {})[`daily_limit_${todayNum()}`]; }, remaining: d.screen_time_remaining,
 				bonus: d.active_bonus, lock: d.lock, lockedWhen: found.locked_when || 'off', next: d.next_restriction,
 				icon: /tab|pad/i.test((dev && (dev.model || dev.name)) || '') ? 'mdi:tablet' : reg.platform === 'familylink' ? 'mdi:cellphone' : 'mdi:monitor',
 			});
@@ -150,7 +190,15 @@ class Base extends HTMLElement {
 				day > first, day < today, `<div class="msg">${this._t('loading')}</div>`);
 			let values;
 			if (this._config.demo_data) values = Array.from({ length: 24 }, (_, h) => this._config.demo_data.hours[h] || 0);  // shortcut: a demo has no statistics
-			else values = this._hours(await this._stats('hour', new Date(day - 3600000), new Date(day + 86400000)), midnight, day === today);
+			else {
+				const end = new Date(midnight); end.setDate(end.getDate() + 1);  // a day is 23 or 25 h when the clocks change
+				try {
+					values = this._hours(await this._stats('hour', new Date(day - 3600000), end), midnight, day === today);
+				} catch (err) {
+					if (dialog.day === day) dialog.fill(`<div class="msg err">${esc((err && err.message) || String(err))}</div>`);
+					return;
+				}
+			}
 			if (dialog.day === day) dialog.fill(hourChart(values));  // the arrows may have moved on meanwhile
 		};
 		dialog.show(this._t('close'), this._t('prev_day'), this._t('next_day'), (dir) => {
@@ -170,14 +218,16 @@ class Base extends HTMLElement {
 			this._days = this._config.demo_data.days.slice(-days).map((v, i, all) => ({ t: start.getTime() - (all.length - 1 - i) * 86400000, v }));
 		}
 		if (this._key !== key) {
-			this._key = key;
 			const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (days - 1));
 			const { ids, rows } = await this._stats('day', start);
-			this._days = Array.from({ length: days }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return { t: d.getTime(), v: 0 }; });
+			const fresh = Array.from({ length: days }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return { t: d.getTime(), v: 0 }; });
 			for (const id of ids) for (const r of rows[id] || []) {
-				const day = this._days.find((d) => d.t === new Date(ms(r.start)).setHours(0, 0, 0, 0));
+				const day = fresh.find((d) => d.t === new Date(ms(r.start)).setHours(0, 0, 0, 0));
 				if (day) day.v += r.max ?? r.state ?? 0;
 			}
+			// marked as read only once read: a failed fetch (the app waking up) is tried again at the next update
+			this._days = fresh;
+			this._key = key;
 		}
 		// today from the live states, the statistics of the day are not complete yet
 		this._days[this._days.length - 1].v = sum(this._sources.filter((s) => !s.missing).map((s) => this._num(s.used) || 0));
@@ -258,8 +308,8 @@ class ScreenTimeCard extends Base {
 			return this._drawHours();
 		}
 		if (this._chartKey !== key) {
-			this._chartKey = key;
 			this._hourly = await this._stats('hour', new Date(midnight.getTime() - 3600000));
+			this._chartKey = key;  // only once read, as the history
 		}
 		this._bars = this._hours(this._hourly, midnight, true);
 		this._drawHours();
@@ -366,7 +416,7 @@ class Editor extends HTMLElement {
 			...(history ? [{ name: 'days', selector: { number: { min: 3, max: 31, mode: 'box' } } }]
 				: [{ name: 'chart', selector: { boolean: {} } }, { name: 'history', selector: { boolean: {} } },
 					...(this._config.history ? [{ name: 'days', selector: { number: { min: 3, max: 31, mode: 'box' } } }] : [])]),
-			{ name: 'language', selector: { select: { mode: 'dropdown', options: [{ value: 'en', label: 'English' }, { value: 'fr', label: 'Français' }] } } },
+			{ name: 'language', selector: { select: { mode: 'dropdown', options: [{ value: 'en', label: 'English' }, { value: 'fr', label: 'Français' }, { value: 'pl', label: 'Polski' }, { value: 'de', label: 'Deutsch' }, { value: 'es', label: 'Español' }] } } },
 		];
 	}
 }

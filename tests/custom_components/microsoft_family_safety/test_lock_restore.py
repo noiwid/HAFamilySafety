@@ -89,7 +89,7 @@ async def test_lock_then_unlock_restores_the_exact_schedule(coordinator):
     # Locking again reads an all-zero schedule: the good restore point stays.
     coordinator._fetch_screentime_policy.return_value = _policy("00:00:00")
     await coordinator.async_lock_account(CHILD)
-    assert coordinator._saved_screentime[CHILD] == _policy("02:00:00")
+    assert coordinator._saved_screentime[CHILD] == {**_policy("02:00:00"), "_saved_by": "lock"}
 
     coordinator.web_api.allowances.clear()
     await coordinator.async_unlock_account(CHILD)
@@ -137,12 +137,47 @@ async def test_lock_turns_the_schedule_flag_on_and_unlock_puts_it_back(coordinat
     assert coordinator.web_api.enabled_calls == [True, False]
 
 
-async def test_enable_limits_sets_the_flag_even_with_a_restore_point(coordinator):
+async def test_enable_limits_does_not_unlock_a_locked_child(coordinator):
+    """Turning limits on (an automation every morning...) sets the flag, the lock stays."""
     await coordinator.async_lock_account(CHILD)
     coordinator.web_api.allowances.clear()
     await coordinator.async_set_policy_enabled(CHILD, True)
-    assert coordinator.web_api.enabled_calls[0] is True
+    assert coordinator.web_api.enabled_calls[-1] is True
+    assert coordinator.web_api.allowances == []
+    assert CHILD in coordinator._saved_screentime
+    await coordinator.async_unlock_account(CHILD)
     assert coordinator.web_api.allowances == [(d, 2, 0) for d in range(7)]
+
+
+async def test_enable_limits_restores_what_the_disable_fallback_saved(coordinator):
+    coordinator.web_api.set_mobile_schedule_enabled = AsyncMock(side_effect=RuntimeError)
+    await coordinator.async_set_policy_enabled(CHILD, False)
+    coordinator.web_api.allowances.clear()
+    await coordinator.async_set_policy_enabled(CHILD, True)
+    assert coordinator.web_api.allowances == [(d, 2, 0) for d in range(7)]
+
+
+async def test_a_lock_after_the_disable_fallback_keeps_the_real_schedule(coordinator):
+    """Audit 2026-11-13: the 24 h week of "limits off" must never replace the saved schedule."""
+    coordinator.web_api.set_mobile_schedule_enabled = AsyncMock(side_effect=RuntimeError)
+    await coordinator.async_set_policy_enabled(CHILD, False)
+    assert coordinator.web_api.allowances[-1] == (6, 24, 0)
+    # The next read sees the 24 h week the fallback wrote.
+    coordinator._fetch_screentime_policy.return_value = _policy("1.00:00:00")
+    await coordinator.async_lock_account(CHILD)
+    await coordinator.async_set_policy_enabled(CHILD, False)  # a second "off" while it still fails
+    coordinator.web_api.allowances.clear()
+    await coordinator.async_unlock_account(CHILD)
+    assert coordinator.web_api.allowances == [(d, 2, 0) for d in range(7)]
+
+
+async def test_a_day_changed_during_a_lock_is_kept_at_unlock(coordinator):
+    await coordinator.async_lock_account(CHILD)
+    await coordinator.async_set_screentime_limit(CHILD, 1, 3, 0)
+    coordinator.web_api.allowances.clear()
+    await coordinator.async_unlock_account(CHILD)
+    assert (1, 3, 0) in coordinator.web_api.allowances
+    assert (2, 2, 0) in coordinator.web_api.allowances
 
 
 async def test_disable_fallback_never_saves_a_zeroed_schedule(coordinator):

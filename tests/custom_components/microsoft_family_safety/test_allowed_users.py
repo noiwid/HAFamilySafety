@@ -182,3 +182,36 @@ async def test_changing_only_the_allowed_users_does_not_reload(hass) -> None:
         )
         await _async_options_updated(hass, entry)
         reload.assert_awaited_once()
+
+
+async def test_every_service_goes_through_the_guard(hass):
+    """Audit 2026-11-13: a service registered without guard_service would bypass allowed_users."""
+    from unittest.mock import MagicMock, patch
+
+    from custom_components.microsoft_family_safety import _register_services
+
+    with patch("custom_components.microsoft_family_safety._get_coordinator", return_value=MagicMock()):
+        _register_services(hass)
+    services = hass.services.async_services().get(DOMAIN, {})
+    assert services, "no service registered"
+    for name in services:
+        handler = hass.services._services[DOMAIN][name].job.target
+        assert getattr(handler, "familysafety_guarded", False), f"{name} is not guarded"
+
+
+def test_every_entity_action_checks_the_caller_first():
+    """Each action method's first statement is async_check_entity_action(self)."""
+    import ast
+    from pathlib import Path
+
+    actions = {"async_press", "async_turn_on", "async_turn_off", "async_set_native_value", "async_set_value"}
+    base = Path(__file__).parents[3] / "custom_components" / "microsoft_family_safety"
+    found = 0
+    for name in ("button.py", "number.py", "switch.py", "time.py"):
+        for node in ast.walk(ast.parse((base / name).read_text(encoding="utf-8"))):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name in actions:
+                found += 1
+                body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+                first = ast.unparse(body[0]) if body else ""
+                assert "async_check_entity_action(self)" in first, f"{name}:{node.lineno} {node.name}"
+    assert found >= 18
