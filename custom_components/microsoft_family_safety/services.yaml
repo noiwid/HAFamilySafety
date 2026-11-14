@@ -113,8 +113,8 @@ unlock_platform:
             - "Mobile"
 
 add_time_bonus:
-  name: Add Xbox Extra Time
-  description: "Give a child extra time on the Xbox, for some minutes or until a time, through the Xbox Family Settings service. Needs the Xbox Family Settings sign-in linked. Refused while the Xbox is locked, unless Replace lock is on. Fails when Microsoft does not confirm the extra time, or when the Xbox stays locked. Can answer with added, until and replaced_lock."
+  name: Add Extra Time
+  description: "Give a child extra time on the Xbox or on Windows, for some minutes or until a time. Xbox: through the Xbox Family Settings service, which needs the Xbox Family Settings sign-in linked. Windows: through the Family Safety mobile API. Refused while the platform is locked, unless Replace lock is on. Fails when Microsoft does not confirm the extra time, or when the platform stays locked. Can answer with added, until and replaced_lock."
   fields:
     account_id:
       name: Account ID
@@ -131,12 +131,13 @@ add_time_bonus:
           integration: microsoft_family_safety
     platform:
       name: Platform
-      description: Only Xbox for now (the default).
+      description: Xbox (the default) or Windows.
       default: "Xbox"
       selector:
         select:
           options:
             - "Xbox"
+            - "Windows"
     minutes:
       name: Minutes
       description: Extra time from now, 1 to 1440 minutes. Give this or until.
@@ -152,14 +153,14 @@ add_time_bonus:
         datetime:
     replace_lock:
       name: Replace lock
-      description: "Microsoft keeps one Xbox override, so extra time replaces a lock. Off (default): refused while the Xbox is locked, by this integration or by a parent. On: the lock is replaced by the extra time."
+      description: "Microsoft keeps one override per platform, so extra time replaces a lock. Off (default): refused while the platform is locked, by this integration or by a parent. On: the lock is replaced by the extra time."
       default: false
       selector:
         boolean:
 
 cancel_time_bonus:
-  name: Cancel Xbox Extra Time
-  description: "Cancel the extra time in force on a child's Xbox. Only extra time is cancelled: fails while the Xbox is locked (a lock is never lifted), and does nothing when no extra time is in force. Can answer with cancelled and reason or lock_in_force."
+  name: Cancel Extra Time
+  description: "Cancel the extra time in force on a child's Xbox or Windows. Only extra time is cancelled: fails while the platform is locked (a lock is never lifted), and does nothing when no extra time is in force. Can answer with cancelled and reason or lock_in_force."
   fields:
     account_id:
       name: Account ID
@@ -176,12 +177,13 @@ cancel_time_bonus:
           integration: microsoft_family_safety
     platform:
       name: Platform
-      description: Only Xbox for now (the default).
+      description: Xbox (the default) or Windows.
       default: "Xbox"
       selector:
         select:
           options:
             - "Xbox"
+            - "Windows"
 
 approve_request:
   name: Approve Pending Request

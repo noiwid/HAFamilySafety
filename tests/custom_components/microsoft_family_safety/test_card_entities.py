@@ -131,6 +131,7 @@ async def test_registered_once():
     hass = MagicMock()
     hass.data = {}
     hass.http.async_register_static_paths = AsyncMock()
+    hass.async_add_executor_job = AsyncMock(return_value=123)
     with (
         patch.object(card, "async_get_integration", AsyncMock(return_value=SimpleNamespace(version="9.9.9"))),
         patch.object(card, "add_extra_js_url") as add_js,
@@ -139,8 +140,8 @@ async def test_registered_once():
         await card.async_register_card(hass)
         await card.async_register_card(hass)
     assert [c.args[1] for c in add_js.call_args_list] == [
-        "/familysafety_card/parental-screen-time.js?v=9.9.9",
-        "/familysafety_card/familysafety-card.js?v=9.9.9",
+        "/familysafety_card/parental-screen-time.js?v=9.9.9-123",
+        "/familysafety_card/familysafety-card.js?v=9.9.9-123",
     ]
     add_ws.assert_called_once()
     hass.http.async_register_static_paths.assert_awaited_once()

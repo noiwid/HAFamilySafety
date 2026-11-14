@@ -396,6 +396,9 @@ class FamilySafetyTimeRemainingSensor(MinuteUpdateMixin, FamilySafetyAccountSens
             "allowance_minutes": status["allowance_minutes"],
             "used_minutes": status["used_minutes"],
         }
+        override = status.get("override") or {}
+        if status["reason"] == "extra_time" and override.get("valid_until"):
+            attrs["extra_time_until"] = override["valid_until"]
         policy = self._schedule()
         if policy is not None:
             attrs["limits_enabled"] = policy.get("isEnabled", policy.get("IsEnabled")) is not False
@@ -483,7 +486,7 @@ class FamilySafetyApplicationCountSensor(FamilySafetyAccountSensor):
     _attr_state_class = SensorStateClass.MEASUREMENT
     # The per-app list (usage changes every poll, plus the limits) would be
     # written to the recorder on every update; the state keeps the count.
-    _unrecorded_attributes = frozenset({"applications"})
+    _unrecorded_attributes = frozenset({"applications", "paused_apps"})
 
     def __init__(
         self,
@@ -647,6 +650,7 @@ class FamilySafetyPendingRequestsSensor(FamilySafetyAccountSensor):
 
     _attr_icon = "mdi:message-alert"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _unrecorded_attributes = frozenset({"requests"})
 
     def __init__(
         self,
@@ -689,6 +693,11 @@ class FamilySafetyWebFilterSensor(FamilySafetyAccountSensor):
     """Sensor for web filtering status."""
 
     _attr_icon = "mdi:web"
+    # Site lists grow with every allowed or blocked site: kept out of history.
+    _unrecorded_attributes = frozenset({
+        "exceptions", "Exceptions", "blockedSites", "allowedSites", "BlockedSites",
+        "AllowedSites", "categories", "Categories", "content_settings",
+    })
 
     def __init__(
         self,
@@ -811,6 +820,9 @@ class FamilySafetyScreenTimePolicySensor(FamilySafetyAccountSensor):
     """Sensor for screen time policy details."""
 
     _attr_icon = "mdi:clock-check"
+    _unrecorded_attributes = frozenset(
+        f"{prefix}{day}_allowed_intervals" for prefix in ("", "xbox_") for day in DAY_KEYS
+    )
 
     def __init__(
         self,

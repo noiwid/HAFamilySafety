@@ -141,3 +141,16 @@ async def test_applications_attribute_carries_the_limits(hass):
     # The per-app list stays out of the recorder; the count is the state.
     assert "applications" in sensor._unrecorded_attributes
     assert sensor.native_value == 3
+
+
+async def test_app_ids_are_encoded_in_the_policy_path():
+    """Audit 2026-11-13: a win32 id comes from an executable's name; '#', '?' or '/' must stay in it."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.microsoft_family_safety.api_client import FamilySafetyWebAPI
+
+    api = FamilySafetyWebAPI(authenticator=object())
+    api._request = AsyncMock(return_value={})
+    await api.remove_app_time_limit("123", "win32:game#2/../x?y", "Game", "Windows")
+    path = api._request.await_args.args[1]
+    assert path == "/v3/AppLimits/policies/123/win32:game%232%2F..%2Fx%3Fy"

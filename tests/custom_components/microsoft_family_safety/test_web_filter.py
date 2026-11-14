@@ -273,3 +273,17 @@ async def test_site_lists_are_read_from_the_mobile_api_with_exceptions():
     api._request = AsyncMock(return_value=None)
     with pytest.raises(FamilySafetyWebAPIError):
         await api.get_web_restrictions(CHILD)
+
+
+def test_large_attributes_stay_out_of_history():
+    """Audit 2026-11-13: site lists, day slots, requests and paused apps are not recorded."""
+    from custom_components.microsoft_family_safety import sensor
+
+    assert {"exceptions", "blockedSites", "allowedSites", "content_settings"} <= (
+        sensor.FamilySafetyWebFilterSensor._unrecorded_attributes
+    )
+    assert {"monday_allowed_intervals", "xbox_sunday_allowed_intervals"} <= (
+        sensor.FamilySafetyScreenTimePolicySensor._unrecorded_attributes
+    )
+    assert "requests" in sensor.FamilySafetyPendingRequestsSensor._unrecorded_attributes
+    assert "paused_apps" in sensor.FamilySafetyApplicationCountSensor._unrecorded_attributes

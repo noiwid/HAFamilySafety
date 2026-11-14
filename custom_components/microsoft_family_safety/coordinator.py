@@ -39,19 +39,23 @@ from ._pyfamilysafety_compat import (
 from .api_client import FamilySafetyWebAPI, FamilySafetyWebAPIError
 from .app_pause import AppPauser, app_limit_today
 from .mobile_overrides import (
+    MOBILE_OVERRIDE_ALLOW,
     MOBILE_OVERRIDE_BLOCK,
     MOBILE_OVERRIDE_CANCEL,
     is_overrides_document,
     mobile_blocked_platforms,
+    mobile_extra_time_of,
     mobile_lock_of,
     mobile_platform_entry,
     mobile_platform_name,
 )
 from .auth.addon_client import AddonCookieClient
 from .screen_time import (
+    ALLOW_UNTIL,
     BLOCK_UNTIL,
     REASON_UNKNOWN,
     override as make_override,
+    parse_utc,
     platform_allowance,
     xbox_policy_override,
 )
@@ -115,6 +119,14 @@ def _range_to_slots(start_hour: int, start_minute: int, end_hour: int, end_minut
     for i in range(start_slot, min(end_slot, 48)):
         intervals[i] = True
     return intervals
+
+
+#: Restore point key: which operation holds it ("lock" or "limits_off").
+SAVED_BY = "_saved_by"
+
+
+def _saved_by(operation: str) -> str:
+    return "lock" if operation == "lock" else "limits_off"
 
 
 def _policy_intervals_to_slots(day_data: dict[str, Any]) -> list[bool] | None:
@@ -778,6 +790,20 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     blocked.append(platform)
         return blocked
 
+    def _merge_extra_time(self, account: Account) -> dict[str, str]:
+        """Platform -> end of the mobile extra time (AllowUntil) in force, our recent writes first."""
+        now = dt_util.utcnow()
+        extra = dict(getattr(account, "extra_time", None) or {})
+        for (acct, platform), (written, entry) in self._mobile_writes.items():
+            if acct != str(account.user_id) or now - written >= self._MOBILE_WRITE_GRACE:
+                continue
+            until = mobile_extra_time_of(entry, now)
+            if until is not None:
+                extra[platform] = until.isoformat()
+            else:
+                extra.pop(platform, None)
+        return extra
+
     def _apply_xbox_lock_state(
         self,
         account_id: str,
@@ -1326,7 +1352,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ValueError("day_of_week must be between 0 and 6")
         if hours < 0 or minutes < 0 or minutes > 59 or hours * 60 + minutes > 1440:
             raise ValueError("screen-time allowance must be between 0 and 24 hours")
-        await self._set_screentime_allowance(child_id, day_of_week, hours, minutes)
+        async with self._account_lock(child_id):
+            await self._set_screentime_allowance(child_id, day_of_week, hours, minutes)
+            await self._update_saved_day(
+                child_id, day_of_week, allowance=f"{hours:02d}:{minutes:02d}:00"
+            )
         self._update_cached_day(
             child_id, day_of_week, allowance=f"{hours:02d}:{minutes:02d}:00"
         )
@@ -1356,9 +1386,41 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not 0 <= start_total < end_total <= 1440:
             raise ValueError("screen-time interval end must be later than start")
         slots = _range_to_slots(start_hour, start_minute, end_hour, end_minute)
-        await self._set_screentime_intervals(child_id, day_of_week, slots)
+        async with self._account_lock(child_id):
+            await self._set_screentime_intervals(child_id, day_of_week, slots)
+            await self._update_saved_day(child_id, day_of_week, slots=slots)
         self._update_cached_day(child_id, day_of_week, slots=slots)
         await self.async_request_refresh()
+
+    async def _update_saved_day(
+        self,
+        child_id: str,
+        day_of_week: int,
+        *,
+        allowance: str | None = None,
+        slots: list[bool] | None = None,
+    ) -> None:
+        """Carry a day written during a lock or "limits off" into the restore point.
+
+        Otherwise the unlock (or "limits on") writes the old day back and the
+        parent's change is lost.
+        """
+        saved = self._saved_screentime.get(self._policy_key(child_id))
+        if not saved:
+            return
+        daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions")
+        if not isinstance(daily, dict):
+            return
+        day_key = DAY_KEYS[day_of_week]
+        key = day_key if day_key in daily or day_key.capitalize() not in daily else day_key.capitalize()
+        day = dict(daily.get(key) or {})
+        if allowance is not None:
+            day.pop("Allowance", None)
+            day["allowance"] = allowance
+        if slots is not None:
+            day["timeline"] = list(slots)
+        daily[key] = day
+        await self._async_save_screentime()
 
     def _update_cached_day(
         self,
@@ -1491,14 +1553,17 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         until: datetime,
         replace_lock: bool = False,
     ) -> dict[str, Any]:
-        """Give a child extra time on the Xbox until ``until``.
+        """Give a child extra time on the Xbox (or Windows) until ``until``.
 
         The Xbox Family Settings app's own "add time" (xapprove override 1).
         Microsoft keeps one Xbox override, so extra time replaces a lock: while
         one is in force (ours or a parent's) this is refused unless
         ``replace_lock``. It succeeds only when Microsoft's answer lists the
-        extra time ending when asked and no lock left in force.
+        extra time ending when asked and no lock left in force. Windows goes
+        through the mobile device-limits overrides (_async_windows_time_bonus).
         """
+        if str(platform).lower() == "windows":
+            return await self._async_windows_time_bonus(account_id, until, replace_lock)
         xuid = await self._async_bonus_xuid(account_id, platform)
         until = dt_util.as_utc(until)
         current = await self._async_xbox_overrides(xuid, "no extra time was given")
@@ -1544,8 +1609,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         extra time is in force and no lock is: the revoke would lift a lock too,
         and a lock (from this integration or from a parent) is never touched
         here. With a lock in force this fails; with no extra time in force it
-        does nothing and says so.
+        does nothing and says so. Windows: _async_windows_cancel_time_bonus.
         """
+        if str(platform).lower() == "windows":
+            return await self._async_windows_cancel_time_bonus(account_id)
         xuid = await self._async_bonus_xuid(account_id, platform)
         current = await self._async_xbox_overrides(xuid, "nothing was cancelled")
         if self._xapprove_override_of(current, OVERRIDE_BLOCK) is not None:
@@ -1573,6 +1640,103 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 account_id, lock.get("validUntil"),
             )
         return {"cancelled": True, "lock_in_force": lock is not None}
+
+    async def _async_windows_overrides_entry(self, account_id: str, what: str) -> tuple[str, dict]:
+        """The child id and its Windows entry of the mobile overrides, or a clear error."""
+        if not any(str(key) == str(account_id) for key in self._accounts):
+            raise ValueError(f"Account {account_id} not found")
+        if self.web_api is None:
+            raise HomeAssistantError(
+                "Windows extra time needs the Family Safety mobile API, which is not connected yet."
+            )
+        child = str(account_id)
+        try:
+            state = await self._async_read_mobile_overrides(child)
+        except self._MOBILE_REQUEST_ERRORS as err:
+            raise HomeAssistantError(
+                f"Could not read the Windows overrides, so {what}: {_describe_error(err)}"
+            ) from err
+        entry = mobile_platform_entry(state, "Windows")
+        if entry is None:
+            raise HomeAssistantError(
+                f"Microsoft lists no Windows device limits for this child, so {what}."
+            )
+        return child, entry
+
+    async def _async_windows_time_bonus(
+        self, account_id: str, until: datetime, replace_lock: bool
+    ) -> dict[str, Any]:
+        """Windows extra time: an AllowUntil override on the mobile API.
+
+        Same rules as the Xbox: refused while Windows is locked unless
+        ``replace_lock``, and a success only when Microsoft lists the extra
+        time ending when asked and no lock left in force.
+        """
+        until = dt_util.as_utc(until)
+        child, entry = await self._async_windows_overrides_entry(account_id, "no extra time was given")
+        lock = mobile_lock_of(entry)
+        if lock is not None and not replace_lock:
+            raise HomeAssistantError(
+                f"Windows is locked (until {lock.get('validUntil')}); extra time would "
+                "lift that lock. Pass replace_lock: true to replace it."
+            )
+
+        def granted_until(state: Any) -> datetime | None:
+            got = mobile_extra_time_of(mobile_platform_entry(state, "Windows"))
+            return got if got is not None and abs(got - until) <= self._BONUS_TOLERANCE else None
+
+        state, write_error, read_error = await self._async_post_mobile_override(
+            child, str(entry.get("appliesTo")), MOBILE_OVERRIDE_ALLOW, until,
+            lambda state: granted_until(state) is not None,
+        )
+        await self.async_request_refresh()
+        valid_until = granted_until(state) if state is not None else None
+        if valid_until is None:
+            error = write_error or read_error
+            _LOGGER.debug("Windows extra time not confirmed: answer %s", state)
+            raise HomeAssistantError(
+                "Microsoft did not confirm the Windows extra time"
+                + (f" ({_describe_error(error)})" if error else "") + "."
+            ) from error
+        if mobile_lock_of(mobile_platform_entry(state, "Windows")) is not None:
+            raise HomeAssistantError(
+                "Microsoft recorded the Windows extra time but Windows is still locked; "
+                "unlock it with unlock_platform first."
+            )
+        return {
+            "added": True,
+            "until": dt_util.as_local(valid_until).isoformat(),
+            "replaced_lock": lock is not None,
+        }
+
+    async def _async_windows_cancel_time_bonus(self, account_id: str) -> dict[str, Any]:
+        """End the Windows extra time in force with a Cancel, never touching a lock."""
+        child, entry = await self._async_windows_overrides_entry(account_id, "nothing was cancelled")
+        if mobile_lock_of(entry) is not None:
+            raise HomeAssistantError(
+                "Windows is locked, so nothing was cancelled: the cancel would lift the "
+                "lock as well. Use unlock_platform to end the lock."
+            )
+        if mobile_extra_time_of(entry) is None:
+            return {"cancelled": False, "reason": "no_extra_time"}
+
+        def ended(state: Any) -> bool:
+            return mobile_extra_time_of(mobile_platform_entry(state, "Windows")) is None
+
+        state, write_error, read_error = await self._async_post_mobile_override(
+            child, str(entry.get("appliesTo")), MOBILE_OVERRIDE_CANCEL, dt_util.utcnow(), ended,
+        )
+        await self.async_request_refresh()
+        if state is None or not ended(state):
+            error = write_error or read_error
+            raise HomeAssistantError(
+                "Microsoft left the Windows extra time in place"
+                + (f" ({_describe_error(error)})" if error else "") + "."
+            ) from error
+        return {
+            "cancelled": True,
+            "lock_in_force": mobile_lock_of(mobile_platform_entry(state, "Windows")) is not None,
+        }
 
     # --- Xbox Family Settings API (xapprove) ---------------------------------
     @property
@@ -2020,7 +2184,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             policy = account.get("screentime_policy")
             used = self._windows_usage(data, account)
-            current = None
+            extra_until = parse_utc((account.get("extra_time") or {}).get("Windows"))
+            current = make_override(ALLOW_UNTIL, extra_until) if extra_until else None
         if platform in (account.get("blocked_platforms") or []) and (
             current is None or current.get("type") != BLOCK_UNTIL
         ):
@@ -2134,6 +2299,14 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A restore point is only worth something if `_saved_week` can read
         # it back; otherwise the unlock would refuse and the child stay at 0.
         saved_ok = self._saved_week(self._saved_screentime.get(key) or {}) is not None
+        if saved_ok:
+            # The schedule still in place is the one written by the operation
+            # that saved this point (a lock's zeros, a "limits off" 24 h week,
+            # or a day edited since): only the saved one is the child's real
+            # schedule, so it is kept and only the operation is noted.
+            self._saved_screentime[key][SAVED_BY] = _saved_by(operation)
+            await self._async_save_screentime()
+            return
         if current_policy:
             if self._has_nonzero_allowance(current_policy):
                 if self._saved_week(current_policy) is None:
@@ -2142,7 +2315,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "has a day this integration cannot read back, so it could not "
                         "be restored afterwards."
                     )
-                self._saved_screentime[key] = current_policy
+                self._saved_screentime[key] = {**current_policy, SAVED_BY: _saved_by(operation)}
                 # A new restore point supersedes any earlier release.
                 self._released_screentime.discard(key)
                 await self._async_save_screentime()
@@ -2334,12 +2507,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mobile_ok = True
                 except Exception as err:  # noqa: BLE001 - fall back to the web path
                     _LOGGER.warning("Mobile schedule on/off failed, trying web: %s", err)
-            has_saved = self._policy_key(account_id) in self._saved_screentime
+            saved = self._saved_screentime.get(self._policy_key(account_id))
+            has_saved = saved is not None
             if enabled:
-                # The flag is on; a restore point left by the web fallback
-                # (or a lock) is restored too. Without one, the flag alone
-                # was the whole job.
-                if has_saved:
+                # The flag is on; a restore point left by the web fallback is
+                # restored too. One held by a lock is not: turning limits on
+                # must not unlock the child (only unlock_account does).
+                if has_saved and saved.get(SAVED_BY) == "lock":
+                    if not mobile_ok:
+                        await self._set_schedule_flag(account_id, True)
+                elif has_saved:
                     await self._restore_saved(
                         account_id, "re-enable screen time limits for", enabled=True
                     )
@@ -2724,6 +2901,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "account_balance": account.account_balance,
             "account_currency": account.account_currency,
             "blocked_platforms": self._merge_blocked_platforms(account),
+            "extra_time": self._merge_extra_time(account),
             # False while no overrides document has been read for this member:
             # blocked_platforms is then a stand-in and the Windows/Mobile
             # locks are unknown, not "unlocked" (the Xbox has xbox_lock_known).

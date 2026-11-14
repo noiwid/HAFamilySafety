@@ -24,6 +24,7 @@ from homeassistant.loader import async_get_integration
 from .const import DAY_KEYS, DOMAIN
 
 URL_BASE = "/familysafety_card"
+FRONTEND = Path(__file__).parent / "frontend"
 # Outside hass.data[DOMAIN], which is dropped when the last entry unloads.
 _REGISTERED = f"{DOMAIN}_card_registered"
 
@@ -34,13 +35,22 @@ async def async_register_card(hass: HomeAssistant) -> None:
         return
     hass.data[_REGISTERED] = True
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(URL_BASE, str(Path(__file__).parent / "frontend"), cache_headers=False)]
+        [StaticPathConfig(URL_BASE, str(FRONTEND), cache_headers=False)]
     )
-    # The release workflow bumps the manifest version: browsers then fetch the new file.
+    # Version and file date in the URL: browsers and the mobile app fetch a changed file
+    # after the next restart, even between two releases.
     version = (await async_get_integration(hass, DOMAIN)).version
     for name in ("parental-screen-time.js", "familysafety-card.js"):
-        add_extra_js_url(hass, f"{URL_BASE}/{name}?v={version}")
+        stamp = await hass.async_add_executor_job(_mtime, FRONTEND / name)
+        add_extra_js_url(hass, f"{URL_BASE}/{name}?v={version}-{stamp}")
     websocket_api.async_register_command(hass, ws_card_entities)
+
+
+def _mtime(path: Path) -> int:
+    try:
+        return int(path.stat().st_mtime)
+    except OSError:
+        return 0
 
 
 #: Why the child's own device does not answer (the cards show it).

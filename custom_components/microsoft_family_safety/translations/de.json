@@ -185,8 +185,8 @@
       }
     },
     "add_time_bonus": {
-      "name": "Xbox-Extrazeit geben",
-      "description": "Gibt einem Kind Extrazeit auf der Xbox, für einige Minuten oder bis zu einer Uhrzeit, über den Dienst von Xbox Family Settings. Dafür muss die Xbox-Family-Settings-Anmeldung verknüpft sein. Wird abgelehnt, solange die Xbox gesperrt ist, außer „Sperre ersetzen“ ist aktiv. Schlägt fehl, wenn Microsoft die Extrazeit nicht bestätigt oder die Xbox gesperrt bleibt. Kann mit added, until und replaced_lock antworten.",
+      "name": "Extrazeit geben",
+      "description": "Gibt einem Kind Extrazeit auf der Xbox oder unter Windows, für einige Minuten oder bis zu einer Uhrzeit. Xbox: über den Dienst von Xbox Family Settings, dafür muss die Xbox-Family-Settings-Anmeldung verknüpft sein. Windows: über die mobile Family-Safety-API. Wird abgelehnt, solange die Plattform gesperrt ist, außer „Sperre ersetzen“ ist aktiv. Schlägt fehl, wenn Microsoft die Extrazeit nicht bestätigt oder die Plattform gesperrt bleibt. Kann mit added, until und replaced_lock antworten.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
@@ -198,7 +198,7 @@
         },
         "platform": {
           "name": "Plattform",
-          "description": "Vorerst nur Xbox (Standard)."
+          "description": "Xbox (Standard) oder Windows."
         },
         "minutes": {
           "name": "Minuten",
@@ -210,13 +210,13 @@
         },
         "replace_lock": {
           "name": "Sperre ersetzen",
-          "description": "Microsoft führt nur eine Xbox-Ausnahme, daher ersetzt Extrazeit eine Sperre. Aus (Standard): wird abgelehnt, solange die Xbox gesperrt ist, ob durch diese Integration oder durch ein Elternteil. Ein: Die Sperre wird durch die Extrazeit ersetzt."
+          "description": "Microsoft führt nur eine Ausnahme pro Plattform, daher ersetzt Extrazeit eine Sperre. Aus (Standard): wird abgelehnt, solange die Plattform gesperrt ist, ob durch diese Integration oder durch ein Elternteil. Ein: Die Sperre wird durch die Extrazeit ersetzt."
         }
       }
     },
     "cancel_time_bonus": {
-      "name": "Xbox-Extrazeit aufheben",
-      "description": "Hebt die laufende Extrazeit auf der Xbox eines Kindes auf. Nur Extrazeit wird aufgehoben: Schlägt fehl, solange die Xbox gesperrt ist (eine Sperre wird nie gelöst), und tut nichts, wenn keine Extrazeit läuft. Kann mit cancelled und reason oder lock_in_force antworten.",
+      "name": "Extrazeit aufheben",
+      "description": "Hebt die laufende Extrazeit auf der Xbox oder unter Windows eines Kindes auf. Nur Extrazeit wird aufgehoben: Schlägt fehl, solange die Plattform gesperrt ist (eine Sperre wird nie gelöst), und tut nichts, wenn keine Extrazeit läuft. Kann mit cancelled und reason oder lock_in_force antworten.",
       "fields": {
         "account_id": {
           "name": "Konto-ID",
@@ -228,7 +228,7 @@
         },
         "platform": {
           "name": "Plattform",
-          "description": "Vorerst nur Xbox (Standard)."
+          "description": "Xbox (Standard) oder Windows."
         }
       }
     },

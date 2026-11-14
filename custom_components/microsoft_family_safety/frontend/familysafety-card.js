@@ -6,6 +6,9 @@
  * websites, weekly limits). Every line opens a sheet whose draft lives in the sheet itself:
  * no helper and no script is needed, Save calls the integration's services directly.
  *
+ * Options: bonus (true by default, false hides the extra time bar; same key as the Family
+ * Link card), show_tiles / show_request / show_apps / show_websites / show_week (true by default).
+ *
  * Plain custom element, no build step and no dependency.
  */
 const DOMAIN = 'microsoft_family_safety';
@@ -33,7 +36,7 @@ const STR = {
 		duration: 'For', duration_sub: 'Windows and Xbox locks only', unlock: 'Unlock',
 		extra: 'Extra time', extra_sub: 'Added to today', approve: 'Approve', deny: 'Deny',
 		day: 'Day', daily: 'Daily limit', daily_sub: 'Screen time allowed that day', from: 'Allowed from', until: 'Allowed until', step30: 'In 30 min steps',
-		save: 'Save', saving: 'Saving…', close: 'Close', missing: 'Entity not found: ', h: 'h', d: 'day', ds: 'days',
+		save: 'Save', saving: 'Saving…', close: 'Close', back: 'Back', missing: 'Entity not found: ', h: 'h', d: 'day', ds: 'days',
 		st_locked: 'Locked', st_extra_time: 'Extra time', st_no_limits: 'No limits', st_outside_allowed_hours: 'Outside allowed hours',
 		st_allowance_used: 'Time used up', st_within_limits: 'Allowed', st_unknown: '', left: '{t} left', downtime_at: 'downtime {t}', downtime_now: 'downtime until {t}',
 		paused: 'paused', pause: 'Paused', pause_sub: 'Blocked for now, its limit comes back on resume', cur_paused: 'Currently paused',
@@ -43,12 +46,14 @@ const STR = {
 		settings: 'Settings', limits_sw: 'Screen time limits', limits_sw_sub: 'Off: no daily limit, the schedule comes back when on',
 		xbox_limits_sw: 'Xbox limits', xbox_limits_sw_sub: 'The console follows its own schedule', app_limits_sw: 'App limits',
 		app_limits_sw_sub: 'Off: no per-app limit is enforced', web_row: 'Web and content', web_row_sub: 'Filter, age rating, ask to buy',
-		conn: 'Connection', conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed',
+		conn_ok: 'Connected to Microsoft', conn_degraded: 'Partly connected: {r}', conn_reauth: 'Sign-in needed', pill_ok: 'Account linked', pill_reauth: 'Sign in again', pill_action: 'Action needed', pill_partial: 'Partly linked',
 		conn_terms: 'Microsoft asks to accept updated terms on account.microsoft.com', conn_proof: 'Microsoft asks to confirm your identity: sign in again',
-		reauth: 'Sign in again', reauth_sub: 'Opens the Microsoft sign-in in Home Assistant', reauth_done: 'Check the notification to finish signing in',
+		reauth: 'Renew the Microsoft link', reauth_sub: 'Signs Home Assistant in to Microsoft again, nothing is lost',
 		configure: 'Configure the integration', configure_sub: 'Users allowed, platforms, Xbox link',
-		bonus: 'Extra time on the Xbox', bonus_sub: 'Added now, ends by itself', add_bonus: 'Add extra time', cancel_bonus: 'Cancel extra time',
-		cancel_bonus_sub: 'Ends the extra time running now',
+		bonus: 'Extra time', bonus_len: 'Duration', bonus_sub: 'Free from now, ends by itself', add_bonus: 'Add {t}', stop_bonus: 'Stop',
+		bonus_pill: 'Until {t}', bonus_pill_none: 'None', bonus_nav_sub: 'Free time from now, ends by itself',
+		extra_bar: 'Reset', extra_none: 'No extra time', extra_until: 'Free until {t}',
+		tip_extra: '{n} min free from now', tip_extra_end: 'End the extra time', tip_extra_custom: 'Custom duration',
 		dnames: { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' },
 	},
 	fr: {
@@ -71,7 +76,7 @@ const STR = {
 		duration: 'Pendant', duration_sub: 'Verrous Windows et Xbox seulement', unlock: 'Déverrouiller',
 		extra: 'Temps en plus', extra_sub: "Ajouté à aujourd'hui", approve: 'Accepter', deny: 'Refuser',
 		day: 'Jour', daily: 'Limite du jour', daily_sub: "Temps d'écran autorisé ce jour-là", from: 'Autorisé à partir de', until: "Autorisé jusqu'à", step30: 'Par pas de 30 min',
-		save: 'Enregistrer', saving: 'Enregistrement…', close: 'Fermer', missing: 'Entité introuvable : ', h: 'h', d: 'jour', ds: 'jours',
+		save: 'Enregistrer', saving: 'Enregistrement…', close: 'Fermer', back: 'Retour', missing: 'Entité introuvable : ', h: 'h', d: 'jour', ds: 'jours',
 		st_locked: 'Verrouillé', st_extra_time: 'Temps en plus', st_no_limits: 'Sans limite', st_outside_allowed_hours: 'Hors plage autorisée',
 		st_allowance_used: 'Temps écoulé', st_within_limits: 'Autorisé', st_unknown: '', left: 'reste {t}', downtime_at: 'coupure à {t}', downtime_now: "coupé jusqu'à {t}",
 		paused: 'en pause', pause: 'En pause', pause_sub: 'Bloquée pour le moment, sa limite revient à la reprise', cur_paused: 'Actuellement en pause',
@@ -81,12 +86,14 @@ const STR = {
 		settings: 'Réglages', limits_sw: "Limites de temps d'écran", limits_sw_sub: 'Coupées : plus de limite du jour, le planning revient à la réactivation',
 		xbox_limits_sw: 'Limites Xbox', xbox_limits_sw_sub: 'La console suit son propre planning', app_limits_sw: 'Limites des applis',
 		app_limits_sw_sub: "Coupées : aucune limite d'appli ne s'applique", web_row: 'Web et contenus', web_row_sub: "Filtre, âge, demander avant d'acheter",
-		conn: 'Connexion', conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire',
+		conn_ok: 'Connecté à Microsoft', conn_degraded: 'Connexion partielle : {r}', conn_reauth: 'Reconnexion nécessaire', pill_ok: 'Compte lié', pill_reauth: 'À reconnecter', pill_action: 'Action requise', pill_partial: 'Lien partiel',
 		conn_terms: 'Microsoft demande d’accepter ses nouvelles conditions sur account.microsoft.com', conn_proof: 'Microsoft demande de confirmer votre identité : reconnectez-vous',
-		reauth: 'Se reconnecter', reauth_sub: 'Ouvre la connexion Microsoft dans Home Assistant', reauth_done: 'Ouvrez la notification pour terminer la connexion',
+		reauth: 'Renouveler le lien Microsoft', reauth_sub: 'Reconnecte Home Assistant à Microsoft, sans rien perdre',
 		configure: "Configurer l'intégration", configure_sub: 'Utilisateurs autorisés, plateformes, liaison Xbox',
-		bonus: 'Temps en plus sur la Xbox', bonus_sub: 'Ajouté maintenant, se termine seul', add_bonus: 'Ajouter du temps', cancel_bonus: 'Annuler le temps en plus',
-		cancel_bonus_sub: 'Arrête le temps en plus en cours',
+		bonus: 'Temps en plus', bonus_len: 'Durée', bonus_sub: 'Libre dès maintenant, se termine seul', add_bonus: 'Ajouter {t}', stop_bonus: 'Arrêter',
+		bonus_pill: "Jusqu'à {t}", bonus_pill_none: 'Aucun', bonus_nav_sub: 'Du temps libre dès maintenant, se termine seul',
+		extra_bar: 'Reset', extra_none: 'Aucun temps en plus', extra_until: "Libre jusqu'à {t}",
+		tip_extra: '{n} min libres dès maintenant', tip_extra_end: 'Arrêter le temps en plus', tip_extra_custom: 'Durée au choix',
 		dnames: { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' },
 	},
 };
@@ -130,6 +137,16 @@ class FamilySafetyCard extends HTMLElement {
 		this._tab = 'today';
 		this._seen = '';
 		if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
+		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
+	}
+
+	/** Same rule as familylink-card: tab words only when the row is 405 px or wider and nothing is cut; icons and counts always stay. */
+	_fitTabs() {
+		const tabs = this.shadowRoot && this.shadowRoot.querySelector('.tabs');
+		if (!tabs) return;
+		const cut = () => tabs.scrollWidth > tabs.clientWidth + 1 || [...tabs.children].some((b) => b.scrollWidth > b.clientWidth + 1);
+		tabs.classList.remove('short');
+		if (tabs.clientWidth < 405 || cut()) tabs.classList.add('short');
 	}
 
 	/** The default config of the card picker: the first child with a screen time sensor. */
@@ -138,7 +155,7 @@ class FamilySafetyCard extends HTMLElement {
 	static getStubConfig(hass) {
 		const e = Object.values(hass.entities || {}).find((x) => x.platform === DOMAIN && x.device_id && x.entity_id.startsWith('sensor.') && /_screen_time$/.test(x.entity_id)
 			&& !/_(xbox|windows)_screen_time$/.test(x.entity_id) && Object.values(hass.entities).some((y) => y.device_id === x.device_id && y.entity_id.endsWith('_applications')));
-		return { device: e ? e.device_id : '' };
+		return { device: e ? e.device_id : '', bonus: true };
 	}
 
 	getCardSize() { return this._compact() ? 5 : 9; }
@@ -150,6 +167,13 @@ class FamilySafetyCard extends HTMLElement {
 	connectedCallback() {
 		// where the card sits is only known once it is in the page: render again for the picker
 		if (this._hass && this._picker === undefined) { this._seen = ''; this.hass = this._hass; }
+		if (!this._resize) { this._resize = new ResizeObserver(() => this._fitTabs()); this._resize.observe(this); }
+	}
+
+	/** Removed from the page (view change, dashboard rebuilt): stop watching it, close its sheet. */
+	disconnectedCallback() {
+		if (this._resize) { this._resize.disconnect(); this._resize = null; }
+		if (this._dialog) { this._dialog.remove(); this._dialog = null; }
 	}
 
 	/** true inside the "add card" picker, whose preview boxes are small (not in a dashboard being edited) */
@@ -219,6 +243,16 @@ class FamilySafetyCard extends HTMLElement {
 			down && down.state === 'on' ? esc(t('downtime_now').replace('{t}', clock(down.attributes.downtime_end)))
 				: down && down.attributes.downtime_start ? esc(t('downtime_at').replace('{t}', clock(down.attributes.downtime_start))) : '',
 		].filter(Boolean).join(' · ') : '';
+		// extra time: a window from now (Microsoft's AllowUntil), not minutes added to the day
+		const extraOn = ch.windows_lock ? 'Windows' : ch.xbox_lock ? 'Xbox' : null;
+		const extraUntil = this._extraUntil(extraOn);
+		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
+		const extraBar = extraOn && !compact && c.bonus !== false ? `<div class="bonus">
+				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:restart"></ha-icon></button>
+				<div class="btxt"><div>${esc(t('extra_bar'))}</div><small>${extraUntil ? esc(t('extra_until').replace('{t}', clock(extraUntil))) : esc(t('extra_none'))}</small></div>
+				${press(15)}${press(30)}${press(60)}
+				<button class="round" data-extra-custom data-tip="${esc(t('tip_extra_custom'))}" aria-label="${esc(t('tip_extra_custom'))}"><ha-icon icon="mdi:timer-edit-outline"></ha-icon></button>
+			</div>` : '';
 		const tile = (key, icon, label, on, col) => `<button class="tile${on ? ' on' : ''}" data-tile="${key}" style="--on:var(${col})"><ha-icon icon="${icon}"></ha-icon><span>${esc(label)}</span></button>`;
 		const tiles = [
 			ch.lock && tile('Account', accLocked ? 'mdi:lock' : 'mdi:lock-open-variant', t('lock'), accLocked, '--error-color'),
@@ -297,12 +331,13 @@ class FamilySafetyCard extends HTMLElement {
 			<ha-card>
 				<div class="head">
 					<ha-icon icon="${esc(c.icon || 'mdi:laptop')}" style="color:var(${accLocked ? '--error-color' : '--success-color'})"></ha-icon>
-					<span class="title">${esc(c.title || '')}</span>
+					<div class="tt"><span class="title">${esc(c.title || '')}</span>${status ? `<span class="status">${status}</span>` : ''}</div>
 					<span class="used">${isNaN(used) ? '' : hm(used)}${limit > 0 ? ' / ' + hm(limit) : ''}</span>
 					<button class="gear" data-settings aria-label="${esc(t('settings'))}" data-tip="${esc(t('settings'))}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
 				</div>
-				${status ? `<div class="status">${status}</div>` : ''}
 				<div class="track big"><div style="width:${pct}%"></div></div>
+				${extraBar}
+				${this._err ? `<div class="warn" role="alert">${esc(this._err)}</div>` : ''}
 				${missing.length ? `<div class="warn">${t('missing')}${esc(missing.join(', '))}</div>` : ''}
 				${tiles && c.show_tiles !== false ? `<div class="tiles">${tiles}</div>` : ''}
 				${compact || c.show_request === false ? '' : reqLine}
@@ -317,6 +352,9 @@ class FamilySafetyCard extends HTMLElement {
 				${sitesPart}
 				${weekPart}
 			</ha-card>`;
+		this._fitTabs();
+		// icons and fonts arrive after the first layout (slower on a phone) and widen the tabs: measure again
+		for (const ms of [300, 1500]) setTimeout(() => this._fitTabs(), ms);
 		const $ = (sel, fn) => this.shadowRoot.querySelectorAll(sel).forEach((el) => el.addEventListener('click', (ev) => fn(el, ev)));
 		$('[data-tab]', (b) => { this._tab = b.dataset.tab; this._render(); });
 		$('[data-app]', (r) => { const a = apps.find((x) => x.app_id === r.dataset.app); if (a) this._open(appSheet(this, a, paused.has(a.app_id))); });
@@ -326,6 +364,12 @@ class FamilySafetyCard extends HTMLElement {
 		$('[data-tile]', (b) => this._open(b.dataset.tile === 'web' ? webSheet(this) : lockSheet(this, b.dataset.tile)));
 		$('[data-req]', () => { if (req) this._open(requestSheet(this, req)); });
 		$('[data-day]', (b) => this._open(daySheet(this, b.dataset.day, b.dataset.xbox === '1')));
+		const extra = (service, data) => this._call(service, { platform: extraOn, ...data })
+			.then(() => { this._err = ''; this._render(); })
+			.catch((err) => { this._err = (err && err.message) || String(err); this._render(); });
+		$('[data-extra]', (b) => extra('add_time_bonus', { minutes: Number(b.dataset.extra) }));
+		$('[data-extra-end]', () => extra('cancel_time_bonus', {}));
+		$('[data-extra-custom]', () => this._open(extraSheet(this, extraOn)));
 	}
 
 	/** The allowed and blocked lists: get_sites when read, else the web filter sensor's exceptions. */
@@ -357,6 +401,16 @@ class FamilySafetyCard extends HTMLElement {
 		return this._hass.callService(DOMAIN, service, { entity_id: this._config.child.screen_time, ...data });
 	}
 
+	/** End of the extra time in force (Windows only: Microsoft gives no Xbox end), or null. */
+	_extraUntil(platform) {
+		return platform === 'Windows' ? this._attr(this._config.child.time_remaining, 'extra_time_until', null) : null;
+	}
+
+	_clock(iso) {
+		const d = iso ? new Date(iso) : null;
+		return d && !isNaN(d) ? d.toLocaleTimeString(this._hass.language, { hour: '2-digit', minute: '2-digit' }) : '';
+	}
+
 	_open(sheet) {
 		if (this._dialog) this._dialog.remove();
 		const dialog = document.createElement('familysafety-dialog');
@@ -371,17 +425,27 @@ FamilySafetyCard.css = `
 	:host { display: block; container-type: inline-size; }
 	ha-card { overflow: hidden; }
 	button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
-	.head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
+	.head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+	.tt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 	.head ha-icon { --mdc-icon-size: 28px; }
 	.title { font-weight: 700; font-size: 15px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.used { margin-left: auto; font-weight: 700; font-size: 14px; white-space: nowrap; flex: none; }
 	.gear { width: 32px; height: 32px; margin: -6px -6px -6px 0; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.6; }
 	.gear ha-icon { --mdc-icon-size: 20px; }
-	.status { margin: -6px 16px 8px 54px; font-size: 13px; color: var(--secondary-text-color); }
+	.status { font-size: 13px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	em.warn2 { color: var(--warning-color, #ff9800); }
 	.track { height: 6px; border-radius: 3px; background: var(--divider-color); grid-column: 1 / 3; }
 	.track > div { height: 100%; border-radius: 3px; background: var(--primary-color); }
 	.track.big { height: 8px; margin: 0 16px 12px; }
+	.bonus { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--divider-color); }
+	.btxt { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+	.btxt small { display: block; font-weight: 400; opacity: 0.6; font-size: 12px; }
+	.round { position: relative; width: 36px; height: 36px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center;
+		background: rgba(var(--rgb-primary-text-color, 255, 255, 255), 0.08); opacity: 0.75; }
+	.round.big { width: 40px; height: 40px; border-radius: 20px; }
+	.round[disabled] { opacity: 0.3; cursor: default; }
+	.round ha-icon { --mdc-icon-size: 20px; }
+	.round.big[data-tip]:hover::after { right: auto; left: 0; }
 	.track.big > div { background: var(--accent-color); }
 	.warn { margin: 0 16px 8px; font-size: 12px; color: var(--error-color); }
 	.tiles { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
@@ -398,10 +462,11 @@ FamilySafetyCard.css = `
 	.label::before { content: ''; width: 3px; height: 12px; border-radius: 2px; background: var(--accent-color); }
 	.label .add { margin-left: auto; opacity: 1; }
 	.tabs { display: flex; border-top: 1px solid var(--divider-color); border-bottom: 1px solid var(--divider-color); }
-	.tab { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 12px 2px; font-size: 13px;
+	.tab { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 12px 2px; font-size: 13px;
 		font-weight: 600; opacity: 0.6; border-bottom: 3px solid transparent; white-space: nowrap; }
 	.tab span { overflow: hidden; text-overflow: ellipsis; }
 	.tab ha-icon { --mdc-icon-size: 18px; flex: none; }
+	.tabs.short .tab .w { display: none; } .tabs.short .tab { gap: 4px; }
 	.tab.on { opacity: 1; border-bottom-color: var(--accent-color); }
 	.tab.on ha-icon { color: var(--accent-color); }
 	.list { padding: 6px 16px 14px; }
@@ -435,8 +500,9 @@ FamilySafetyCard.css = `
 		padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: #fff; background: rgba(40, 40, 40, 0.92); }
 	.tab[data-tip]:hover::after { right: auto; left: 50%; transform: translateX(-50%); }
 	/* narrow card (half width, phone, card picker preview): icons and counts only, tighter rows */
+	/* a little room in the tabs, so their words still fit down to about 400 px */
+	@container (max-width: 560px) { .tab { font-size: 12px; gap: 3px; padding: 10px 0; } }
 	@container (max-width: 420px) {
-		.tab .w { display: none; } .tab { gap: 4px; }
 		.head { gap: 8px; } .title { font-size: 14px; } .used { font-size: 13px; }
 		.tile { font-size: 12px; padding: 8px 2px; } .day b { font-size: 13px; } .day i { font-size: 8px; }
 	}
@@ -561,24 +627,46 @@ function lockSheet(card, target) {
 	};
 	return {
 		icon: 'mdi:lock-clock', title: t('lock_title'), chip: 'mdi:lock-clock', name: t('lock_title'), sub: card._config.title || '',
-		draft: { target, hours: 24, bonus: 30 },
+		draft: { target, hours: 24 },
 		rows: (d) => [
 			...choices,
 			{ kind: 'stepper', key: 'hours', step: 1, min: 1, max: 168, fmt: hrs, icon: 'mdi:timer-sand', title: t('duration'), sub: t('duration_sub') },
-			// extra time exists on the Xbox only (Xbox Family Settings service)
-			...(d.target === 'Xbox' ? [
-				{ kind: 'stepper', key: 'bonus', step: 15, min: 15, max: 240, fmt: hm, icon: 'mdi:timer-plus-outline', title: t('bonus'), sub: t('bonus_sub') },
-				{ kind: 'action', icon: 'mdi:plus-circle-outline', title: t('add_bonus'), sub: '', close: true,
-					run: (dd) => card._call('add_time_bonus', { platform: 'Xbox', minutes: dd.bonus }) },
-				{ kind: 'action', icon: 'mdi:close-circle-outline', title: t('cancel_bonus'), sub: t('cancel_bonus_sub'), close: true,
-					run: () => card._call('cancel_time_bonus', { platform: 'Xbox' }) },
-			] : []),
+			// extra time: Xbox (Xbox Family Settings service) and Windows (mobile overrides)
+			...(d.target === 'Xbox' || d.target === 'Windows' ? [{ kind: 'action', nav: true, icon: 'mdi:timer-plus-outline', title: t('bonus'),
+				sub: card._extraUntil(d.target) ? t('extra_until').replace('{t}', card._clock(card._extraUntil(d.target))) : t('bonus_nav_sub'),
+				run: (dd) => card._open({ ...extraSheet(card, dd.target), back: () => card._open(lockSheet(card, dd.target)) }) }] : []),
 		],
 		buttons: [
 			{ label: t('lock'), icon: 'mdi:lock', color: 'var(--error-color, #f44336)', run: go(true) },
 			{ label: t('unlock'), icon: 'mdi:lock-open-variant', color: 'var(--success-color, #4caf50)', run: go(false) },
 		],
 	};
+}
+
+/** Extra time: a window from now (Microsoft's AllowUntil), with the one in force shown as a pill. */
+function extraSheet(card, platform) {
+	const t = (k) => card._t(k), until = card._extraUntil(platform);
+	return {
+		icon: 'mdi:timer-plus-outline', title: t('bonus'), chip: platform === 'Xbox' ? 'mdi:microsoft-xbox' : 'mdi:microsoft-windows',
+		name: t(platform.toLowerCase()), sub: card._config.title || '',
+		// Windows only: Microsoft gives no end for the Xbox extra time
+		pill: platform !== 'Windows' ? null : until
+			? { ok: true, icon: 'mdi:timer-sand', text: t('bonus_pill').replace('{t}', card._clock(until)), tip: t('extra_until').replace('{t}', card._clock(until)) }
+			: { off: true, icon: 'mdi:timer-sand', text: t('bonus_pill_none'), tip: t('extra_none') },
+		draft: { minutes: 30 },
+		rows: () => [{ kind: 'stepper', key: 'minutes', step: 15, min: 15, max: 240, fmt: hm, icon: 'mdi:timer-sand', title: t('bonus_len'), sub: t('bonus_sub') }],
+		buttons: [
+			{ label: (d) => t('add_bonus').replace('{t}', hm(d.minutes)), icon: 'mdi:timer-plus-outline', color: 'var(--success-color, #4caf50)',
+				run: (d) => card._call('add_time_bonus', { platform, minutes: d.minutes }) },
+			{ label: t('stop_bonus'), icon: 'mdi:timer-off-outline', color: 'var(--error-color, #f44336)', off: platform === 'Windows' && !until,
+				run: () => card._call('cancel_time_bonus', { platform }) },
+		],
+	};
+}
+
+function openIntegration() {
+	history.pushState(null, '', '/config/integrations/integration/' + DOMAIN);
+	window.dispatchEvent(new CustomEvent('location-changed'));
 }
 
 function settingsSheet(card) {
@@ -597,15 +685,21 @@ function settingsSheet(card) {
 		: a.reauth_required || a.reauth_requested ? t('conn_reauth') : conn.state === 'connected' ? t('conn_ok') : t('conn_degraded').replace('{r}', conn.state);
 	return {
 		icon: 'mdi:cog-outline', title: t('settings'), chip: 'mdi:account-child-circle', name: card._config.title || t('settings'), sub: '',
+		// connection as a coloured pill next to the name (full text as tooltip), not a row that looks like a button
+		pill: !conn ? null : {
+			ok: conn.state === 'connected' && !a.reauth_required && !a.account_interrupt,
+			text: t(a.account_interrupt ? 'pill_action' : a.reauth_required || a.reauth_requested ? 'pill_reauth' : conn.state === 'connected' ? 'pill_ok' : 'pill_partial'),
+			tip: connText,
+		},
 		draft,
 		rows: () => [
 			...toggles.map(([key, icon, title, sub]) => ({ kind: 'toggle', key, icon, title, sub })),
-			...(ch.web_filter ? [{ kind: 'action', nav: true, icon: 'mdi:shield-check-outline', title: t('web_row'), sub: t('web_row_sub'), run: () => card._open(webSheet(card)) }] : []),
-			{ kind: 'info', icon: conn && conn.state === 'connected' && !a.reauth_required ? 'mdi:lan-connect' : 'mdi:lan-disconnect', title: t('conn'), sub: connText },
-			{ kind: 'action', icon: 'mdi:login', title: t('reauth'), sub: t('reauth_sub'), done: t('reauth_done'),
-				run: () => card._hass.callService(DOMAIN, 'request_reauth', {}) },
+			...(ch.web_filter ? [{ kind: 'action', nav: true, icon: 'mdi:shield-check-outline', title: t('web_row'), sub: t('web_row_sub'), run: () => card._open({ ...webSheet(card), back: () => card._open(settingsSheet(card)) }) }] : []),
+			// both continue on the integration's page (the sign-in is started there): close the sheet and go
+			{ kind: 'action', icon: 'mdi:link-variant', title: t('reauth'), sub: t('reauth_sub'), close: true,
+				run: async () => { await card._hass.callService(DOMAIN, 'request_reauth', {}); openIntegration(); } },
 			{ kind: 'action', icon: 'mdi:open-in-app', title: t('configure'), sub: t('configure_sub'), close: true,
-				run: async () => { history.pushState(null, '', '/config/integrations/integration/' + DOMAIN); window.dispatchEvent(new CustomEvent('location-changed')); } },
+				run: async () => openIntegration() },
 		],
 		buttons: [{ label: t('save'), icon: 'mdi:content-save-outline', run: async (d) => {
 			for (const [key] of toggles) {
@@ -718,7 +812,6 @@ class FamilySafetyDialog extends HTMLElement {
 			if (r.kind === 'toggle') {
 				return `<div class="opt${d[r.key] ? ' on' : ''}" data-row="${i}">${chip(r.icon)}${txt(r)}<div class="sw${d[r.key] === null ? ' unk' : d[r.key] ? ' on' : ''}"><i></i></div></div>`;
 			}
-			if (r.kind === 'info') return `<div class="opt flat">${chip(r.icon)}${txt(r)}</div>`;
 			if (r.kind === 'action') return `<div class="opt act" data-row="${i}">${chip(r.icon)}${txt(r)}<ha-icon class="go" icon="mdi:chevron-right"></ha-icon></div>`;
 			return `<div class="opt flat">${chip(r.icon)}${txt(r)}${stepper(r)}</div>`;
 		};
@@ -728,16 +821,17 @@ class FamilySafetyDialog extends HTMLElement {
 			<style>${FamilySafetyDialog.css}</style>
 			<div class="veil"></div>
 			<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(s.title)}">
-				<div class="bar"><ha-icon icon="${s.icon}"></ha-icon><span>${esc(s.title)}</span><button class="x" aria-label="${esc(t('close'))}"><ha-icon icon="mdi:close"></ha-icon></button></div>
-				<div class="head"><div class="chip sq"><ha-icon icon="${s.chip}"></ha-icon></div><div class="txt"><div class="big">${esc(s.name)}</div>${s.sub ? `<small>${esc(s.sub)}</small>` : ''}</div></div>
+				<div class="bar">${s.back ? `<button class="bk" aria-label="${esc(t('back'))}"><ha-icon icon="mdi:arrow-left"></ha-icon></button>` : `<ha-icon icon="${s.icon}"></ha-icon>`}<span>${esc(s.title)}</span><button class="x" aria-label="${esc(t('close'))}"><ha-icon icon="mdi:close"></ha-icon></button></div>
+				<div class="head"><div class="chip sq"><ha-icon icon="${s.chip}"></ha-icon></div><div class="txt"><div class="big">${esc(s.name)}</div>${s.sub ? `<small>${esc(s.sub)}</small>` : ''}</div>${s.pill ? `<span class="pill${s.pill.ok ? ' ok' : s.pill.off ? ' off' : ''}" title="${esc(s.pill.tip)}" role="status"><ha-icon icon="${s.pill.icon || 'mdi:microsoft'}"></ha-icon>${esc(s.pill.text)}</span>` : ''}</div>
 				${rows.map(row).join('')}
 				${this._error ? `<div class="err" role="alert">${esc(this._error)}</div>` : ''}
 				${this._notice ? `<div class="note" role="status">${esc(this._notice)}</div>` : ''}
-				<div class="btns">${s.buttons.map((b, i) => `<button class="save" data-btn="${i}" ${busy ? 'disabled' : ''}><ha-icon icon="${this._busy === i ? 'mdi:loading' : b.icon}" style="${b.color && this._busy !== i ? 'color:' + b.color : ''}"></ha-icon>${esc(this._busy === i ? t('saving') : b.label)}</button>`).join('')}</div>
+				<div class="btns">${s.buttons.map((b, i) => `<button class="save${b.off ? ' off' : ''}" data-btn="${i}" ${busy || b.off ? 'disabled' : ''}><ha-icon icon="${this._busy === i ? 'mdi:loading' : b.icon}" style="${b.color && this._busy !== i ? 'color:' + b.color : ''}"></ha-icon>${esc(this._busy === i ? t('saving') : typeof b.label === 'function' ? b.label(d) : b.label)}</button>`).join('')}</div>
 			</div>`;
 		const root = this.shadowRoot, $ = (sel, fn) => root.querySelectorAll(sel).forEach((el) => el.addEventListener('click', (ev) => fn(el, ev)));
 		$('.veil', () => busy || this._close());
 		$('.x', () => busy || this._close());
+		$('.bk', () => busy || s.back());
 		$('[data-btn]', (b) => busy || this._run(Number(b.dataset.btn)));
 		$('[data-row]', (o) => {
 			if (busy) return;
@@ -768,14 +862,19 @@ class FamilySafetyDialog extends HTMLElement {
 FamilySafetyDialog.css = `
 	:host { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
 	.veil { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
-	.sheet { position: relative; width: min(440px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 16px;
+	.sheet { position: relative; width: min(440px, calc(100vw - 24px)); max-height: calc(100% - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); overflow: auto; box-sizing: border-box; padding: 16px;
 		border-radius: 28px; background: #1c1c1e; color: #ebebf0; }
 	.bar { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; margin-bottom: 14px; }
 	.bar span { flex: 1; }
 	button { font: inherit; color: inherit; border: 0; cursor: pointer; background: none; }
-	.x { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.08); display: inline-flex; align-items: center; justify-content: center; }
+	.x, .bk { width: 44px; height: 44px; border-radius: 22px; background: rgba(255, 255, 255, 0.08); display: inline-flex; align-items: center; justify-content: center; }
 	.head, .opt { display: flex; align-items: center; gap: 14px; }
 	.head { margin-bottom: 14px; }
+	.pill { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+		background: rgba(244, 67, 54, 0.15); color: #ff8a80; }
+	.pill ha-icon { --mdc-icon-size: 14px; }
+	.pill.ok { background: rgba(76, 175, 80, 0.15); color: #81c784; }
+	.pill.off { background: rgba(255, 255, 255, 0.08); color: #a5a5ac; }
 	.opt { padding: 12px 14px; margin-bottom: 8px; border-radius: 18px; background: rgba(255, 255, 255, 0.06); border: 2px solid transparent; cursor: pointer; min-height: 48px; }
 	.opt.flat { cursor: default; }
 	.opt.on { border-color: #ff9800; }
@@ -803,11 +902,12 @@ FamilySafetyDialog.css = `
 	.save { flex: 1; height: 52px; border-radius: 26px; background: rgba(255, 255, 255, 0.1); font-weight: 600; font-size: 16px;
 		display: flex; align-items: center; justify-content: center; gap: 8px; }
 	.save[disabled] { opacity: 0.6; cursor: default; }
+	.save.off { opacity: 0.3; }
 	.save[disabled] ha-icon[icon="mdi:loading"] { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 `;
 
-const SECTIONS = ['show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
+const SECTIONS = ['bonus', 'show_tiles', 'show_request', 'show_apps', 'show_websites', 'show_week'];
 
 /** Visual editor: the child (its Family Safety device), a title, the sections shown, the language. */
 class FamilySafetyCardEditor extends HTMLElement {
@@ -822,13 +922,13 @@ class FamilySafetyCardEditor extends HTMLElement {
 			this._form.computeLabel = (s) => ({
 				device: fr ? 'Enfant (son appareil Family Safety)' : 'Child (its Family Safety device)', title: fr ? 'Titre' : 'Title',
 				language: fr ? 'Langue' : 'Language',
-				show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
+				bonus: fr ? 'Barre de temps en plus (+15 / +30 / +60 min)' : 'Extra time bar (+15 / +30 / +60 min)', show_tiles: fr ? 'Tuiles (verrous, web)' : 'Tiles (locks, web)', show_request: fr ? 'Demande en attente' : 'Pending request',
 				show_apps: fr ? 'Applications' : 'Applications', show_websites: fr ? 'Sites web' : 'Websites', show_week: fr ? 'Limites de la semaine' : 'Weekly limits',
 			}[s.name]);
 			this._form.addEventListener('value-changed', (e) => {
 				const config = { ...e.detail.value };
 				delete config.compact;  // replaced by the show_* switches
-				Object.keys(config).forEach((k) => (config[k] === '' || config[k] === undefined || (SECTIONS.includes(k) && config[k] === true)) && delete config[k]);
+				Object.keys(config).forEach((k) => (config[k] === '' || config[k] === undefined || (k !== 'bonus' && SECTIONS.includes(k) && config[k] === true)) && delete config[k]);
 				this._config = config;
 				this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
 			});
