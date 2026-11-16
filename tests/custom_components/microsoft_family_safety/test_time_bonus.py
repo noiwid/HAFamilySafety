@@ -233,6 +233,108 @@ async def test_cancelling_windows_extra_time(coordinator, mobile):
     mobile.set_mobile_device_override.assert_not_awaited()
 
 
+# --- Windows: an unconfirmed write is cleaned up, never a lock or earlier extra time --
+def _serve_windows(mobile, *reads, post=None, cancel=None):
+    """GETs answer ``reads`` in turn (the last repeats); the AllowUntil POST answers or
+    raises ``post``; a Cancel answers the cleared state or raises ``cancel``."""
+    pending = list(reads)
+
+    async def get(child_id):
+        answer = pending[0] if len(pending) == 1 else pending.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    async def set_override(child_id, target, override_type, valid_until):
+        if override_type == "Cancel":
+            if cancel is not None:
+                raise cancel
+            return _windows()
+        if isinstance(post, Exception):
+            raise post
+        return post if post is not None else {}
+
+    mobile.get_mobile_device_overrides.side_effect = get
+    mobile.set_mobile_device_override.side_effect = set_override
+
+
+def _types(mobile) -> list[str]:
+    return [c.args[2] for c in mobile.set_mobile_device_override.await_args_list]
+
+
+def _error(text="API request failed with status 500"):
+    from custom_components.microsoft_family_safety.api_client import FamilySafetyWebAPIError
+
+    return FamilySafetyWebAPIError(text)
+
+
+async def test_windows_unconfirmed_write_cancels_what_it_left(coordinator, mobile):
+    # Microsoft answered an error but stored extra time, not ending when asked.
+    _serve_windows(mobile, _windows(), _windows(("AllowUntil", FAR)), post=_error())
+    with pytest.raises(HomeAssistantError, match="did not confirm the Windows extra time") as err:
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30))
+    assert _types(mobile) == ["AllowUntil", "Cancel"]
+    assert mobile.set_mobile_device_override.await_args_list[1].args[1] == "Desktop"
+    assert "has been cancelled" in str(err.value) and "status 500" in str(err.value)
+
+
+async def test_windows_unconfirmed_answer_document_is_cleaned_up_too(coordinator, mobile):
+    _serve_windows(mobile, _windows(), post=_windows(("AllowUntil", FAR)))
+    with pytest.raises(HomeAssistantError, match="has been cancelled"):
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30))
+    assert _types(mobile) == ["AllowUntil", "Cancel"]
+
+
+async def test_windows_unconfirmed_with_nothing_listed_sends_no_cancel(coordinator, mobile):
+    _serve_windows(mobile, _windows(), _windows(), post=_error("status 400: bad type"))
+    with pytest.raises(HomeAssistantError, match="Nothing is in force"):
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30))
+    assert _types(mobile) == ["AllowUntil"]
+
+
+async def test_windows_unconfirmed_keeps_earlier_extra_time(coordinator, mobile):
+    parents = _windows(("AllowUntil", FAR))
+    _serve_windows(mobile, parents, parents, post=_error())
+    with pytest.raises(HomeAssistantError, match="left as it was"):
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30))
+    assert _types(mobile) == ["AllowUntil"]
+
+
+async def test_windows_unconfirmed_never_cancels_a_lock(coordinator, mobile):
+    lock = _windows(("BlockUntil", FAR))
+    _serve_windows(mobile, lock, lock, post=_error())
+    with pytest.raises(HomeAssistantError, match="nothing was cancelled"):
+        await coordinator.async_add_time_bonus(
+            CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30), replace_lock=True
+        )
+    assert _types(mobile) == ["AllowUntil"]
+
+
+async def test_windows_unread_result_cancels_when_nothing_was_in_force(coordinator, mobile):
+    _serve_windows(mobile, _windows(), _error("status 503"), _windows(), post=_error())
+    with pytest.raises(HomeAssistantError, match="has been cancelled"):
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30))
+    assert _types(mobile) == ["AllowUntil", "Cancel"]
+
+
+@pytest.mark.parametrize("before", [("BlockUntil", FAR), ("AllowUntil", FAR)])
+async def test_windows_unread_result_over_an_override_cancels_nothing(coordinator, mobile, before):
+    _serve_windows(mobile, _windows(before), _error("status 503"), post=_error())
+    with pytest.raises(HomeAssistantError, match="nothing was cancelled"):
+        await coordinator.async_add_time_bonus(
+            CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30), replace_lock=True
+        )
+    assert _types(mobile) == ["AllowUntil"]
+
+
+async def test_windows_failed_cleanup_says_so(coordinator, mobile):
+    stays = _windows(("AllowUntil", FAR))
+    _serve_windows(mobile, _windows(), stays, post=_error(), cancel=_error("status 500 on cancel"))
+    with pytest.raises(HomeAssistantError, match="failed as well"):
+        await coordinator.async_add_time_bonus(CHILD, "Windows", dt_util.utcnow() + timedelta(minutes=30))
+    assert _types(mobile) == ["AllowUntil", "Cancel"]
+
+
 async def test_windows_allowed_now_counts_the_extra_time(coordinator):
     later = dt_util.utcnow() + timedelta(minutes=40)
     coordinator.data = {"accounts": {CHILD: {"extra_time": {"Windows": later.isoformat()}}}, "devices": {}}

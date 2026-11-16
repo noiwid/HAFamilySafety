@@ -1685,19 +1685,25 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             got = mobile_extra_time_of(mobile_platform_entry(state, "Windows"))
             return got if got is not None and abs(got - until) <= self._BONUS_TOLERANCE else None
 
+        target = str(entry.get("appliesTo"))
         state, write_error, read_error = await self._async_post_mobile_override(
-            child, str(entry.get("appliesTo")), MOBILE_OVERRIDE_ALLOW, until,
+            child, target, MOBILE_OVERRIDE_ALLOW, until,
             lambda state: granted_until(state) is not None,
         )
-        await self.async_request_refresh()
         valid_until = granted_until(state) if state is not None else None
         if valid_until is None:
+            # Microsoft has applied overrides it answered an error for: extra
+            # time this write left in force is cancelled.
             error = write_error or read_error
             _LOGGER.debug("Windows extra time not confirmed: answer %s", state)
+            after = mobile_platform_entry(state, "Windows") if state is not None else None
+            undone = await self._async_undo_windows_write(child, target, entry, after)
+            await self.async_request_refresh()
             raise HomeAssistantError(
                 "Microsoft did not confirm the Windows extra time"
-                + (f" ({_describe_error(error)})" if error else "") + "."
+                + (f" ({_describe_error(error)})" if error else "") + f". {undone}"
             ) from error
+        await self.async_request_refresh()
         if mobile_lock_of(mobile_platform_entry(state, "Windows")) is not None:
             raise HomeAssistantError(
                 "Microsoft recorded the Windows extra time but Windows is still locked; "
@@ -1708,6 +1714,57 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "until": dt_util.as_local(valid_until).isoformat(),
             "replaced_lock": lock is not None,
         }
+
+    async def _async_undo_windows_write(
+        self, child: str, target: str, before: dict, after: dict | None
+    ) -> str:
+        """Cancel the extra time an unconfirmed AllowUntil left; never a lock or earlier extra time.
+
+        ``before`` is the Windows entry read before the write, ``after`` the
+        last one read after it (None when no read worked). Only extra time
+        this write created is cancelled: extra time in force before (a
+        parent's, or one given earlier) is left alone, and so is a lock. A
+        Cancel lifts whatever is in force, so with the result unread it is
+        sent only when nothing was in force before. Returns a sentence saying
+        what was done.
+        """
+        if after is None:
+            if mobile_lock_of(before) is not None or mobile_extra_time_of(before) is not None:
+                return (
+                    "The result could not be read and an override was in force before, "
+                    "so nothing was cancelled; check Windows in the Family Safety app."
+                )
+        else:
+            if mobile_lock_of(after) is not None:
+                return "A lock is listed on Windows, so nothing was cancelled."
+            extra_before = mobile_extra_time_of(before)
+            extra_after = mobile_extra_time_of(after)
+            if extra_after is None:
+                return "Nothing is in force on Windows."
+            if extra_before is not None and abs(extra_after - extra_before) <= self._BONUS_TOLERANCE:
+                return "The extra time in force before was left as it was."
+
+        def cleared(state: Any) -> bool:
+            entry = mobile_platform_entry(state, "Windows")
+            return mobile_extra_time_of(entry) is None and mobile_lock_of(entry) is None
+
+        state, write_error, read_error = await self._async_post_mobile_override(
+            child, target, MOBILE_OVERRIDE_CANCEL, dt_util.utcnow(), cleared
+        )
+        if state is not None and cleared(state):
+            if mobile_lock_of(before) is not None:
+                return (
+                    "What was written has been cancelled; the lock it replaced is no "
+                    "longer in force."
+                )
+            return "What was written has been cancelled."
+        problem = write_error or read_error
+        _LOGGER.warning("Cancelling an unconfirmed Windows extra time failed: %s", problem or state)
+        return (
+            "Cancelling what was written failed as well"
+            + (f" ({_describe_error(problem)})" if problem else "")
+            + "; check Windows in the Family Safety app."
+        )
 
     async def _async_windows_cancel_time_bonus(self, account_id: str) -> dict[str, Any]:
         """End the Windows extra time in force with a Cancel, never touching a lock."""
