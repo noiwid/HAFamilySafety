@@ -287,13 +287,13 @@ class FamilySafetyPlatformLockSwitch(CoordinatorEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Lock the platform (web override for Windows/Xbox, else mobile API)."""
+        """Lock the platform (Xbox: xapprove or web override; Windows/Mobile: mobile API)."""
         await async_check_entity_action(self)
         _LOGGER.debug("Locking platform %s for %s", self._platform, self._account_name)
         await self.coordinator.async_lock_platform(self._account_id, self._platform)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Unlock the platform (web override for Windows/Xbox, else mobile API)."""
+        """Unlock the platform, putting back what the lock replaced (see the coordinator)."""
         await async_check_entity_action(self)
         _LOGGER.debug("Unlocking platform %s for %s", self._platform, self._account_name)
         await self.coordinator.async_unlock_platform(self._account_id, self._platform)
