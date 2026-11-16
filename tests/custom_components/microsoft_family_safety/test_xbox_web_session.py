@@ -441,12 +441,18 @@ async def test_unneeded_reauth_is_withdrawn(make_coordinator, hass):
     ("reason", "linked", "withdrawn"),
     [("manual", True, False), ("family_context_auth_required", False, False)],
 )
-async def test_reauth_kept_when_asked_for_or_still_needed(make_coordinator, reason, linked, withdrawn):
+async def test_reauth_kept_when_asked_for_or_still_needed(
+    make_coordinator, hass, reason, linked, withdrawn
+):
     coord = make_coordinator()
     _link_xbox(coord, linked)
     coord.web_api = SimpleNamespace(mobile_schedule_ok=True)
     coord._reauth_requested = True
     coord._reauth_reason = reason
+    # The sign-in the user asked for is still open.
+    hass.config_entries.flow.async_progress_by_handler = MagicMock(
+        return_value=[{"flow_id": "f1", "step_id": "reauth_full_confirm"}]
+    )
     await coord._async_withdraw_unneeded_reauth()
     assert (coord._reauth_requested is False) is withdrawn
 
@@ -470,6 +476,28 @@ async def test_manual_reauth_survives_a_later_automatic_reason(make_coordinator,
     await coord._async_withdraw_unneeded_reauth()
     assert coord._reauth_requested is True
     abort.assert_not_called()
+
+
+async def test_manual_reauth_is_withdrawn_once_its_flow_is_gone(make_coordinator, hass):
+    # An entry without Xbox runs on the mobile token only: nothing else would
+    # clear a request_reauth whose sign-in was closed.
+    coord = make_coordinator(xbox=False)
+    coord._request_reauth = FamilySafetyDataUpdateCoordinator._request_reauth.__get__(coord)
+    await coord.async_request_reauth()
+    await hass.async_block_till_done()
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(flows) == 1
+
+    # While the sign-in is open, the request stays.
+    await coord._async_withdraw_unneeded_reauth()
+    assert (coord._reauth_requested, coord._reauth_reason) == (True, "manual")
+    coord._dismiss_auth_notification.assert_not_awaited()
+
+    hass.config_entries.flow.async_abort(flows[0]["flow_id"])
+    await coord._async_withdraw_unneeded_reauth()
+    assert (coord._reauth_requested, coord._reauth_reason) == (False, None)
+    coord._dismiss_auth_notification.assert_awaited_once()
+    assert coord.connection_state()["reauth_requested"] is False
 
 
 async def test_an_html_page_with_status_200_is_not_a_success():
