@@ -229,7 +229,8 @@ class FamilySafetyCard extends HTMLElement {
 		const apps = this._attr(ch.applications, 'applications', []);
 		const used = this._num(ch.screen_time);
 		const today = DAYS[(new Date().getDay() + 6) % 7];
-		const limit = c.schedule ? this._num(this._dayIds(today, false)[0]) : NaN;
+		// limits off: the day's limit is kept by Microsoft but not enforced, so it is not shown
+		const limit = c.schedule && this._attr(ch.allowed_now, 'reason') !== 'no_limits' ? this._num(this._dayIds(today, false)[0]) : NaN;
 		const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
 		const acc = this._state(ch.lock), accLocked = acc && acc.state === 'on';
 		const reqs = this._attr(ch.pending_requests, 'requests', []);
