@@ -20,6 +20,7 @@ from homeassistant.exceptions import (
     ServiceValidationError,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -52,7 +53,11 @@ from .const import (
     SERVICE_CANCEL_TIME_BONUS,
     CONF_ALLOWED_USERS,
 )
-from .coordinator import FamilySafetyDataUpdateCoordinator
+from .coordinator import (
+    HELD_OVERRIDES_STORAGE_KEY,
+    STORAGE_VERSION,
+    FamilySafetyDataUpdateCoordinator,
+)
 from .permissions import guard_service
 from .targeting import child_schema, resolve_account_id
 from ._httpx_web_adapter import apply_httpx_web_transport_patch
@@ -454,12 +459,15 @@ def _register_services(hass: HomeAssistant) -> None:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the Xbox Family Settings refresh token and the paused apps kept for this entry."""
+    """Delete the Xbox Family Settings refresh token and the states kept for this entry."""
     from .app_pause import AppPauser
     from .xbox_family_api import XboxFamilyAPI
 
     await XboxFamilyAPI(hass, entry.entry_id).async_unlink()
     await AppPauser(hass, entry.entry_id).async_remove()
+    await Store(
+        hass, STORAGE_VERSION, f"{HELD_OVERRIDES_STORAGE_KEY}.{entry.entry_id}"
+    ).async_remove()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

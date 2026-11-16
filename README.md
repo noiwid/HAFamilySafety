@@ -345,7 +345,7 @@ Windows uses the Windows schedule and the minutes of the child's Windows devices
 | App Limits | `switch.{prefix}_app_limits` | The "App, feature, and game limits" toggle above the app list. While it is OFF, the per-app time limits are kept but not enforced. |
 | Web Filtering | `switch.{prefix}_web_filtering` | ON = Microsoft filters inappropriate websites and searches in Microsoft Edge, and the blocked and allowed lists apply. Same write as the `toggle_web_filter` action. |
 | App Block | `switch.{prefix}_app_{appname}` | ON = app blocked. One switch per application. |
-| Platform Lock | `switch.{prefix}_{platform}_lock` | ON = platform locked. Locks one platform (e.g. Windows) through a Microsoft device override. For Windows the integration tries a web-API time override first, then falls back to the mobile API. Use **Account Lock** to lock every platform at once. |
+| Platform Lock | `switch.{prefix}_{platform}_lock` | ON = platform locked. Locks one platform (e.g. Windows) through a Microsoft device override: the mobile API for Windows and Mobile, the Xbox Family Settings sign-in (else the web session) for the Xbox. Off puts back the lock or extra time that was in force before, as `unlock_platform` does. Use **Account Lock** to lock every platform at once. |
 
 ### Buttons — Per Child Account
 
@@ -422,6 +422,8 @@ data:
   account_id: "1234567890123456"
   platform: "Windows"
 ```
+
+The first `lock_platform` remembers what was in force on that platform: a lock a parent set in the Family Safety app, or extra time. A second `lock_platform` keeps what the first one saved, and it is kept across restarts. `unlock_platform` (or turning the lock switch off) puts it back if it has not run out yet; otherwise, or when nothing was in force, it cancels the lock. On the Xbox, what is in force can only be read with the Xbox Family Settings sign-in linked; without it, unlock cancels.
 
 #### Extra time (Xbox and Windows)
 
@@ -1050,7 +1052,7 @@ Used for read operations and app management. Token-based, no browser session req
 | GET | `/v1/activityreport/webactivity/{childId}` | Websites visited in Edge (`allowStatus=true`, 403 when there is no data) | `sensor.websites_visited` |
 | GET | `/v1/activityreport/searchactivity/{childId}` | Bing searches | `sensor.websites_visited` attributes |
 | GET | `/v4/devicelimits/{childId}/overrides` (`Plat-Info: ALL`) | Active device overrides; the platform name to send is its `appliesTo` (Windows can be listed as `Desktop`) | `switch.lock`, `lock_platform` / `unlock_platform` read-back |
-| POST | `/v4/devicelimits/{childId}/overrides` (`Plat-Info: ALL`) | Lock (`BlockUntil`) or unlock (`Cancel`) Windows/Mobile; body `{target, overrideType, validUntil, culture}` | `lock_platform`, `unlock_platform` |
+| POST | `/v4/devicelimits/{childId}/overrides` (`Plat-Info: ALL`) | Lock (`BlockUntil`), unlock (`Cancel`) or give extra time (`AllowUntil`) on Windows/Mobile; body `{target, overrideType, validUntil, culture}` | `lock_platform`, `unlock_platform`, `add_time_bonus` |
 | PATCH | `/v4/devicelimits/schedules/{childId}` | ~~Set screen time schedule~~ | **Broken** (400 error) |
 
 > The POST answers with the whole overrides document as it stands after the write, and `lock_platform` / `unlock_platform` are judged by that answer: a GET made right after a write can still list the previous state for a while. Microsoft sometimes answers HTTP 500 to a lock or unlock it applied anyway, and has failed a cancel without applying it; after an error, a timeout or an answer without the document, the overrides are read up to three times over a few seconds, and the action succeeds only when a read shows the platform locked (lock) or not locked (unlock); when no read succeeds it fails. A poll answer without the platform list keeps the last known locks; before any list has been read for a child (or while Microsoft cannot resolve that child's overrides), the Windows and Mobile lock switches read `unknown` and Windows Allowed Now does not report `on`, rather than showing the platform as unlocked. For two minutes after a write, its answer is shown for that platform instead of what the poll reads.
