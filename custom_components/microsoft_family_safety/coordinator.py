@@ -2755,10 +2755,13 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Raised while the web session was still needed, e.g. before the mobile
         schedule API first answered or before the Xbox Family Settings sign-in
-        was linked. A request the user asked for (the service) is kept, and so
-        is a sign-in flow already under way: only flows still on their first
-        step are closed.
+        was linked. A request the user asked for (the service) is kept while
+        its sign-in flow is open, and so is a sign-in flow already under way:
+        only flows still on their first step are closed.
         """
+        if self._reauth_requested and self._reauth_reason == "manual":
+            await self._async_withdraw_abandoned_manual_reauth()
+            return
         if (
             not self._reauth_requested
             or self._reauth_reason not in _AUTOMATIC_WEB_REAUTH
@@ -2783,6 +2786,29 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.hass.config_entries.flow.async_abort(flow["flow_id"])
         except Exception as err:  # noqa: BLE001 - the card can still be ignored
             _LOGGER.debug("Could not close the reauth flow: %r", err)
+
+    async def _async_withdraw_abandoned_manual_reauth(self) -> None:
+        """Clear a ``request_reauth`` once its sign-in flow is gone.
+
+        Nothing else clears it while the web session is not checked (an entry
+        without Xbox runs on the mobile token only), so a sign-in aborted or
+        ignored left the flag and the notification up for good. An automatic
+        reason still in force raises its own request again on the next poll.
+        """
+        try:
+            if self.hass.config_entries.flow.async_progress_by_handler(
+                DOMAIN,
+                include_uninitialized=True,
+                match_context={"source": SOURCE_REAUTH, "entry_id": self.entry.entry_id},
+            ):
+                return
+        except Exception as err:  # noqa: BLE001 - keep the request when unsure
+            _LOGGER.debug("Could not list the reauth flows: %r", err)
+            return
+        _LOGGER.info("The requested sign-in was closed; withdrawing the reauthentication request")
+        self._reauth_requested = False
+        self._reauth_reason = None
+        await self._dismiss_auth_notification()
 
     @property
     def _family_context_dead_end(self) -> bool:
