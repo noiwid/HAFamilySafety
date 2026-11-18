@@ -331,7 +331,7 @@ class FamilySafetyCard extends HTMLElement {
 			<style>${FamilySafetyCard.css}</style>
 			<ha-card>
 				<div class="head">
-					<ha-icon icon="${esc(c.icon || 'mdi:laptop')}" style="color:var(${accLocked ? '--error-color' : '--success-color'})"></ha-icon>
+					<ha-icon icon="${esc(c.icon || 'mdi:laptop')}" style="color:var(${accLocked || now?.state === 'off' ? '--error-color' : '--success-color'})"></ha-icon>
 					<div class="tt"><span class="title">${esc(c.title || '')}</span>${status ? `<span class="status">${status}</span>` : ''}</div>
 					<span class="used">${isNaN(used) ? '' : hm(used)}${limit > 0 ? ' / ' + hm(limit) : ''}</span>
 					<button class="gear" data-settings aria-label="${esc(t('settings'))}" data-tip="${esc(t('settings'))}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
