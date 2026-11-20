@@ -54,6 +54,7 @@ const STR = {
 		bonus_pill: 'Until {t}', bonus_pill_none: 'None', bonus_nav_sub: 'Free time from now, ends by itself',
 		extra_bar: 'Reset', extra_none: 'No extra time', extra_until: 'Free until {t}',
 		tip_extra: '{n} min free from now', tip_extra_end: 'End the extra time', tip_extra_custom: 'Custom duration',
+		extra_sent: '{n} min of extra time added', extra_cancelled: 'Extra time ended',
 		dnames: { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' },
 	},
 	fr: {
@@ -94,6 +95,7 @@ const STR = {
 		bonus_pill: "Jusqu'à {t}", bonus_pill_none: 'Aucun', bonus_nav_sub: 'Du temps libre dès maintenant, se termine seul',
 		extra_bar: 'Reset', extra_none: 'Aucun temps en plus', extra_until: "Libre jusqu'à {t}",
 		tip_extra: '{n} min libres dès maintenant', tip_extra_end: 'Arrêter le temps en plus', tip_extra_custom: 'Durée au choix',
+		extra_sent: '{n} min de temps en plus ajoutées', extra_cancelled: 'Temps en plus arrêté',
 		dnames: { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' },
 	},
 };
@@ -247,9 +249,11 @@ class FamilySafetyCard extends HTMLElement {
 		// extra time: a window from now (Microsoft's AllowUntil), not minutes added to the day
 		const extraOn = ch.windows_lock ? 'Windows' : ch.xbox_lock ? 'Xbox' : null;
 		const extraUntil = this._extraUntil(extraOn);
-		const press = (n) => `<button class="round" data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
+		// a press in flight shows as busy and blocks the others until the service answers
+		const busy = (key) => (this._pressing === key ? ' busy' : ''), off = this._pressing ? ' disabled' : '';
+		const press = (n) => `<button class="round${busy(String(n))}"${off} data-extra="${n}" data-tip="${esc(t('tip_extra').replace('{n}', n))}" aria-label="+${n} min"><ha-icon icon="mdi:fast-forward-${n}"></ha-icon></button>`;
 		const extraBar = extraOn && !compact && c.bonus !== false ? `<div class="bonus">
-				<button class="round big" data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil ? '' : 'disabled'}><ha-icon icon="mdi:restart"></ha-icon></button>
+				<button class="round big${busy('end')}"${off} data-extra-end data-tip="${esc(t('tip_extra_end'))}" aria-label="${esc(t('tip_extra_end'))}" ${extraUntil || extraOn === 'Xbox' ? '' : 'disabled'}><ha-icon icon="mdi:restart"></ha-icon></button>
 				<div class="btxt"><div>${esc(t('extra_bar'))}</div><small>${extraUntil ? esc(t('extra_until').replace('{t}', clock(extraUntil))) : esc(t('extra_none'))}</small></div>
 				${press(15)}${press(30)}${press(60)}
 				<button class="round" data-extra-custom data-tip="${esc(t('tip_extra_custom'))}" aria-label="${esc(t('tip_extra_custom'))}"><ha-icon icon="mdi:timer-edit-outline"></ha-icon></button>
@@ -365,11 +369,21 @@ class FamilySafetyCard extends HTMLElement {
 		$('[data-tile]', (b) => this._open(b.dataset.tile === 'web' ? webSheet(this) : lockSheet(this, b.dataset.tile)));
 		$('[data-req]', () => { if (req) this._open(requestSheet(this, req)); });
 		$('[data-day]', (b) => this._open(daySheet(this, b.dataset.day, b.dataset.xbox === '1')));
-		const extra = (service, data) => this._call(service, { platform: extraOn, ...data })
-			.then(() => { this._err = ''; this._render(); })
-			.catch((err) => { this._err = (err && err.message) || String(err); this._render(); });
-		$('[data-extra]', (b) => extra('add_time_bonus', { minutes: Number(b.dataset.extra) }));
-		$('[data-extra-end]', () => extra('cancel_time_bonus', {}));
+		// haptic: relayed by the companion app; navigator.vibrate for an Android web view
+		const buzz = (kind, ms) => { window.dispatchEvent(new CustomEvent('haptic', { detail: kind })); try { navigator.vibrate && navigator.vibrate(ms); } catch (e) { /* not allowed */ } };
+		const toast = (message) => this.dispatchEvent(new CustomEvent('hass-notification', { detail: { message }, bubbles: true, composed: true }));
+		const extra = async (key, service, data, done) => {
+			if (this._pressing) return;
+			buzz('light', 15); this._pressing = key; this._render();
+			try {
+				await this._call(service, { platform: extraOn, ...data });
+				this._err = ''; buzz('success', 30); toast(done);
+			} catch (err) {
+				this._err = (err && err.message) || String(err); buzz('failure', [40, 60, 40]); toast(this._err);
+			} finally { this._pressing = null; this._render(); }
+		};
+		$('[data-extra]', (b) => extra(b.dataset.extra, 'add_time_bonus', { minutes: Number(b.dataset.extra) }, t('extra_sent').replace('{n}', b.dataset.extra)));
+		$('[data-extra-end]', () => extra('end', 'cancel_time_bonus', {}, t('extra_cancelled')));
 		$('[data-extra-custom]', () => this._open(extraSheet(this, extraOn)));
 	}
 
@@ -445,6 +459,8 @@ FamilySafetyCard.css = `
 		background: rgba(var(--rgb-primary-text-color, 255, 255, 255), 0.08); opacity: 0.75; }
 	.round.big { width: 40px; height: 40px; border-radius: 20px; }
 	.round[disabled] { opacity: 0.3; cursor: default; }
+	.round.busy { opacity: 0.5; animation: fs-pulse 0.8s ease-in-out infinite alternate; }
+	@keyframes fs-pulse { to { transform: scale(0.88); } }
 	.round ha-icon { --mdc-icon-size: 20px; }
 	.round.big[data-tip]:hover::after { right: auto; left: 0; }
 	.track.big > div { background: var(--accent-color); }
@@ -500,6 +516,7 @@ FamilySafetyCard.css = `
 	[data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 2; white-space: nowrap; pointer-events: none;
 		padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: #fff; background: rgba(40, 40, 40, 0.92); }
 	.tab[data-tip]:hover::after { right: auto; left: 50%; transform: translateX(-50%); }
+	@media (hover: none) { [data-tip]:hover::after { display: none; } }
 	/* narrow card (half width, phone, card picker preview): icons and counts only, tighter rows */
 	/* a little room in the tabs, so their words still fit down to about 400 px */
 	@container (max-width: 560px) { .tab { font-size: 12px; gap: 3px; padding: 10px 0; } }
